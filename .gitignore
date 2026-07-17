@@ -1,0 +1,51 @@
+# === 环境变量（含 API Key）===
+.env
+*.env
+!.env.example
+
+# === IDE ===
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# === Java ===
+**/target/
+*.class
+*.jar
+*.war
+!gradle/wrapper/gradle-wrapper.jar
+
+# === Maven ===
+**/.mvn/
+mvnw
+mvnw.cmd
+
+# === Node ===
+node_modules/
+dist/
+*.tsbuildinfo
+
+# === Docker ===
+mysql_data/
+redis_data/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === 日志 ===
+*.log
+logs/
+
+# === 测试报告 ===
+**/jacoco.exec
+**/coverage/
+**/test-results/
+**/playwright-report/
+
+# === 临时文件 ===
+tmp/
+temp/

@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dart-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: dart2024
+      MYSQL_DATABASE: dart
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb_lock_wait_timeout=10
+      - --innodb_deadlock_detect=ON
+      - --innodb_print_all_deadlocks=ON
+      - --transaction-isolation=READ-COMMITTED
+      - --innodb_autoinc_lock_mode=2
+      - --innodb_ft_cache_size=8000000
+      - --innodb_ft_enable_stopword=0
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pdart2024"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dart-network
+
+  redis-stack:
+    image: redis/redis-stack-server:latest
+    container_name: dart-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dart-network
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: dart-searxng
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    networks:
+      - dart-network
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  dart-network:
+    driver: bridge

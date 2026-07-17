@@ -1,0 +1,57 @@
+# DART SearXNG 配置
+# 挂载到容器 /etc/searxng/settings.yml
+
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json
+  safe_search: 0
+  autocomplete: ""
+
+server:
+  secret_key: "dart_searxng_secret_key_2026_change_in_production"
+  bind_address: "0.0.0.0"
+  limiter: false
+
+ui:
+  static_use_hash: true
+
+# 启用的搜索引擎
+engines:
+  # Google
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+
+  # Bing
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+
+  # DuckDuckGo
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  # GitHub
+  - name: github
+    engine: github
+    shortcut: gh
+    disabled: false
+
+  # Stack Overflow
+  - name: stackoverflow
+    engine: stackoverflow
+    shortcut: so
+    disabled: false
+
+  # Wikipedia
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
