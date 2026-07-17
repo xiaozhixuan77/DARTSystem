@@ -1,0 +1,22 @@
+// Element Plus SCSS 变量覆盖
+// 主色：科技蓝 → 偏紫，体现 AI/智能感
+$--el-color-primary: #5B5FEB;
+$--el-color-primary-light-3: #7B7EF0;
+$--el-color-primary-light-5: #A5A6F5;
+$--el-color-primary-dark-2: #484BC4;
+
+// 功能色
+$--el-color-success: #52C41A;
+$--el-color-warning: #FAAD14;
+$--el-color-danger: #FF4D4F;
+$--el-color-info: #909399;
+
+// 背景色
+$--el-bg-color: #F8F9FC;
+$--el-bg-color-overlay: #FFFFFF;
+
+// 字体
+$--el-font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+// 圆角
+$--el-border-radius-base: 8px;
