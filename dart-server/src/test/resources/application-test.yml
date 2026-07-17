@@ -1,0 +1,62 @@
+# 测试环境配置 — 使用 H2 内嵌数据库 + Mock 外部 API
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:dart_test;MODE=MySQL;DATABASE_TO_LOWER=true
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  sql:
+    init:
+      mode: always
+
+  ai:
+    deepseek:
+      api-key: test-key-not-real
+    openai:
+      api-key: test-key-not-real
+
+  data:
+    redis:
+      host: ${TEST_REDIS_HOST:localhost}
+      port: ${TEST_REDIS_PORT:6379}
+
+  # 测试环境不需要 Spring Security 自动配置（可选覆盖）
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration
+
+# JWT 测试密钥
+jwt:
+  secret: test-jwt-secret-key-for-unit-tests-only
+  access-token-expiration: 300
+  refresh-token-expiration: 1800
+
+# Agent 测试配置
+agent:
+  search:
+    max-results: 5
+    fetch-timeout-ms: 2000
+    score-threshold: 3.0
+  chunk:
+    size: 500
+    overlap: 50
+    min-length: 20
+  rag:
+    similarity-threshold: 0.80
+    top-k: 5
+
+# MyBatis-Plus
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: auto
+    banner: false
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+logging:
+  level:
+    com.dart: DEBUG
