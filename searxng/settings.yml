@@ -15,6 +15,12 @@ server:
   bind_address: "0.0.0.0"
   limiter: false
 
+outgoing:
+  proxies:
+    http: http://host.docker.internal:7890
+    https: http://host.docker.internal:7890
+  using_tor_proxy: false
+
 ui:
   static_use_hash: true
 
