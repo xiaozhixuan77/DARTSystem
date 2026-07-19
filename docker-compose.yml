@@ -6,8 +6,6 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: dart2024
       MYSQL_DATABASE: dart
-      MYSQL_CHARSET: utf8mb4
-      MYSQL_COLLATION: utf8mb4_unicode_ci
     ports:
       - "3306:3306"
     volumes:
@@ -59,7 +57,7 @@ services:
       - SEARXNG_BASE_URL=http://localhost:8080
       - HTTP_PROXY=http://host.docker.internal:7890
       - HTTPS_PROXY=http://host.docker.internal:7890
-      - NO_PROXY=localhost,127.0.0.1,mysql,redis-stack,dart-server,dart-mysql,dart-redis
+      - NO_PROXY=localhost,127.0.0.1,mysql,redis-stack,dart-server,dart-mysql,dart-redis,embeddings
     extra_hosts:
       - "host.docker.internal:host-gateway"
     cap_drop:
@@ -72,9 +70,24 @@ services:
     networks:
       - dart-network
 
+  embeddings:
+    image: ollama/ollama:latest
+    container_name: dart-embeddings
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_HOST=0.0.0.0:11434
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - dart-network
+
 volumes:
   mysql_data:
   redis_data:
+  ollama_data:
 
 networks:
   dart-network:
