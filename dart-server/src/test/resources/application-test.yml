@@ -15,11 +15,7 @@ spring:
     deepseek:
       api-key: test-key-not-real
     openai:
-      api-key: not-needed
-      base-url: http://localhost:11434/v1
-      embedding:
-        options:
-          model: bge-m3
+      api-key: test-key-not-real
 
   data:
     redis:
