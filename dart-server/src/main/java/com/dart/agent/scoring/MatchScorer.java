@@ -21,6 +21,9 @@ public class MatchScorer {
     }
 
     public int evaluate(String query, String content) {
+        if (query == null || query.isBlank()) {
+            return 1;
+        }
         if (content == null || content.isBlank()) {
             return 1;
         }

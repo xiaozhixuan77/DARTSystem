@@ -1,5 +1,7 @@
 package com.dart.agent.scoring;
 
+import java.util.Objects;
+
 /**
  * 页面抓取结果 —— 传给评分器的输入。
  */
@@ -36,4 +38,22 @@ public class PageContent {
     public boolean isHasDiagram() { return hasDiagram; }
     public boolean isHasExercise() { return hasExercise; }
     public Integer getYear() { return year; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof PageContent that)) return false;
+        return Objects.equals(url, that.url);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(url);
+    }
+
+    @Override
+    public String toString() {
+        return "PageContent{url='%s', title='%s', words=%d, code=%d, diagram=%s, exercise=%s, year=%d}"
+                .formatted(url, title, wordCount, codeBlockCount, hasDiagram, hasExercise, year);
+    }
 }

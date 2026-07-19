@@ -53,9 +53,9 @@ public class AuthorityScorer {
             return score;
         }
 
-        // 子域名匹配
+        // 子域名匹配（精确匹配已在上面处理，这里只检查子域名）
         for (var entry : DOMAIN_SCORES.entrySet()) {
-            if (host.equals(entry.getKey()) || host.endsWith("." + entry.getKey())) {
+            if (host.endsWith("." + entry.getKey())) {
                 return entry.getValue();
             }
         }
