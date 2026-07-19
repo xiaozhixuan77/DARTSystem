@@ -76,6 +76,16 @@ class MatchScorerTest {
     }
 
     @Test
+    void evaluate_whenQueryNull_returns1() {
+        assertThat(scorer.evaluate(null, "一些内容")).isEqualTo(1);
+    }
+
+    @Test
+    void evaluate_whenQueryEmpty_returns1() {
+        assertThat(scorer.evaluate("", "一些内容")).isEqualTo(1);
+    }
+
+    @Test
     void evaluate_promptContainsQueryAndContent() {
         when(chatResponse.getResults()).thenReturn(List.of(gen("4")));
         when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
