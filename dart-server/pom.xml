@@ -18,7 +18,7 @@
     <description>双Agent协作的编程技术资源智能检索与知识整理系统 — 后端</description>
 
     <properties>
-        <java.version>17</java.version>
+        <java.version>21</java.version>
         <spring-ai.version>2.0.0</spring-ai.version>
         <mybatis-plus.version>3.5.9</mybatis-plus.version>
         <jjwt.version>0.12.5</jjwt.version>
