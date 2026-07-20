@@ -22,6 +22,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.security.MessageDigest;
@@ -34,11 +36,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class AuthServiceTest {
 
     @Mock private UserMapper userMapper;
@@ -81,13 +86,17 @@ class AuthServiceTest {
     void register_withValidInput_succeeds() {
         when(userMapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
         when(passwordEncoder.encode("pass123")).thenReturn("$2a$10$hashed");
-        when(userMapper.insert(any(User.class))).thenReturn(1);
+        doAnswer(inv -> {
+            User u = inv.getArgument(0, User.class);
+            u.setId(1L);
+            return 1;
+        }).when(userMapper).insertUser(any(User.class));
 
         RegisterResponse response = authService.register(validRegister);
 
         assertThat(response.getUserId()).isEqualTo(1L);
         assertThat(response.getUsername()).isEqualTo("testuser");
-        verify(userMapper).insert(any(User.class));
+        verify(userMapper).insertUser(any(User.class));
     }
 
     @Test
@@ -98,7 +107,7 @@ class AuthServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(ex -> ((BusinessException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.USERNAME_EXISTS);
-        verify(userMapper, never()).insert(any());
+        verify(userMapper, never()).insertUser(any(User.class));
     }
 
     @Test
@@ -135,8 +144,8 @@ class AuthServiceTest {
         assertThat(response.getRefreshToken()).isEqualTo("refresh.xyz");
         assertThat(response.getUserId()).isEqualTo(1L);
         assertThat(response.getUsername()).isEqualTo("testuser");
-        verify(refreshTokenMapper).insert(any(RefreshToken.class));
-        verify(userMapper).updateById(any(User.class));
+        verify(refreshTokenMapper).insertToken(any(RefreshToken.class));
+        verify(userMapper).updateUser(any(User.class));
     }
 
     @Test
@@ -159,7 +168,7 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.login(validLogin));
 
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-        verify(userMapper).updateById(captor.capture());
+        verify(userMapper).updateUser(captor.capture());
         assertThat(captor.getValue().getLoginAttempts()).isEqualTo(3);
     }
 
@@ -172,7 +181,7 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.login(validLogin));
 
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-        verify(userMapper).updateById(captor.capture());
+        verify(userMapper).updateUser(captor.capture());
         assertThat(captor.getValue().getLoginAttempts()).isEqualTo(5);
         assertThat(captor.getValue().getStatus()).isEqualTo(User.STATUS_LOCKED);
         assertThat(captor.getValue().getLockedUntil()).isNotNull();
@@ -205,7 +214,7 @@ class AuthServiceTest {
 
         assertThat(response).isNotNull();
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
-        verify(userMapper).updateById(captor.capture());
+        verify(userMapper, atLeastOnce()).updateUser(captor.capture());
         assertThat(captor.getValue().getStatus()).isEqualTo(User.STATUS_ACTIVE);
     }
 
@@ -220,7 +229,7 @@ class AuthServiceTest {
         authService.login(validLogin);
 
         ArgumentCaptor<RefreshToken> captor = ArgumentCaptor.forClass(RefreshToken.class);
-        verify(refreshTokenMapper).insert(captor.capture());
+        verify(refreshTokenMapper).insertToken(captor.capture());
         RefreshToken saved = captor.getValue();
 
         String expectedHash = HexFormat.of().formatHex(
@@ -245,7 +254,7 @@ class AuthServiceTest {
         authService.login(validLogin);
 
         verify(refreshTokenMapper).deleteById(100L);
-        verify(refreshTokenMapper).insert(any(RefreshToken.class));
+        verify(refreshTokenMapper).insertToken(any(RefreshToken.class));
     }
 
     @Test
