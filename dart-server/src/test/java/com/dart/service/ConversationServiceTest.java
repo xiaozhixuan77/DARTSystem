@@ -1,0 +1,174 @@
+package com.dart.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.dart.dto.request.ConversationUpsertRequest;
+import com.dart.dto.response.ConversationVO;
+import com.dart.dto.response.MessageVO;
+import com.dart.entity.Conversation;
+import com.dart.entity.Message;
+import com.dart.exception.BusinessException;
+import com.dart.exception.ErrorCode;
+import com.dart.mapper.ConversationMapper;
+import com.dart.mapper.MessageMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class ConversationServiceTest {
+
+    @Mock private ConversationMapper conversationMapper;
+    @Mock private MessageMapper messageMapper;
+
+    @InjectMocks
+    private ConversationService conversationService;
+
+    private static final Long USER_ID = 1L;
+    private static final Long CONV_ID = 100L;
+
+    private Conversation activeConv;
+
+    @BeforeEach
+    void setUp() {
+        activeConv = new Conversation();
+        activeConv.setId(CONV_ID);
+        activeConv.setUserId(USER_ID);
+        activeConv.setTitle("测试会话");
+        activeConv.setTags("[\"Java\"]");
+        activeConv.setIsDeleted(0);
+        activeConv.setUpdatedAt(LocalDateTime.now());
+    }
+
+    // === listConversations ===
+
+    @Test
+    void listConversations_returnsList() {
+        when(conversationMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(activeConv));
+        when(messageMapper.selectCount(any(QueryWrapper.class))).thenReturn(3L);
+
+        List<ConversationVO> result = conversationService.listConversations(USER_ID);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getId()).isEqualTo(CONV_ID);
+        assertThat(result.get(0).getTitle()).isEqualTo("测试会话");
+        assertThat(result.get(0).getMessageCount()).isEqualTo(3);
+    }
+
+    // === createConversation ===
+
+    @Test
+    void createConversation_success() {
+        doAnswer(inv -> {
+            Conversation c = inv.getArgument(0, Conversation.class);
+            c.setId(200L);
+            return 1;
+        }).when(conversationMapper).insertConversation(any(Conversation.class));
+
+        ConversationVO result = conversationService.createConversation(USER_ID);
+
+        assertThat(result.getId()).isEqualTo(200L);
+        assertThat(result.getTitle()).isEqualTo("新对话");
+        assertThat(result.getMessageCount()).isZero();
+        verify(conversationMapper).insertConversation(any(Conversation.class));
+    }
+
+    // === updateConversation ===
+
+    @Test
+    void updateConversation_success() {
+        ConversationUpsertRequest req = new ConversationUpsertRequest();
+        req.setTitle("更新标题");
+        req.setTags("[\"Spring\"]");
+
+        when(conversationMapper.selectById(CONV_ID)).thenReturn(activeConv);
+
+        conversationService.updateConversation(USER_ID, CONV_ID, req);
+
+        ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
+        verify(conversationMapper).updateConversation(captor.capture());
+        assertThat(captor.getValue().getTitle()).isEqualTo("更新标题");
+        assertThat(captor.getValue().getTags()).isEqualTo("[\"Spring\"]");
+    }
+
+    @Test
+    void updateConversation_notFound_throwsException() {
+        when(conversationMapper.selectById(999L)).thenReturn(null);
+
+        ConversationUpsertRequest req = new ConversationUpsertRequest();
+        req.setTitle("新标题");
+
+        assertThatThrownBy(() -> conversationService.updateConversation(USER_ID, 999L, req))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+    }
+
+    // === deleteConversation ===
+
+    @Test
+    void deleteConversation_success() {
+        when(conversationMapper.selectById(CONV_ID)).thenReturn(activeConv);
+
+        conversationService.deleteConversation(USER_ID, CONV_ID);
+
+        verify(conversationMapper).deleteById(CONV_ID);
+    }
+
+    @Test
+    void deleteConversation_notFound_throwsException() {
+        when(conversationMapper.selectById(999L)).thenReturn(null);
+
+        assertThatThrownBy(() -> conversationService.deleteConversation(USER_ID, 999L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+    }
+
+    // === getMessages ===
+
+    @Test
+    void getMessages_returnsMessages() {
+        Message msg = new Message();
+        msg.setId(1L);
+        msg.setConversationId(CONV_ID);
+        msg.setRole("user");
+        msg.setContent("测试问题");
+        msg.setCreatedAt(LocalDateTime.now());
+
+        when(conversationMapper.selectById(CONV_ID)).thenReturn(activeConv);
+        when(messageMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(msg));
+
+        List<MessageVO> result = conversationService.getMessages(USER_ID, CONV_ID);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getRole()).isEqualTo("user");
+        assertThat(result.get(0).getContent()).isEqualTo("测试问题");
+    }
+
+    @Test
+    void getMessages_conversationNotFound_throwsException() {
+        when(conversationMapper.selectById(999L)).thenReturn(null);
+
+        assertThatThrownBy(() -> conversationService.getMessages(USER_ID, 999L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+    }
+}
