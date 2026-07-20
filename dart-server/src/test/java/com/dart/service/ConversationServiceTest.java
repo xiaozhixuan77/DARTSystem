@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,7 +61,8 @@ class ConversationServiceTest {
     void listConversations_returnsList() {
         when(conversationMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(activeConv));
-        when(messageMapper.selectCount(any(QueryWrapper.class))).thenReturn(3L);
+        when(messageMapper.selectMaps(any(QueryWrapper.class)))
+                .thenReturn(List.of(Map.of("conversation_id", CONV_ID, "cnt", 3L)));
 
         List<ConversationVO> result = conversationService.listConversations(USER_ID);
 
@@ -119,6 +121,22 @@ class ConversationServiceTest {
                 .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
     }
 
+    @Test
+    void updateConversation_wrongUser_throwsException() {
+        Conversation otherConv = new Conversation();
+        otherConv.setId(200L);
+        otherConv.setUserId(999L);
+        when(conversationMapper.selectById(200L)).thenReturn(otherConv);
+
+        ConversationUpsertRequest req = new ConversationUpsertRequest();
+        req.setTitle("新标题");
+
+        assertThatThrownBy(() -> conversationService.updateConversation(USER_ID, 200L, req))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+    }
+
     // === deleteConversation ===
 
     @Test
@@ -127,7 +145,9 @@ class ConversationServiceTest {
 
         conversationService.deleteConversation(USER_ID, CONV_ID);
 
-        verify(conversationMapper).deleteById(CONV_ID);
+        ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
+        verify(conversationMapper).updateConversation(captor.capture());
+        assertThat(captor.getValue().getIsDeleted()).isEqualTo(1);
     }
 
     @Test
@@ -167,6 +187,32 @@ class ConversationServiceTest {
         when(conversationMapper.selectById(999L)).thenReturn(null);
 
         assertThatThrownBy(() -> conversationService.getMessages(USER_ID, 999L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+    }
+
+    @Test
+    void deleteConversation_wrongUser_throwsException() {
+        Conversation otherConv = new Conversation();
+        otherConv.setId(300L);
+        otherConv.setUserId(999L);
+        when(conversationMapper.selectById(300L)).thenReturn(otherConv);
+
+        assertThatThrownBy(() -> conversationService.deleteConversation(USER_ID, 300L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+    }
+
+    @Test
+    void getMessages_wrongUser_throwsException() {
+        Conversation otherConv = new Conversation();
+        otherConv.setId(400L);
+        otherConv.setUserId(999L);
+        when(conversationMapper.selectById(400L)).thenReturn(otherConv);
+
+        assertThatThrownBy(() -> conversationService.getMessages(USER_ID, 400L))
                 .isInstanceOf(BusinessException.class)
                 .extracting(ex -> ((BusinessException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);

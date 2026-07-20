@@ -37,6 +37,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getServletPath();
+        if (path == null) {
+            return false;
+        }
         return WHITELIST_PATTERNS.stream()
                 .anyMatch(pattern -> pathMatcher.match(pattern, path));
     }

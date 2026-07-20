@@ -4,6 +4,7 @@ import com.dart.dto.request.ConversationUpsertRequest;
 import com.dart.dto.response.ApiResponse;
 import com.dart.dto.response.ConversationVO;
 import com.dart.dto.response.MessageVO;
+import com.dart.exception.ErrorCode;
 import com.dart.service.ConversationService;
 import com.dart.util.SecurityUtils;
 import jakarta.validation.Valid;
@@ -26,36 +27,39 @@ public class ConversationController {
 
     private final ConversationService conversationService;
 
+    private Long requireUserId() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            throw new com.dart.exception.BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        return userId;
+    }
+
     @GetMapping
     public ApiResponse<List<ConversationVO>> list() {
-        Long userId = SecurityUtils.getCurrentUserId();
-        return ApiResponse.ok(conversationService.listConversations(userId));
+        return ApiResponse.ok(conversationService.listConversations(requireUserId()));
     }
 
     @PostMapping
     public ApiResponse<ConversationVO> create() {
-        Long userId = SecurityUtils.getCurrentUserId();
-        return ApiResponse.ok(conversationService.createConversation(userId));
+        return ApiResponse.ok(conversationService.createConversation(requireUserId()));
     }
 
     @GetMapping("/{id}/messages")
     public ApiResponse<List<MessageVO>> getMessages(@PathVariable Long id) {
-        Long userId = SecurityUtils.getCurrentUserId();
-        return ApiResponse.ok(conversationService.getMessages(userId, id));
+        return ApiResponse.ok(conversationService.getMessages(requireUserId(), id));
     }
 
     @PutMapping("/{id}")
     public ApiResponse<Void> update(@PathVariable Long id,
                                      @Valid @RequestBody ConversationUpsertRequest request) {
-        Long userId = SecurityUtils.getCurrentUserId();
-        conversationService.updateConversation(userId, id, request);
+        conversationService.updateConversation(requireUserId(), id, request);
         return ApiResponse.ok(null);
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
-        Long userId = SecurityUtils.getCurrentUserId();
-        conversationService.deleteConversation(userId, id);
+        conversationService.deleteConversation(requireUserId(), id);
         return ApiResponse.ok(null);
     }
 }

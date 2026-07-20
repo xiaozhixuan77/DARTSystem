@@ -1,6 +1,6 @@
 package com.dart.security;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dart.entity.User;
 import com.dart.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
@@ -17,8 +17,8 @@ public class UserDetailsServiceImpl implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        QueryWrapper<User> query = new QueryWrapper<>();
-        query.eq("username", username);
+        LambdaQueryWrapper<User> query = new LambdaQueryWrapper<>();
+        query.eq(User::getUsername, username);
         User user = userMapper.selectOne(query);
         if (user == null) {
             throw new UsernameNotFoundException("User not found: " + username);

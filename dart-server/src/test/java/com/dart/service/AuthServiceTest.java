@@ -26,6 +26,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
@@ -128,6 +129,15 @@ class AuthServiceTest {
                 .isEqualTo(ErrorCode.PASSWORD_TOO_SHORT);
     }
 
+    @Test
+    void register_withLongPassword_throwsException() {
+        validRegister.setPassword("a".repeat(73));
+        assertThatThrownBy(() -> authService.register(validRegister))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.PASSWORD_TOO_SHORT);
+    }
+
     // === login ===
 
     @Test
@@ -200,6 +210,17 @@ class AuthServiceTest {
     }
 
     @Test
+    void login_withDisabledAccount_throwsLoginFailed() {
+        savedUser.setStatus(User.STATUS_DISABLED);
+        when(userMapper.selectOne(any(QueryWrapper.class))).thenReturn(savedUser);
+
+        assertThatThrownBy(() -> authService.login(validLogin))
+                .isInstanceOf(BusinessException.class)
+                .extracting(ex -> ((BusinessException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.LOGIN_FAILED);
+    }
+
+    @Test
     void login_withExpiredLock_succeeds() {
         savedUser.setStatus(User.STATUS_LOCKED);
         savedUser.setLockedUntil(LocalDateTime.now().minusMinutes(1));
@@ -233,7 +254,7 @@ class AuthServiceTest {
         RefreshToken saved = captor.getValue();
 
         String expectedHash = HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest("refresh.xyz".getBytes()));
+                MessageDigest.getInstance("SHA-256").digest("refresh.xyz".getBytes(StandardCharsets.UTF_8)));
         assertThat(saved.getTokenHash()).isEqualTo(expectedHash);
         assertThat(saved.getUserId()).isEqualTo(1L);
         assertThat(saved.getRevoked()).isFalse();
@@ -270,7 +291,7 @@ class AuthServiceTest {
     // === refresh ===
 
     @Test
-    void refreshToken_withValidToken_returnsNewAccess() throws Exception {
+    void refreshToken_withValidToken_returnsNewTokens() throws Exception {
         RefreshTokenRequest request = new RefreshTokenRequest();
         request.setRefreshToken("valid.refresh.token");
 
@@ -281,7 +302,7 @@ class AuthServiceTest {
 
         String expectedHash = HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256")
-                        .digest("valid.refresh.token".getBytes()));
+                        .digest("valid.refresh.token".getBytes(StandardCharsets.UTF_8)));
 
         RefreshToken stored = new RefreshToken();
         stored.setId(10L);
@@ -291,11 +312,16 @@ class AuthServiceTest {
 
         when(userMapper.selectById(1L)).thenReturn(savedUser);
         when(jwtTokenProvider.generateAccessToken(1L, "testuser")).thenReturn("new.access.abc");
+        when(jwtTokenProvider.generateRefreshToken(1L)).thenReturn("new.refresh.xyz");
+        when(refreshTokenMapper.updateToken(any(RefreshToken.class))).thenReturn(1);
+        when(refreshTokenMapper.insertToken(any(RefreshToken.class))).thenReturn(1);
 
         TokenRefreshResponse response = authService.refreshToken(request);
 
         assertThat(response.getAccessToken()).isEqualTo("new.access.abc");
+        assertThat(response.getRefreshToken()).isEqualTo("new.refresh.xyz");
         assertThat(response.getExpiresIn()).isEqualTo(7200L);
+        verify(refreshTokenMapper).updateToken(stored);
     }
 
     @Test
@@ -308,7 +334,7 @@ class AuthServiceTest {
 
         String expectedHash = HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256")
-                        .digest("revoked.token".getBytes()));
+                        .digest("revoked.token".getBytes(StandardCharsets.UTF_8)));
 
         RefreshToken revokedRecord = new RefreshToken();
         revokedRecord.setRevoked(true);

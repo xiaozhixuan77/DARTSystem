@@ -72,7 +72,7 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(2001));
+                .andExpect(jsonPath("$.code").value(ErrorCode.USERNAME_EXISTS.getCode()));
     }
 
     @Test
@@ -85,7 +85,7 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(400));
+                .andExpect(jsonPath("$.code").value(ErrorCode.BAD_REQUEST.getCode()));
     }
 
     @Test
@@ -119,7 +119,7 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(2004));
+                .andExpect(jsonPath("$.code").value(ErrorCode.LOGIN_FAILED.getCode()));
     }
 
     @Test
@@ -128,13 +128,14 @@ class AuthControllerTest {
         req.setRefreshToken("valid.refresh");
 
         when(authService.refreshToken(any())).thenReturn(
-                new TokenRefreshResponse("new.access", 7200));
+                new TokenRefreshResponse("new.access", "new.refresh", 7200));
 
         mockMvc.perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.accessToken").value("new.access"));
+                .andExpect(jsonPath("$.data.accessToken").value("new.access"))
+                .andExpect(jsonPath("$.data.refreshToken").value("new.refresh"));
     }
 }

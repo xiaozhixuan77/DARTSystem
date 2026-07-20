@@ -62,14 +62,23 @@ public class JwtTokenProvider {
     }
 
     public Long getUserId(String token) {
+        if (token == null || token.isEmpty()) {
+            throw new IllegalArgumentException("token must not be null or empty");
+        }
         return Long.parseLong(parseClaims(token).getPayload().getSubject());
     }
 
     public String getUsername(String token) {
+        if (token == null || token.isEmpty()) {
+            throw new IllegalArgumentException("token must not be null or empty");
+        }
         return parseClaims(token).getPayload().get("username", String.class);
     }
 
     public String getTokenType(String token) {
+        if (token == null || token.isEmpty()) {
+            throw new IllegalArgumentException("token must not be null or empty");
+        }
         return parseClaims(token).getPayload().get("type", String.class);
     }
 

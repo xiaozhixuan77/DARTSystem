@@ -17,10 +17,12 @@ import com.dart.mapper.UserMapper;
 import com.dart.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
@@ -46,7 +48,8 @@ public class AuthService {
         if (request.getUsername() == null || !USERNAME_PATTERN.matcher(request.getUsername()).matches()) {
             throw new BusinessException(ErrorCode.USERNAME_INVALID);
         }
-        if (request.getPassword() == null || request.getPassword().length() < 6) {
+        if (request.getPassword() == null || request.getPassword().length() < 6
+                || request.getPassword().length() > 72) {
             throw new BusinessException(ErrorCode.PASSWORD_TOO_SHORT);
         }
         QueryWrapper<User> query = new QueryWrapper<>();
@@ -62,7 +65,11 @@ public class AuthService {
         user.setLoginAttempts(0);
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
-        userMapper.insertUser(user);
+        try {
+            userMapper.insertUser(user);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(ErrorCode.USERNAME_EXISTS);
+        }
 
         log.info("User registered: id={}, username={}", user.getId(), user.getUsername());
         return new RegisterResponse(user.getId(), user.getUsername());
@@ -75,6 +82,11 @@ public class AuthService {
         User user = userMapper.selectOne(query);
         if (user == null) {
             log.warn("Login failed: user '{}' not found", request.getUsername());
+            throw new BusinessException(ErrorCode.LOGIN_FAILED);
+        }
+
+        if (user.getStatus() == User.STATUS_DISABLED) {
+            log.warn("Login failed: account disabled, userId={}", user.getId());
             throw new BusinessException(ErrorCode.LOGIN_FAILED);
         }
 
@@ -166,14 +178,30 @@ public class AuthService {
             throw new BusinessException(ErrorCode.TOKEN_INVALID);
         }
 
+        // 吊销旧 refresh token
+        stored.setRevoked(true);
+        refreshTokenMapper.updateToken(stored);
+
+        // 签发新的 refresh token（Token 轮转）
+        String newRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
+        String newTokenHash = sha256(newRefreshToken);
+        RefreshToken newRt = new RefreshToken();
+        newRt.setUserId(userId);
+        newRt.setTokenHash(newTokenHash);
+        newRt.setExpiresAt(LocalDateTime.now().plusSeconds(jwtProperties.getRefreshTokenExpiration()));
+        newRt.setRevoked(false);
+        newRt.setCreatedAt(LocalDateTime.now());
+        refreshTokenMapper.insertToken(newRt);
+
         String newAccessToken = jwtTokenProvider.generateAccessToken(userId, user.getUsername());
-        return new TokenRefreshResponse(newAccessToken, jwtProperties.getAccessTokenExpiration());
+        return new TokenRefreshResponse(newAccessToken, newRefreshToken,
+                jwtProperties.getAccessTokenExpiration());
     }
 
     private static String sha256(String input) {
         try {
             return HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(input.getBytes()));
+                    MessageDigest.getInstance("SHA-256").digest(input.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("SHA-256 not available", e);
         }

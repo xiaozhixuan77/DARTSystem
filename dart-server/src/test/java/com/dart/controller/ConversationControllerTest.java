@@ -126,4 +126,23 @@ class ConversationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
     }
+
+    @Test
+    void list_withoutAuthentication_returns401() throws Exception {
+        SecurityContextHolder.clearContext();
+
+        mockMvc.perform(get("/api/conversations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    void getMessages_conversationNotFound_returns6001() throws Exception {
+        when(conversationService.getMessages(eq(1L), eq(999L)))
+                .thenThrow(new BusinessException(ErrorCode.CONVERSATION_NOT_FOUND));
+
+        mockMvc.perform(get("/api/conversations/999/messages"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(6001));
+    }
 }

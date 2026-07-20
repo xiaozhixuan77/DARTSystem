@@ -13,6 +13,6 @@ public class RegisterRequest {
     private String username;
 
     @NotBlank(message = "密码不能为空")
-    @Size(min = 6, message = "密码长度不足6位")
+    @Size(min = 6, max = 72, message = "密码长度需要6-72位")
     private String password;
 }

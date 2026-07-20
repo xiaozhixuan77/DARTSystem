@@ -11,4 +11,8 @@ public interface RefreshTokenMapper extends BaseMapper<RefreshToken> {
     default int insertToken(RefreshToken token) {
         return insert(token);
     }
+
+    default int updateToken(RefreshToken token) {
+        return updateById(token);
+    }
 }
