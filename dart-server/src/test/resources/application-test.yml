@@ -29,7 +29,7 @@ spring:
 
 # JWT 测试密钥
 jwt:
-  secret: test-jwt-secret-key-for-unit-tests-only
+  secret: dGhpc0lzQVRlc3RTZWNyZXRGb3JKV1RTaWduaW5nUHVycG9zZXM=
   access-token-expiration: 300
   refresh-token-expiration: 1800
 
