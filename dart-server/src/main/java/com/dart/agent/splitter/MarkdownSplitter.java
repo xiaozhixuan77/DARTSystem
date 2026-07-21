@@ -13,6 +13,7 @@ public class MarkdownSplitter {
 
     private static final Pattern HEADING_PATTERN = Pattern.compile("^#{1,6}\\s+(.+)$", Pattern.MULTILINE);
     private static final Pattern SENTENCE_SPLIT = Pattern.compile("(?<=[。！？.!?])\\s*");
+    private static final int MAX_INPUT_LENGTH = 5 * 1024 * 1024; // 5MB
 
     private final int chunkSize;
     private final int overlap;
@@ -27,6 +28,9 @@ public class MarkdownSplitter {
     public List<ChunkResult> split(String markdown) {
         if (markdown == null || markdown.isEmpty()) {
             return List.of();
+        }
+        if (markdown.length() > MAX_INPUT_LENGTH) {
+            throw new IllegalArgumentException("输入文本过大，最大支持 5MB");
         }
 
         String sectionTitle = extractTitle(markdown);

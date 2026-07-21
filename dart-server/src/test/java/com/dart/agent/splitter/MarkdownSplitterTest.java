@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MarkdownSplitterTest {
 
@@ -51,6 +52,14 @@ class MarkdownSplitterTest {
         }
         // 验证 sectionTitle 包含标题
         assertThat(chunks.get(0).sectionTitle()).isEqualTo("测试标题");
+    }
+
+    @Test
+    void split_whenInputExceedsMaxSize_throwsException() {
+        String huge = "x".repeat(5 * 1024 * 1024 + 1);
+        assertThatThrownBy(() -> splitter.split(huge))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("5MB");
     }
 
     @Test

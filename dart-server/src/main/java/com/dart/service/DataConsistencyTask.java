@@ -35,7 +35,7 @@ public class DataConsistencyTask {
      * 每 5 分钟分页检查缺失的向量（仅记录，实际补偿在 ChatService 持久化时完成）。
      */
     @Scheduled(fixedDelay = 300_000)
-    public void compensateMissingVectors() {
+    public void detectMissingVectors() {
         log.debug("开始补偿缺失向量...");
         try {
             int compensated = 0;

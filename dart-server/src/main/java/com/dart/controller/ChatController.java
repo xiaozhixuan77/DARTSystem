@@ -33,9 +33,8 @@ public class ChatController {
                 ChatService.SearchResult result = chatService.executeSearchAndCurate(
                         request.getMessage(), userId, emitter);
 
-                if (result.ragHit()) {
-                    var ragResult = result.ragAnswer().get();
-                    SseUtils.sendEvent(emitter, SseEvents.CONTENT, ragResult.answer());
+                if (result.ragAnswer().isPresent()) {
+                    SseUtils.sendEvent(emitter, SseEvents.CONTENT, result.ragAnswer().get().answer());
                 } else if (result.curatedReport().isPresent()) {
                     SseUtils.sendEvent(emitter, SseEvents.CONTENT,
                             result.curatedReport().get().markdown());

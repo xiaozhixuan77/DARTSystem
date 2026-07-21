@@ -47,13 +47,13 @@ public class ChatService {
         this.messageMapper = messageMapper;
     }
 
-    public record SearchResult(boolean ragHit, Optional<RagService.RagResult> ragAnswer,
+    public record SearchResult(Optional<RagService.RagResult> ragAnswer,
                                Optional<CuratedReport> curatedReport, List<ScoredResource> searchResults) {
         public static SearchResult ragHit(RagService.RagResult answer) {
-            return new SearchResult(true, Optional.of(answer), Optional.empty(), List.of());
+            return new SearchResult(Optional.of(answer), Optional.empty(), List.of());
         }
         public static SearchResult searchResult(CuratedReport report, List<ScoredResource> resources) {
-            return new SearchResult(false, Optional.empty(), Optional.of(report), resources);
+            return new SearchResult(Optional.empty(), Optional.of(report), resources);
         }
     }
 

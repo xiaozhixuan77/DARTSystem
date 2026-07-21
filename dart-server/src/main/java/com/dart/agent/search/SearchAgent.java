@@ -27,7 +27,7 @@ public class SearchAgent {
         try {
             // Step 1: SearXNG 搜索
             SseUtils.sendStatus(emitter, "searching", "正在搜索相关资源...");
-            List<SearchResult> rawResults = searchTools.searchWeb(query, 15);
+            List<SearchResult> rawResults = searchTools.searchWeb(query, maxResults);
             if (rawResults.isEmpty()) {
                 SseUtils.sendError(emitter, ErrorCode.NO_QUALITY_RESULTS.getCode(),
                         ErrorCode.NO_QUALITY_RESULTS.getMessage());
