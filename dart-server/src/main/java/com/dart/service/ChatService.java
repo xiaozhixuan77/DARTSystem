@@ -4,7 +4,10 @@ import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.curator.CuratorAgent;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
+import com.dart.exception.ErrorCode;
 import com.dart.mapper.MessageMapper;
+import com.dart.util.SseEvents;
+import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -15,6 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -56,29 +60,33 @@ public class ChatService {
     /**
      * 执行完整的搜索-整理流程（供 SSE 端点调用）。
      */
-    public SearchResult executeSearchAndCurate(String query, Long userId) {
-        // Step 1: LLM 领域过滤
+    public SearchResult executeSearchAndCurate(String query, Long userId, SseEmitter emitter) {
         if (!isTechQuery(query)) {
-            return SearchResult.searchResult(errorReport("仅支持技术/编程领域搜索，请重新输入"), List.of());
+            SseUtils.sendError(emitter, ErrorCode.NON_TECH_QUERY.getCode(),
+                    ErrorCode.NON_TECH_QUERY.getMessage());
+            return SearchResult.searchResult(errorReport(ErrorCode.NON_TECH_QUERY.getMessage()), List.of());
         }
 
-        // Step 2: RAG 检查
+        SseUtils.sendStatus(emitter, "rag_check", "正在检查知识库...");
         Optional<RagService.RagResult> ragResult = ragService.retrieve(query, userId);
         if (ragResult.isPresent()) {
+            SseUtils.sendEvent(emitter, SseEvents.CONTENT, ragResult.get().answer());
+            SseUtils.sendEvent(emitter, SseEvents.DONE, Map.of("status", "complete"));
             return SearchResult.ragHit(ragResult.get());
         }
 
-        // Step 3: Search Agent
-        SseEmitter emitter = new SseEmitter(120_000L);
         List<ScoredResource> searchResults;
         try {
             searchResults = searchAgent.execute(query, 8, emitter);
         } catch (Exception e) {
             log.error("Search Agent 异常", e);
+            SseUtils.sendError(emitter, ErrorCode.AGENT_EXECUTION_ERROR.getCode(), "搜索服务暂时不可用，请稍后重试");
             return SearchResult.searchResult(errorReport("搜索服务暂时不可用，请稍后重试"), List.of());
         }
 
         if (searchResults.isEmpty()) {
+            SseUtils.sendError(emitter, ErrorCode.NO_QUALITY_RESULTS.getCode(),
+                    ErrorCode.NO_QUALITY_RESULTS.getMessage());
             return SearchResult.searchResult(
                     new CuratedReport(query,
                             "# " + query + "\n\n未找到高质量资源，请尝试更换关键词。",
@@ -86,7 +94,6 @@ public class ChatService {
                     List.of());
         }
 
-        // Step 4: Curator Agent
         CuratedReport report;
         try {
             report = curatorAgent.curate(query, searchResults, emitter);
@@ -99,20 +106,20 @@ public class ChatService {
                     Instant.now());
         }
 
-        emitter.complete();
         return SearchResult.searchResult(report, searchResults);
     }
 
     /**
-     * LLM 前置判断是否为技术领域问题。
+     * LLM 前置判断是否为技术领域问题。用户输入用 XML 标签包裹防止 prompt 注入。
      */
     public boolean isTechQuery(String query) {
         try {
+            String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
             String prompt = """
                     判断以下用户输入是否属于技术/编程领域。
                     仅输出 YES 或 NO：
-                    "%s"
-                    """.formatted(query);
+                    <user_query>%s</user_query>
+                    """.formatted(sanitized);
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResults().getFirst().getOutput().getText().trim();
             return "YES".equalsIgnoreCase(response);

@@ -52,7 +52,7 @@ class EmbeddingServiceTest {
             KnowledgeItem item = inv.getArgument(0);
             item.setId(1L);
             return 1;
-        }).when(knowledgeItemMapper).insert(any(KnowledgeItem.class));
+        }).when(knowledgeItemMapper).insertKnowledgeItem(any(KnowledgeItem.class));
         lenient().when(redisTemplate.opsForHash()).thenReturn(hashOps);
     }
 
@@ -85,8 +85,8 @@ class EmbeddingServiceTest {
                 "https://spring.io", scores);
 
         assertThat(ids).isNotEmpty();
-        verify(knowledgeItemMapper).insert(any(KnowledgeItem.class));
-        verify(knowledgeChunkMapper, atLeastOnce()).insert(any(KnowledgeChunk.class));
+        verify(knowledgeItemMapper).insertKnowledgeItem(any(KnowledgeItem.class));
+        verify(knowledgeChunkMapper, atLeastOnce()).insertKnowledgeChunk(any(KnowledgeChunk.class));
     }
 
     @Test
@@ -101,7 +101,7 @@ class EmbeddingServiceTest {
         ScoredResource scores = new ScoredResource("https://x.com", "X", shortContent, 4, 4, 3, 4, 4.0);
 
         embeddingService.embedAndPersist(1L, "Short", shortContent, "https://x.com", scores);
-        verify(knowledgeChunkMapper, atMost(1)).insert(any(KnowledgeChunk.class));
+        verify(knowledgeChunkMapper, atMost(1)).insertKnowledgeChunk(any(KnowledgeChunk.class));
     }
 
     @Test
@@ -124,13 +124,13 @@ class EmbeddingServiceTest {
             KnowledgeItem item = inv.getArgument(0);
             item.setId(1L);
             return 1;
-        }).when(knowledgeItemMapper).insert(any(KnowledgeItem.class));
+        }).when(knowledgeItemMapper).insertKnowledgeItem(any(KnowledgeItem.class));
 
         ScoredResource scores = new ScoredResource("https://a.com", "A", "", 3, 3, 3, 3, 3.0);
 
         List<Long> ids = embeddingService.embedAndPersist(1L, "Title", "", "https://a.com", scores);
         assertThat(ids).isNotEmpty();
-        verify(knowledgeItemMapper).insert(any(KnowledgeItem.class));
+        verify(knowledgeItemMapper).insertKnowledgeItem(any(KnowledgeItem.class));
         verify(embeddingModel, never()).call(any(EmbeddingRequest.class));
     }
 }

@@ -17,6 +17,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -28,6 +29,7 @@ import java.util.List;
 /**
  * 文本分块 + Embedding 向量化 + MySQL+Redis 双写。
  */
+@Service
 public class EmbeddingService {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddingService.class);
@@ -74,7 +76,7 @@ public class EmbeddingService {
         item.setIsDeleted(0);
         item.setCreatedAt(LocalDateTime.now());
         item.setUpdatedAt(LocalDateTime.now());
-        knowledgeItemMapper.insert(item);
+        knowledgeItemMapper.insertKnowledgeItem(item);
 
         Long knowledgeItemId = item.getId();
         if (knowledgeItemId == null) {
@@ -110,7 +112,7 @@ public class EmbeddingService {
             kc.setChunkText(chunks.get(i).chunkText());
             kc.setEmbeddingId(embeddingIds.get(i));
             kc.setCreatedAt(LocalDateTime.now());
-            knowledgeChunkMapper.insert(kc);
+            knowledgeChunkMapper.insertKnowledgeChunk(kc);
         }
 
         // Step 5: afterCommit 异步写 Redis（需在事务中）

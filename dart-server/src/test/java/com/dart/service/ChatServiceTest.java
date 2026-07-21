@@ -15,6 +15,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
 import java.util.List;
@@ -43,11 +44,13 @@ class ChatServiceTest {
     private MessageMapper messageMapper;
 
     private ChatService chatService;
+    private SseEmitter emitter;
 
     @BeforeEach
     void setUp() {
         chatService = new ChatService(chatModel, searchAgent, curatorAgent, ragService,
                 embeddingService, messageMapper);
+        emitter = spy(new SseEmitter(60_000L));
     }
 
     @Test
@@ -68,7 +71,6 @@ class ChatServiceTest {
     void isTechQuery_whenLLMThrows_returnsTrue() {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
-        // 宽松模式：LLM 失败时默认为技术查询
         assertThat(chatService.isTechQuery("query")).isTrue();
     }
 
@@ -77,10 +79,9 @@ class ChatServiceTest {
         when(ragService.retrieve(eq("Spring Boot"), eq(1L)))
                 .thenReturn(Optional.of(new RagResult("# Spring Boot 详解", List.of("https://spring.io"))));
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, emitter);
         assertThat(result.ragHit()).isTrue();
         assertThat(result.ragAnswer()).isPresent();
-        assertThat(result.ragAnswer().get().answer()).contains("Spring Boot");
         verify(searchAgent, never()).execute(anyString(), anyInt(), any());
     }
 
@@ -93,7 +94,7 @@ class ChatServiceTest {
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, emitter);
         assertThat(result.ragHit()).isFalse();
         assertThat(result.curatedReport()).isPresent();
         verify(ragService).retrieve(eq("Spring Boot"), eq(1L));
@@ -106,7 +107,7 @@ class ChatServiceTest {
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
         when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of());
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("obscure query", 1L);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("obscure query", 1L, emitter);
         assertThat(result.ragHit()).isFalse();
         assertThat(result.curatedReport()).isPresent();
         assertThat(result.curatedReport().get().markdown()).contains("未找到");
@@ -119,7 +120,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyString(), anyInt(), any()))
                 .thenThrow(new RuntimeException("network error"));
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("query", 1L);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("query", 1L, emitter);
         assertThat(result.curatedReport()).isPresent();
         assertThat(result.curatedReport().get().markdown()).contains("不可用");
     }

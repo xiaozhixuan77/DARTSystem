@@ -45,6 +45,7 @@ public class PageFetcher {
     }
 
     protected Document doConnect(String url) {
+        validateUrl(url);
         try {
             return Jsoup.connect(url)
                     .timeout(timeoutMs)
@@ -53,6 +54,16 @@ public class PageFetcher {
         } catch (Exception e) {
             log.warn("页面抓取失败: {}", url, e);
             throw new RuntimeException("页面抓取失败: " + url, e);
+        }
+    }
+
+    private void validateUrl(String url) {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("URL 不能为空");
+        }
+        String lower = url.toLowerCase();
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            throw new IllegalArgumentException("仅支持 HTTP/HTTPS 协议");
         }
     }
 

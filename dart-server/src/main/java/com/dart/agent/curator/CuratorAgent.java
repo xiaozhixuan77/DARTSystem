@@ -2,6 +2,7 @@ package com.dart.agent.curator;
 
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.exception.ErrorCode;
+import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +39,7 @@ public class CuratorAgent {
                 report = curatorTools.fallbackReport(query, deduped);
             }
 
-            SseUtils.sendEvent(emitter, "score", report);
+            SseUtils.sendEvent(emitter, SseEvents.CURATED_REPORT, report);
             return report;
 
         } catch (Exception e) {

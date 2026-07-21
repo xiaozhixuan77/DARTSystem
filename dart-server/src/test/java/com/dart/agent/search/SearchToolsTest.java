@@ -10,9 +10,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,6 +29,7 @@ class SearchToolsTest {
     void setUp() {
         qualityScorer = new QualityScorer(0.15, 0.30, 0.20, 0.35, 3.0);
         searchTools = new SearchTools(searXNGClient, pageFetcher, qualityScorer);
+        lenient().when(searXNGClient.search(any(), anyInt())).thenReturn(List.of());
     }
 
     @Test

@@ -21,10 +21,10 @@ public class SearXNGClient {
     private final String baseUrl;
     private final ObjectMapper objectMapper;
 
-    public SearXNGClient(RestTemplate restTemplate, String baseUrl) {
+    public SearXNGClient(RestTemplate restTemplate, String baseUrl, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = objectMapper;
     }
 
     public List<SearchResult> search(String query, int maxResults) {

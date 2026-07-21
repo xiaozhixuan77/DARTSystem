@@ -2,6 +2,7 @@ package com.dart.agent.search;
 
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.exception.ErrorCode;
+import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,7 +62,7 @@ public class SearchAgent {
             List<ScoredResource> top = scored.stream()
                     .limit(Math.min(maxResults, scored.size()))
                     .toList();
-            SseUtils.sendEvent(emitter, "search_result", top);
+            SseUtils.sendEvent(emitter, SseEvents.SEARCH_RESULT, top);
             return top;
 
         } catch (Exception e) {

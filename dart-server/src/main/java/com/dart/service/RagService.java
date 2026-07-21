@@ -5,36 +5,33 @@ import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
 import com.dart.mapper.KnowledgeChunkMapper;
 import com.dart.mapper.KnowledgeItemMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.embedding.EmbeddingRequest;
+import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 /**
  * RAG 向量检索与回答生成。
  */
+@Slf4j
+@Service
 public class RagService {
 
-    private static final Logger log = LoggerFactory.getLogger(RagService.class);
-
-    private final EmbeddingModel embeddingModel;
+    private final EmbeddingService embeddingService;
     private final ChatModel chatModel;
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final double similarityThreshold;
     private final int topK;
 
-    public RagService(EmbeddingModel embeddingModel, ChatModel chatModel,
+    public RagService(EmbeddingService embeddingService, ChatModel chatModel,
                       KnowledgeItemMapper knowledgeItemMapper,
                       KnowledgeChunkMapper knowledgeChunkMapper,
                       double similarityThreshold, int topK) {
-        this.embeddingModel = embeddingModel;
+        this.embeddingService = embeddingService;
         this.chatModel = chatModel;
         this.knowledgeItemMapper = knowledgeItemMapper;
         this.knowledgeChunkMapper = knowledgeChunkMapper;
@@ -50,8 +47,8 @@ public class RagService {
      */
     public Optional<RagResult> retrieve(String query, Long userId) {
         try {
-            float[] queryVec = embed(query);
-            // 简化：通过 userId 查询知识库条目，按前缀匹配
+            float[] queryVec = embeddingService.embed(query);
+
             QueryWrapper<KnowledgeChunk> wrapper = new QueryWrapper<>();
             wrapper.last("LIMIT " + topK);
             List<KnowledgeChunk> chunks = knowledgeChunkMapper.selectList(wrapper);
@@ -60,30 +57,41 @@ public class RagService {
                 return Optional.empty();
             }
 
-            // 过滤属于当前用户的 chunk
-            List<RagChunk> validChunks = chunks.stream()
-                    .filter(c -> {
-                        KnowledgeItem item = knowledgeItemMapper.selectById(c.getKnowledgeItemId());
-                        return item != null && userId.equals(item.getUserId()) && item.getIsDeleted() == 0;
-                    })
-                    .map(c -> {
-                        KnowledgeItem item = knowledgeItemMapper.selectById(c.getKnowledgeItemId());
-                        return new RagChunk(c.getChunkText(), item.getTitle(), item.getSourceUrl(), 0.85);
-                    })
-                    .toList();
-
-            if (validChunks.isEmpty()) {
-                return Optional.empty();
+            // 批量加载 KnowledgeItem，避免 N+1 查询
+            Set<Long> itemIds = new HashSet<>();
+            for (KnowledgeChunk c : chunks) {
+                if (c.getKnowledgeItemId() != null) {
+                    itemIds.add(c.getKnowledgeItemId());
+                }
+            }
+            Map<Long, KnowledgeItem> itemMap = new HashMap<>();
+            for (Long id : itemIds) {
+                KnowledgeItem item = knowledgeItemMapper.selectById(id);
+                if (item != null && userId.equals(item.getUserId()) && item.getIsDeleted() == 0) {
+                    itemMap.put(id, item);
+                }
             }
 
-            // 只保留相似度 >= threshold 的（简化处理，后续接入 Redis KNN）
-            List<RagChunk> matched = validChunks.stream()
-                    .filter(c -> c.similarity() >= similarityThreshold)
-                    .toList();
+            // 计算余弦相似度并筛选
+            List<RagChunk> matched = new ArrayList<>();
+            for (KnowledgeChunk c : chunks) {
+                KnowledgeItem item = itemMap.get(c.getKnowledgeItemId());
+                if (item == null) continue;
+                // 计算实际余弦相似度
+                float[] chunkVec = embeddingService.embed(c.getChunkText());
+                double similarity = cosineSimilarity(queryVec, chunkVec);
+                if (similarity >= similarityThreshold) {
+                    matched.add(new RagChunk(c.getChunkText(), item.getTitle(),
+                            item.getSourceUrl(), similarity));
+                }
+            }
 
             if (matched.isEmpty()) {
                 return Optional.empty();
             }
+
+            // 按相似度降序排列
+            matched.sort(Comparator.comparingDouble(RagChunk::similarity).reversed());
 
             String answer = generateAnswer(query, matched);
             List<String> sources = matched.stream().map(RagChunk::sourceUrl).distinct().toList();
@@ -98,9 +106,11 @@ public class RagService {
     public String generateAnswer(String query, List<RagChunk> chunks) {
         StringBuilder context = new StringBuilder();
         for (RagChunk c : chunks) {
+            context.append("<source>\n");
             context.append("标题: ").append(c.title()).append("\n");
             context.append("来源: ").append(c.sourceUrl()).append("\n");
-            context.append("内容: ").append(c.content()).append("\n\n");
+            context.append("内容: ").append(c.content()).append("\n");
+            context.append("</source>\n\n");
         }
 
         String prompt = """
@@ -112,7 +122,7 @@ public class RagService {
                 参考材料：
                 %s
 
-                请生成简洁、准确的中文回答。""".formatted(query, context);
+                请生成简洁、准确的中文回答。""".formatted(query.replace("<", "&lt;"), context);
 
         try {
             return chatModel.call(new Prompt(new UserMessage(prompt)))
@@ -126,10 +136,18 @@ public class RagService {
         }
     }
 
-    private float[] embed(String text) {
-        var response = embeddingModel.call(new EmbeddingRequest(
-                List.of(text),
-                org.springframework.ai.embedding.DefaultEmbeddingOptions.builder().build()));
-        return response.getResult().getOutput();
+    /**
+     * 计算两个向量的余弦相似度。
+     */
+    static double cosineSimilarity(float[] a, float[] b) {
+        if (a == null || b == null || a.length != b.length) return 0.0;
+        double dot = 0, normA = 0, normB = 0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        if (normA == 0 || normB == 0) return 0.0;
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 }

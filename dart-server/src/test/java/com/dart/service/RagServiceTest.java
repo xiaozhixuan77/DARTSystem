@@ -13,21 +13,20 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.embedding.EmbeddingRequest;
 
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class RagServiceTest {
 
     @Mock
-    private EmbeddingModel embeddingModel;
+    private EmbeddingService embeddingService;
     @Mock
     private ChatModel chatModel;
     @Mock
@@ -41,16 +40,14 @@ class RagServiceTest {
 
     @BeforeEach
     void setUp() {
-        ragService = new RagService(embeddingModel, chatModel, knowledgeItemMapper,
+        ragService = new RagService(embeddingService, chatModel, knowledgeItemMapper,
                 knowledgeChunkMapper, 0.80, 5);
     }
 
     @Test
-    void retrieve_whenNoRedisConnection_returnsEmpty() {
+    void retrieve_withNoChunks_returnsEmpty() {
         float[] emb = new float[1536];
-        when(embeddingModel.call(any(EmbeddingRequest.class)))
-                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
-                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+        lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of());
 
         Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
@@ -60,9 +57,8 @@ class RagServiceTest {
     @Test
     void retrieve_withMatchingChunks_returnsResult() {
         float[] emb = new float[1536];
-        when(embeddingModel.call(any(EmbeddingRequest.class)))
-                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
-                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+        java.util.Arrays.fill(emb, 1.0f);
+        lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
 
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setKnowledgeItemId(1L);
@@ -74,15 +70,13 @@ class RagServiceTest {
         item.setId(1L);
         item.setUserId(1L);
         item.setTitle("Spring Boot Guide");
-        item.setIsDeleted(0);
         item.setSourceUrl("https://spring.io");
+        item.setIsDeleted(0);
         when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
 
-        // Mock ChatModel for answer generation
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
         when(chatResponse.getResults()).thenReturn(List.of(
-                new org.springframework.ai.chat.model.Generation(
-                        new org.springframework.ai.chat.messages.AssistantMessage("Spring Boot 是一个框架"))));
+                new Generation(new AssistantMessage("Spring Boot 是一个框架"))));
 
         Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
         assertThat(result).isPresent();
@@ -91,9 +85,8 @@ class RagServiceTest {
     @Test
     void retrieve_withNoMatchingChunks_returnsEmpty() {
         float[] emb = new float[1536];
-        when(embeddingModel.call(any(EmbeddingRequest.class)))
-                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
-                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+        lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
+        // embed() 第二次调用返回不同的向量
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of());
 
         Optional<RagService.RagResult> result = ragService.retrieve("unknown query", 1L);
