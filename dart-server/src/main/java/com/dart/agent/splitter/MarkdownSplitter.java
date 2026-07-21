@@ -45,11 +45,7 @@ public class MarkdownSplitter {
             }
 
             if (current.length() + trimmed.length() + 2 > chunkSize && current.length() > 0) {
-                rawChunks.add(current.toString().trim());
-                // overlap: 保留上一块末尾内容
-                String prevText = current.toString();
-                int overlapStart = Math.max(0, prevText.length() - overlap);
-                current = new StringBuilder(prevText.substring(overlapStart));
+                current = buildOverlap(current, rawChunks);
             }
 
             if (trimmed.length() > chunkSize) {
@@ -61,10 +57,7 @@ public class MarkdownSplitter {
                         continue;
                     }
                     if (current.length() + s.length() + 1 > chunkSize && current.length() > 0) {
-                        rawChunks.add(current.toString().trim());
-                        String prevText = current.toString();
-                        int overlapStart = Math.max(0, prevText.length() - overlap);
-                        current = new StringBuilder(prevText.substring(overlapStart));
+                        current = buildOverlap(current, rawChunks);
                     }
                     if (!current.isEmpty()) {
                         current.append(" ");
@@ -99,5 +92,12 @@ public class MarkdownSplitter {
             return m.group(1).trim();
         }
         return "";
+    }
+
+    private StringBuilder buildOverlap(StringBuilder current, List<String> rawChunks) {
+        rawChunks.add(current.toString().trim());
+        String prevText = current.toString();
+        int overlapStart = Math.max(0, prevText.length() - overlap);
+        return new StringBuilder(prevText.substring(overlapStart));
     }
 }

@@ -21,6 +21,8 @@ class SearchToolsTest {
     private SearXNGClient searXNGClient;
     @Mock
     private PageFetcher pageFetcher;
+    @Mock
+    private MatchScorer matchScorer;
 
     private QualityScorer qualityScorer;
     private SearchTools searchTools;
@@ -28,8 +30,9 @@ class SearchToolsTest {
     @BeforeEach
     void setUp() {
         qualityScorer = new QualityScorer(0.15, 0.30, 0.20, 0.35, 3.0);
-        searchTools = new SearchTools(searXNGClient, pageFetcher, qualityScorer);
+        searchTools = new SearchTools(searXNGClient, pageFetcher, qualityScorer, matchScorer);
         lenient().when(searXNGClient.search(any(), anyInt())).thenReturn(List.of());
+        lenient().when(matchScorer.evaluate(anyString(), anyString())).thenReturn(3);
     }
 
     @Test

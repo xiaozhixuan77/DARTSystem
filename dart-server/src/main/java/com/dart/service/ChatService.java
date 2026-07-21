@@ -18,7 +18,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -47,13 +46,14 @@ public class ChatService {
         this.messageMapper = messageMapper;
     }
 
-    public record SearchResult(Optional<RagService.RagResult> ragAnswer,
-                               Optional<CuratedReport> curatedReport, List<ScoredResource> searchResults) {
+    public record SearchResult(RagService.RagResult ragAnswer,
+                               CuratedReport curatedReport, List<ScoredResource> searchResults) {
+        public boolean isRagHit() { return ragAnswer != null; }
         public static SearchResult ragHit(RagService.RagResult answer) {
-            return new SearchResult(Optional.of(answer), Optional.empty(), List.of());
+            return new SearchResult(answer, null, List.of());
         }
         public static SearchResult searchResult(CuratedReport report, List<ScoredResource> resources) {
-            return new SearchResult(Optional.empty(), Optional.of(report), resources);
+            return new SearchResult(null, report, resources);
         }
     }
 
@@ -70,8 +70,6 @@ public class ChatService {
         SseUtils.sendStatus(emitter, "rag_check", "正在检查知识库...");
         Optional<RagService.RagResult> ragResult = ragService.retrieve(query, userId);
         if (ragResult.isPresent()) {
-            SseUtils.sendEvent(emitter, SseEvents.CONTENT, ragResult.get().answer());
-            SseUtils.sendEvent(emitter, SseEvents.DONE, Map.of("status", "complete"));
             return SearchResult.ragHit(ragResult.get());
         }
 

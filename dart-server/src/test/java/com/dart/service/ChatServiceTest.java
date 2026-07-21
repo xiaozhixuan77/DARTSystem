@@ -80,8 +80,8 @@ class ChatServiceTest {
                 .thenReturn(Optional.of(new RagResult("# Spring Boot 详解", List.of("https://spring.io"))));
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, emitter);
-        assertThat(result.ragAnswer()).isPresent();
-        assertThat(result.ragAnswer().get().answer()).contains("Spring Boot");
+        assertThat(result.isRagHit()).isTrue();
+        assertThat(result.ragAnswer().answer()).contains("Spring Boot");
         verify(searchAgent, never()).execute(anyString(), anyInt(), any());
     }
 
@@ -95,8 +95,8 @@ class ChatServiceTest {
         when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, emitter);
-        assertThat(result.ragAnswer()).isEmpty();
-        assertThat(result.curatedReport()).isPresent();
+        assertThat(result.isRagHit()).isFalse();
+        assertThat(result.curatedReport()).isNotNull();
         verify(ragService).retrieve(eq("Spring Boot"), eq(1L));
         verify(searchAgent).execute(anyString(), anyInt(), any());
         verify(curatorAgent).curate(anyString(), anyList(), any());
@@ -108,9 +108,9 @@ class ChatServiceTest {
         when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of());
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("obscure query", 1L, emitter);
-        assertThat(result.ragAnswer()).isEmpty();
-        assertThat(result.curatedReport()).isPresent();
-        assertThat(result.curatedReport().get().markdown()).contains("未找到");
+        assertThat(result.ragAnswer()).isNull();
+        assertThat(result.curatedReport()).isNotNull();
+        assertThat(result.curatedReport().markdown()).contains("未找到");
         verify(curatorAgent, never()).curate(anyString(), anyList(), any());
     }
 
@@ -121,7 +121,7 @@ class ChatServiceTest {
                 .thenThrow(new RuntimeException("network error"));
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("query", 1L, emitter);
-        assertThat(result.curatedReport()).isPresent();
-        assertThat(result.curatedReport().get().markdown()).contains("不可用");
+        assertThat(result.curatedReport()).isNotNull();
+        assertThat(result.curatedReport().markdown()).contains("不可用");
     }
 }

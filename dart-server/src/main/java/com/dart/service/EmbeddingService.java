@@ -7,17 +7,18 @@ import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
 import com.dart.mapper.KnowledgeChunkMapper;
 import com.dart.mapper.KnowledgeItemMapper;
+import com.dart.util.RedisKeyConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -144,7 +145,7 @@ public class EmbeddingService {
 
     private void writeToRedisWithRetry(List<String> embeddingIds, List<float[]> embeddings) {
         for (int i = 0; i < embeddingIds.size(); i++) {
-            String key = "dart:" + embeddingIds.get(i);
+            String key = RedisKeyConstants.DART_PREFIX + embeddingIds.get(i);
             byte[] vectorBytes = floatArrayToBytes(embeddings.get(i));
             String vectorB64 = Base64.getEncoder().encodeToString(vectorBytes);
 

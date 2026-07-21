@@ -35,8 +35,8 @@ public class PageContent {
     public String getContent() { return content; }
     public int getWordCount() { return wordCount; }
     public int getCodeBlockCount() { return codeBlockCount; }
-    public boolean isHasDiagram() { return hasDiagram; }
-    public boolean isHasExercise() { return hasExercise; }
+    public boolean hasDiagram() { return hasDiagram; }
+    public boolean hasExercise() { return hasExercise; }
     public Integer getYear() { return year; }
 
     @Override

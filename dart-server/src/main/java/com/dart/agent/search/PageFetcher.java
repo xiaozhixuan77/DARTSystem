@@ -65,6 +65,38 @@ public class PageFetcher {
         if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
             throw new IllegalArgumentException("仅支持 HTTP/HTTPS 协议");
         }
+        try {
+            java.net.URI uri = java.net.URI.create(url);
+            String host = uri.getHost();
+            if (host == null) {
+                throw new IllegalArgumentException("无法解析主机名");
+            }
+            if (isPrivateAddress(host)) {
+                throw new IllegalArgumentException("不允许访问内网地址: " + host);
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("无效的 URL: " + url, e);
+        }
+    }
+
+    private boolean isPrivateAddress(String host) {
+        if (host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]")
+                || host.startsWith("192.168.") || host.startsWith("10.")
+                || host.startsWith("172.16.") || host.startsWith("172.17.")
+                || host.startsWith("172.18.") || host.startsWith("172.19.")
+                || host.startsWith("172.20.") || host.startsWith("172.21.")
+                || host.startsWith("172.22.") || host.startsWith("172.23.")
+                || host.startsWith("172.24.") || host.startsWith("172.25.")
+                || host.startsWith("172.26.") || host.startsWith("172.27.")
+                || host.startsWith("172.28.") || host.startsWith("172.29.")
+                || host.startsWith("172.30.") || host.startsWith("172.31.")
+                || host.startsWith("169.254.") || host.startsWith("0.")
+                || host.endsWith(".local") || host.endsWith(".internal")) {
+            return true;
+        }
+        return false;
     }
 
     private String extractTitle(Document doc) {

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.mapper.KnowledgeChunkMapper;
+import com.dart.util.RedisKeyConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.Cursor;
@@ -20,7 +21,7 @@ public class DataConsistencyTask {
 
     private static final Logger log = LoggerFactory.getLogger(DataConsistencyTask.class);
     private static final int BATCH_SIZE = 500;
-    private static final String REDIS_KEY_PREFIX = "dart:chunk:";
+    private static final String REDIS_KEY_PREFIX = RedisKeyConstants.CHUNK_PREFIX;
 
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final StringRedisTemplate redisTemplate;

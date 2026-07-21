@@ -12,7 +12,7 @@ public class SecurityUtils {
     public static Long getCurrentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal)) {
-            return null;
+            throw new org.springframework.security.core.AuthenticationException("未登录或 Token 无效") {};
         }
         return ((UserPrincipal) authentication.getPrincipal()).getUserId();
     }

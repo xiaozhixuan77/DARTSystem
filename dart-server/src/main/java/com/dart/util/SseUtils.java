@@ -29,11 +29,11 @@ public class SseUtils {
     }
 
     public static void sendStatus(SseEmitter emitter, String phase, String message) {
-        sendEvent(emitter, "status", java.util.Map.of("phase", phase, "message", message));
+        sendEvent(emitter, SseEvents.STATUS, java.util.Map.of("phase", phase, "message", message));
     }
 
     public static void sendError(SseEmitter emitter, int code, String message) {
-        sendEvent(emitter, "error", java.util.Map.of("code", code, "message", message));
+        sendEvent(emitter, SseEvents.ERROR, java.util.Map.of("code", code, "message", message));
     }
 
     public static void completeSafe(SseEmitter emitter) {

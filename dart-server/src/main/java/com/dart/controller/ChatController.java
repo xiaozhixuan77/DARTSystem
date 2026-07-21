@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 聊天 SSE 流式端点。
@@ -27,24 +28,35 @@ public class ChatController {
     public SseEmitter send(@Valid @RequestBody ChatRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
         SseEmitter emitter = SseUtils.createEmitter(300_000L);
+        AtomicBoolean completed = new AtomicBoolean(false);
+
+        emitter.onCompletion(() -> completed.set(true));
+        emitter.onTimeout(() -> completed.set(true));
+        emitter.onError(e -> completed.set(true));
 
         Thread.startVirtualThread(() -> {
             try {
                 ChatService.SearchResult result = chatService.executeSearchAndCurate(
                         request.getMessage(), userId, emitter);
 
-                if (result.ragAnswer().isPresent()) {
-                    SseUtils.sendEvent(emitter, SseEvents.CONTENT, result.ragAnswer().get().answer());
-                } else if (result.curatedReport().isPresent()) {
+                if (completed.get()) return;
+
+                if (result.isRagHit()) {
+                    SseUtils.sendEvent(emitter, SseEvents.CONTENT, result.ragAnswer().answer());
+                } else if (result.curatedReport() != null) {
                     SseUtils.sendEvent(emitter, SseEvents.CONTENT,
-                            result.curatedReport().get().markdown());
+                            result.curatedReport().markdown());
                 }
 
-                SseUtils.sendEvent(emitter, SseEvents.DONE, Map.of("status", "complete"));
-                SseUtils.completeSafe(emitter);
+                if (!completed.get()) {
+                    SseUtils.sendEvent(emitter, SseEvents.DONE, Map.of("status", "complete"));
+                    SseUtils.completeSafe(emitter);
+                }
             } catch (Exception e) {
-                SseUtils.sendError(emitter, 500, "服务内部错误");
-                SseUtils.errorSafe(emitter, e);
+                if (!completed.get()) {
+                    SseUtils.sendError(emitter, 500, "服务内部错误");
+                    SseUtils.errorSafe(emitter, e);
+                }
             }
         });
 

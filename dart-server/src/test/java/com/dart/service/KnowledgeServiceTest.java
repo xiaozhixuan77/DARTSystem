@@ -1,6 +1,7 @@
 package com.dart.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
 import com.dart.mapper.KnowledgeChunkMapper;
@@ -54,8 +55,10 @@ class KnowledgeServiceTest {
 
     @Test
     void listUserKnowledge_returnsList() {
-        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
-                .thenReturn(List.of(createItem(1L, 1L, "Spring Guide")));
+        Page<KnowledgeItem> mockPage = new Page<>(1, 10);
+        mockPage.setRecords(List.of(createItem(1L, 1L, "Spring Guide")));
+        when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
+                .thenReturn(mockPage);
 
         var result = knowledgeService.listUserKnowledge(1L, 1, 10);
         assertThat(result).hasSize(1);

@@ -1,6 +1,7 @@
 package com.dart.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.dart.dto.response.KnowledgeDetailVO;
 import com.dart.dto.response.KnowledgeItemVO;
 import com.dart.entity.KnowledgeChunk;
@@ -13,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Slf4j
@@ -24,12 +26,13 @@ public class KnowledgeService {
     private final KnowledgeChunkMapper knowledgeChunkMapper;
 
     public List<KnowledgeItemVO> listUserKnowledge(Long userId, int page, int size) {
+        Page<KnowledgeItem> p = new Page<>(page, size);
         QueryWrapper<KnowledgeItem> query = new QueryWrapper<>();
         query.eq("user_id", userId)
                 .eq("is_deleted", 0)
                 .orderByDesc("created_at");
-        query.last("LIMIT " + size + " OFFSET " + ((page - 1) * size));
-        return knowledgeItemMapper.selectList(query).stream()
+        p = knowledgeItemMapper.selectPage(p, query);
+        return p.getRecords().stream()
                 .map(this::toVO)
                 .toList();
     }
@@ -53,6 +56,7 @@ public class KnowledgeService {
             throw new BusinessException(ErrorCode.KNOWLEDGE_NOT_FOUND);
         }
         item.setIsDeleted(1);
+        item.setUpdatedAt(LocalDateTime.now());
         knowledgeItemMapper.updateKnowledgeItem(item);
     }
 

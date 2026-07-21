@@ -27,16 +27,6 @@ public class SearchTools {
     private final DepthScorer depthScorer;
     private final MatchScorer matchScorer;
 
-    public SearchTools(SearXNGClient searXNGClient, PageFetcher pageFetcher, QualityScorer qualityScorer) {
-        this.searXNGClient = searXNGClient;
-        this.pageFetcher = pageFetcher;
-        this.qualityScorer = qualityScorer;
-        this.timelinessScorer = new TimelinessScorer();
-        this.authorityScorer = new AuthorityScorer();
-        this.depthScorer = new DepthScorer();
-        this.matchScorer = null; // 在 ChatService 层注入
-    }
-
     public SearchTools(SearXNGClient searXNGClient, PageFetcher pageFetcher,
                        QualityScorer qualityScorer, MatchScorer matchScorer) {
         this.searXNGClient = searXNGClient;
@@ -102,7 +92,7 @@ public class SearchTools {
                     int t = timelinessScorer.score(p.getYear() != null ? p.getYear() : 0);
                     int a = authorityScorer.score(p.getUrl());
                     int d = depthScorer.score(p.getWordCount(), p.getCodeBlockCount(),
-                            p.isHasDiagram(), p.isHasExercise());
+                            p.hasDiagram(), p.hasExercise());
                     int m = scoreMatch(query, p);
                     return qualityScorer.evaluate(p.getUrl(), p.getTitle(), p.getContent(), t, a, d, m);
                 })

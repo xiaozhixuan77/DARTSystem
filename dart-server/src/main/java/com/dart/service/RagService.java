@@ -50,6 +50,8 @@ public class RagService {
             float[] queryVec = embeddingService.embed(query);
 
             QueryWrapper<KnowledgeChunk> wrapper = new QueryWrapper<>();
+            wrapper.inSql("knowledge_item_id",
+                    "SELECT id FROM knowledge_item WHERE user_id = " + userId + " AND is_deleted = 0");
             wrapper.last("LIMIT " + topK);
             List<KnowledgeChunk> chunks = knowledgeChunkMapper.selectList(wrapper);
 
@@ -139,7 +141,7 @@ public class RagService {
     /**
      * 计算两个向量的余弦相似度。
      */
-    static double cosineSimilarity(float[] a, float[] b) {
+    private static double cosineSimilarity(float[] a, float[] b) {
         if (a == null || b == null || a.length != b.length) return 0.0;
         double dot = 0, normA = 0, normB = 0;
         for (int i = 0; i < a.length; i++) {
