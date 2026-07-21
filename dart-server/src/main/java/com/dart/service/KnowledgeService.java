@@ -57,7 +57,7 @@ public class KnowledgeService {
         }
         item.setIsDeleted(1);
         item.setUpdatedAt(LocalDateTime.now());
-        knowledgeItemMapper.updateKnowledgeItem(item);
+        knowledgeItemMapper.updateById(item);
     }
 
     public boolean existsBySourceUrl(String sourceUrlHash) {

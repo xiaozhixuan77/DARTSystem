@@ -6,8 +6,4 @@ import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
 public interface MessageMapper extends BaseMapper<Message> {
-
-    default int insertMessage(Message message) {
-        return insert(message);
-    }
 }

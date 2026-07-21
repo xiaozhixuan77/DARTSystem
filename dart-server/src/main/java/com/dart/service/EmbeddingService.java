@@ -77,7 +77,7 @@ public class EmbeddingService {
         item.setIsDeleted(0);
         item.setCreatedAt(LocalDateTime.now());
         item.setUpdatedAt(LocalDateTime.now());
-        knowledgeItemMapper.insertKnowledgeItem(item);
+        knowledgeItemMapper.insert(item);
 
         Long knowledgeItemId = item.getId();
         if (knowledgeItemId == null) {
@@ -118,7 +118,7 @@ public class EmbeddingService {
             chunkEntities.add(kc);
         }
         for (KnowledgeChunk kc : chunkEntities) {
-            knowledgeChunkMapper.insertKnowledgeChunk(kc);
+            knowledgeChunkMapper.insert(kc);
         }
 
         // Step 5: afterCommit 异步写 Redis（需在事务中）

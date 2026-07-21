@@ -66,7 +66,7 @@ public class AuthService {
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
         try {
-            userMapper.insertUser(user);
+            userMapper.insert(user);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(ErrorCode.USERNAME_EXISTS);
         }
@@ -95,7 +95,7 @@ public class AuthService {
                 user.setStatus(User.STATUS_ACTIVE);
                 user.setLoginAttempts(0);
                 user.setLockedUntil(null);
-                userMapper.updateUser(user);
+                userMapper.updateById(user);
                 log.info("Account unlocked (lock expired): userId={}", user.getId());
             } else {
                 log.warn("Login failed: account locked, userId={}", user.getId());
@@ -111,14 +111,14 @@ public class AuthService {
                 log.warn("Account locked after {} failures: userId={}", user.getLoginAttempts(), user.getId());
             }
             user.setUpdatedAt(LocalDateTime.now());
-            userMapper.updateUser(user);
+            userMapper.updateById(user);
             throw new BusinessException(ErrorCode.LOGIN_FAILED);
         }
 
         user.setLoginAttempts(0);
         user.setLockedUntil(null);
         user.setUpdatedAt(LocalDateTime.now());
-        userMapper.updateUser(user);
+        userMapper.updateById(user);
 
         String accessToken = jwtTokenProvider.generateAccessToken(user.getId(), user.getUsername());
         String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId());
@@ -146,13 +146,14 @@ public class AuthService {
         rt.setExpiresAt(LocalDateTime.now().plusSeconds(jwtProperties.getRefreshTokenExpiration()));
         rt.setRevoked(false);
         rt.setCreatedAt(LocalDateTime.now());
-        refreshTokenMapper.insertToken(rt);
+        refreshTokenMapper.insert(rt);
 
         log.info("User logged in: userId={}", user.getId());
         return new LoginResponse(accessToken, refreshToken,
                 jwtProperties.getAccessTokenExpiration(), user.getId(), user.getUsername());
     }
 
+    @Transactional
     public TokenRefreshResponse refreshToken(RefreshTokenRequest request) {
         String rawToken = request.getRefreshToken();
 
@@ -178,11 +179,9 @@ public class AuthService {
             throw new BusinessException(ErrorCode.TOKEN_INVALID);
         }
 
-        // 吊销旧 refresh token
         stored.setRevoked(true);
-        refreshTokenMapper.updateToken(stored);
+        refreshTokenMapper.updateById(stored);
 
-        // 签发新的 refresh token（Token 轮转）
         String newRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
         String newTokenHash = sha256(newRefreshToken);
         RefreshToken newRt = new RefreshToken();
@@ -191,7 +190,7 @@ public class AuthService {
         newRt.setExpiresAt(LocalDateTime.now().plusSeconds(jwtProperties.getRefreshTokenExpiration()));
         newRt.setRevoked(false);
         newRt.setCreatedAt(LocalDateTime.now());
-        refreshTokenMapper.insertToken(newRt);
+        refreshTokenMapper.insert(newRt);
 
         String newAccessToken = jwtTokenProvider.generateAccessToken(userId, user.getUsername());
         return new TokenRefreshResponse(newAccessToken, newRefreshToken,

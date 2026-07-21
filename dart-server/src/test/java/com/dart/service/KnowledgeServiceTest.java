@@ -96,7 +96,7 @@ class KnowledgeServiceTest {
     void deleteKnowledge_success() {
         KnowledgeItem item = createItem(1L, 1L, "Spring Guide");
         when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
-        when(knowledgeItemMapper.updateKnowledgeItem(any(KnowledgeItem.class))).thenReturn(1);
+        when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
         knowledgeService.deleteKnowledge(1L, 1L);
     }
 

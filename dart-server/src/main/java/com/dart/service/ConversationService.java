@@ -40,13 +40,13 @@ public class ConversationService {
 
         Map<Long, Long> countMap = batchCountMessages(conversations);
 
-        return conversations.stream().map(conv -> new ConversationVO(
-                conv.getId(),
-                conv.getTitle(),
-                conv.getTags(),
-                countMap.getOrDefault(conv.getId(), 0L).intValue(),
-                conv.getUpdatedAt()
-        )).collect(Collectors.toList());
+        return conversations.stream().map(conv -> ConversationVO.builder()
+                .id(conv.getId())
+                .title(conv.getTitle())
+                .tags(conv.getTags())
+                .messageCount(countMap.getOrDefault(conv.getId(), 0L).intValue())
+                .updatedAt(conv.getUpdatedAt())
+                .build()).collect(Collectors.toList());
     }
 
     private Map<Long, Long> batchCountMessages(List<Conversation> conversations) {
@@ -74,16 +74,15 @@ public class ConversationService {
         conversation.setUserId(userId);
         conversation.setTitle("新对话");
         conversation.setIsDeleted(0);
-        conversationMapper.insertConversation(conversation);
+        conversationMapper.insert(conversation);
 
         log.info("Conversation created: id={}, userId={}", conversation.getId(), userId);
-        return new ConversationVO(
-                conversation.getId(),
-                conversation.getTitle(),
-                null,
-                0,
-                conversation.getUpdatedAt()
-        );
+        return ConversationVO.builder()
+                .id(conversation.getId())
+                .title(conversation.getTitle())
+                .messageCount(0)
+                .updatedAt(conversation.getUpdatedAt())
+                .build();
     }
 
     @Transactional
@@ -102,10 +101,11 @@ public class ConversationService {
             conversation.setTags(request.getTags());
         }
 
-        conversationMapper.updateConversation(conversation);
+        conversationMapper.updateById(conversation);
         log.info("Conversation updated: id={}", conversationId);
     }
 
+    @Transactional
     public void deleteConversation(Long userId, Long conversationId) {
         validateUserId(userId);
         Conversation conversation = conversationMapper.selectById(conversationId);
@@ -115,7 +115,7 @@ public class ConversationService {
 
         conversation.setIsDeleted(1);
         conversation.setUpdatedAt(LocalDateTime.now());
-        conversationMapper.updateConversation(conversation);
+        conversationMapper.updateById(conversation);
         log.info("Conversation soft-deleted: id={}", conversationId);
     }
 
@@ -131,13 +131,13 @@ public class ConversationService {
                 .orderByAsc("created_at");
         List<Message> messages = messageMapper.selectList(query);
 
-        return messages.stream().map(msg -> new MessageVO(
-                msg.getId(),
-                msg.getRole(),
-                msg.getContent(),
-                msg.getMetadata(),
-                msg.getCreatedAt()
-        )).collect(Collectors.toList());
+        return messages.stream().map(msg -> MessageVO.builder()
+                .id(msg.getId())
+                .role(msg.getRole())
+                .content(msg.getContent())
+                .metadata(msg.getMetadata())
+                .createdAt(msg.getCreatedAt())
+                .build()).collect(Collectors.toList());
     }
 
     private void validateUserId(Long userId) {

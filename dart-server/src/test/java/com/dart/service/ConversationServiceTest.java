@@ -80,14 +80,14 @@ class ConversationServiceTest {
             Conversation c = inv.getArgument(0, Conversation.class);
             c.setId(200L);
             return 1;
-        }).when(conversationMapper).insertConversation(any(Conversation.class));
+        }).when(conversationMapper).insert(any(Conversation.class));
 
         ConversationVO result = conversationService.createConversation(USER_ID);
 
         assertThat(result.getId()).isEqualTo(200L);
         assertThat(result.getTitle()).isEqualTo("新对话");
         assertThat(result.getMessageCount()).isZero();
-        verify(conversationMapper).insertConversation(any(Conversation.class));
+        verify(conversationMapper).insert(any(Conversation.class));
     }
 
     // === updateConversation ===
@@ -103,7 +103,7 @@ class ConversationServiceTest {
         conversationService.updateConversation(USER_ID, CONV_ID, req);
 
         ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
-        verify(conversationMapper).updateConversation(captor.capture());
+        verify(conversationMapper).updateById(captor.capture());
         assertThat(captor.getValue().getTitle()).isEqualTo("更新标题");
         assertThat(captor.getValue().getTags()).isEqualTo("[\"Spring\"]");
     }
@@ -146,7 +146,7 @@ class ConversationServiceTest {
         conversationService.deleteConversation(USER_ID, CONV_ID);
 
         ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
-        verify(conversationMapper).updateConversation(captor.capture());
+        verify(conversationMapper).updateById(captor.capture());
         assertThat(captor.getValue().getIsDeleted()).isEqualTo(1);
     }
 
