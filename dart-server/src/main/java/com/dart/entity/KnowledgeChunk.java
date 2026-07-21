@@ -18,5 +18,6 @@ public class KnowledgeChunk {
     private Integer chunkIndex;
     private String chunkText;
     private String embeddingId;
+    private String embedding;
     private LocalDateTime createdAt;
 }

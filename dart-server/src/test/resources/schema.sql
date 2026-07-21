@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     chunk_index INT NOT NULL,
     chunk_text TEXT NOT NULL,
     embedding_id VARCHAR(200) NOT NULL,
+    embedding CLOB,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (knowledge_item_id) REFERENCES knowledge_item(id)
 );

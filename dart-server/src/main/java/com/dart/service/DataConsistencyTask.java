@@ -13,6 +13,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
 /**
  * 数据一致性补偿任务：检测缺失的 Redis 向量，每日对账。
  */
@@ -48,12 +51,24 @@ public class DataConsistencyTask {
                 var result = knowledgeChunkMapper.selectPage(page, wrapper);
                 if (result.getRecords().isEmpty()) break;
 
-                for (KnowledgeChunk chunk : result.getRecords()) {
-                    String key = REDIS_KEY_PREFIX + chunk.getEmbeddingId();
-                    Boolean exists = redisTemplate.hasKey(key);
-                    if (!Boolean.TRUE.equals(exists)) {
-                        log.info("发现缺失向量: {}", chunk.getEmbeddingId());
-                        compensated++;
+                // 使用 Pipeline 批量检查 key 存在性
+                List<KnowledgeChunk> records = result.getRecords();
+                List<Object> pipeResults = redisTemplate.executePipelined(
+                        (org.springframework.data.redis.connection.RedisConnection connection) -> {
+                            for (KnowledgeChunk chunk : records) {
+                                String key = REDIS_KEY_PREFIX + chunk.getEmbeddingId();
+                                connection.keyCommands().exists(key.getBytes(StandardCharsets.UTF_8));
+                            }
+                            return null;
+                        });
+
+                if (pipeResults != null) {
+                    for (int i = 0; i < pipeResults.size(); i++) {
+                        Boolean exists = (Boolean) pipeResults.get(i);
+                        if (!Boolean.TRUE.equals(exists)) {
+                            log.info("发现缺失向量: {}", records.get(i).getEmbeddingId());
+                            compensated++;
+                        }
                     }
                 }
                 if (!result.hasNext()) break;

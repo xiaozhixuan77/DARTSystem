@@ -58,12 +58,14 @@ class RagServiceTest {
     void retrieve_withMatchingChunks_returnsResult() {
         float[] emb = new float[1536];
         java.util.Arrays.fill(emb, 1.0f);
-        lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
+        when(embeddingService.embed(anyString())).thenReturn(emb);
 
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setKnowledgeItemId(1L);
         chunk.setChunkText("Spring Boot 教程内容");
         chunk.setChunkIndex(0);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                EmbeddingService.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
         KnowledgeItem item = new KnowledgeItem();

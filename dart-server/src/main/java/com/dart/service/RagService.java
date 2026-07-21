@@ -74,13 +74,13 @@ public class RagService {
                 }
             }
 
-            // 计算余弦相似度并筛选
+            // 用 MySQL 中存储的向量计算余弦相似度（避免重复 Embedding API 调用）
             List<RagChunk> matched = new ArrayList<>();
             for (KnowledgeChunk c : chunks) {
                 KnowledgeItem item = itemMap.get(c.getKnowledgeItemId());
-                if (item == null) continue;
-                // 计算实际余弦相似度
-                float[] chunkVec = embeddingService.embed(c.getChunkText());
+                if (item == null || c.getEmbedding() == null) continue;
+                float[] chunkVec = EmbeddingService.bytesToFloatArray(
+                        java.util.Base64.getDecoder().decode(c.getEmbedding()));
                 double similarity = cosineSimilarity(queryVec, chunkVec);
                 if (similarity >= similarityThreshold) {
                     matched.add(new RagChunk(c.getChunkText(), item.getTitle(),

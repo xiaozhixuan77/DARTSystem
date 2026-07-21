@@ -44,11 +44,18 @@ public class CuratorTools {
         List<ScoredResource> sorted = new ArrayList<>(resources);
         sorted.sort(Comparator.comparingDouble(ScoredResource::getWeightedScore).reversed());
 
+        // 预计算 shingle 集，避免 O(n²) 次重复计算
+        Map<ScoredResource, Set<String>> shingleCache = new HashMap<>();
+        for (ScoredResource r : sorted) {
+            shingleCache.put(r, shingle(r.getTitle()));
+        }
+
         List<ScoredResource> result = new ArrayList<>();
         for (ScoredResource r : sorted) {
             boolean duplicate = false;
+            Set<String> shinglesA = shingleCache.get(r);
             for (ScoredResource kept : result) {
-                double sim = jaccardSimilarity(r.getTitle(), kept.getTitle());
+                double sim = jaccardSimilarity(shinglesA, shingleCache.get(kept));
                 if (sim >= jaccardThreshold) {
                     duplicate = true;
                     break;
@@ -137,8 +144,10 @@ public class CuratorTools {
         if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
             return 0.0;
         }
-        Set<String> shinglesA = shingle(a);
-        Set<String> shinglesB = shingle(b);
+        return jaccardSimilarity(shingle(a), shingle(b));
+    }
+
+    private double jaccardSimilarity(Set<String> shinglesA, Set<String> shinglesB) {
         if (shinglesA.isEmpty() || shinglesB.isEmpty()) {
             return 0.0;
         }

@@ -105,14 +105,19 @@ public class EmbeddingService {
             }
         }
 
-        // Step 4: 写入 KnowledgeChunk (MySQL)
+        // Step 4: 批量写入 KnowledgeChunk (MySQL)，同时存储向量
+        List<KnowledgeChunk> chunkEntities = new ArrayList<>();
         for (int i = 0; i < chunks.size(); i++) {
             KnowledgeChunk kc = new KnowledgeChunk();
             kc.setKnowledgeItemId(knowledgeItemId);
             kc.setChunkIndex(chunks.get(i).chunkIndex());
             kc.setChunkText(chunks.get(i).chunkText());
             kc.setEmbeddingId(embeddingIds.get(i));
+            kc.setEmbedding(Base64.getEncoder().encodeToString(floatArrayToBytes(embeddings.get(i))));
             kc.setCreatedAt(LocalDateTime.now());
+            chunkEntities.add(kc);
+        }
+        for (KnowledgeChunk kc : chunkEntities) {
             knowledgeChunkMapper.insertKnowledgeChunk(kc);
         }
 
@@ -144,37 +149,49 @@ public class EmbeddingService {
     }
 
     private void writeToRedisWithRetry(List<String> embeddingIds, List<float[]> embeddings) {
-        for (int i = 0; i < embeddingIds.size(); i++) {
-            String key = RedisKeyConstants.DART_PREFIX + embeddingIds.get(i);
-            byte[] vectorBytes = floatArrayToBytes(embeddings.get(i));
-            String vectorB64 = Base64.getEncoder().encodeToString(vectorBytes);
-
-            for (int retry = 0; retry < MAX_RETRIES; retry++) {
-                try {
-                    redisTemplate.opsForHash().put(key, "embedding", vectorB64);
-                    redisTemplate.opsForHash().put(key, "chunk_id", embeddingIds.get(i));
-                    log.debug("Redis 写入成功: {}", key);
-                    break;
-                } catch (Exception e) {
-                    log.warn("Redis 写入失败 (重试 {}/{}): {}", retry + 1, MAX_RETRIES, key, e);
-                    if (retry < MAX_RETRIES - 1) {
-                        try {
-                            Thread.sleep(RETRY_DELAYS_MS[retry]);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                        }
+        for (int retry = 0; retry < MAX_RETRIES; retry++) {
+            try {
+                redisTemplate.executePipelined((org.springframework.data.redis.connection.RedisConnection connection) -> {
+                    for (int i = 0; i < embeddingIds.size(); i++) {
+                        String key = RedisKeyConstants.DART_PREFIX + embeddingIds.get(i);
+                        byte[] keyBytes = key.getBytes(StandardCharsets.UTF_8);
+                        byte[] vectorBytes = floatArrayToBytes(embeddings.get(i));
+                        connection.hashCommands().hSet(keyBytes,
+                                "embedding".getBytes(StandardCharsets.UTF_8), vectorBytes);
+                        connection.hashCommands().hSet(keyBytes,
+                                "chunk_id".getBytes(StandardCharsets.UTF_8),
+                                embeddingIds.get(i).getBytes(StandardCharsets.UTF_8));
+                    }
+                    return null;
+                });
+                log.debug("Redis Pipeline 批量写入成功: {} 条", embeddingIds.size());
+                return;
+            } catch (Exception e) {
+                log.warn("Redis Pipeline 写入失败 (重试 {}/{}): 共 {} 条", retry + 1, MAX_RETRIES, embeddingIds.size(), e);
+                if (retry < MAX_RETRIES - 1) {
+                    try {
+                        Thread.sleep(RETRY_DELAYS_MS[retry]);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
                     }
                 }
             }
         }
     }
 
-    private byte[] floatArrayToBytes(float[] floats) {
+    static byte[] floatArrayToBytes(float[] floats) {
         ByteBuffer buffer = ByteBuffer.allocate(floats.length * 4).order(ByteOrder.LITTLE_ENDIAN);
         for (float f : floats) {
             buffer.putFloat(f);
         }
         return buffer.array();
+    }
+
+    static float[] bytesToFloatArray(byte[] bytes) {
+        float[] floats = new float[bytes.length / 4];
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(floats);
+        return floats;
     }
 
     private String sha256(String input) {
