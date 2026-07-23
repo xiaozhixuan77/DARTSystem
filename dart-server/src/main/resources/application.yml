@@ -6,8 +6,6 @@ spring:
     name: dart-server
   profiles:
     active: dev
-  main:
-    allow-bean-definition-overriding: true
   autoconfigure:
     exclude:
       # Spring AI 2.0.0
@@ -16,13 +14,14 @@ spring:
       - org.springframework.ai.model.embedding.observation.autoconfigure.EmbeddingObservationAutoConfiguration
       - org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration
       - org.springframework.ai.autoconfigure.vectorstore.redis.RedisVectorStoreAutoConfiguration
-      # Spring Boot 3.4.1 新包路径
+      # Spring Boot 3.4.1 新包路径（与旧路径 autoconfigure 类冲突，需定向排除）
       - org.springframework.boot.http.client.autoconfigure.reactive.ReactiveHttpClientAutoConfiguration
       - org.springframework.boot.http.client.autoconfigure.HttpClientAutoConfiguration
       - org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration
       - org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration
       - org.springframework.boot.webclient.autoconfigure.WebClientAutoConfiguration
       - org.springframework.boot.http.converter.autoconfigure.HttpMessageConvertersAutoConfiguration
+      - org.springframework.boot.http.codec.autoconfigure.CodecsAutoConfiguration
 
   # MySQL 数据源
   datasource:

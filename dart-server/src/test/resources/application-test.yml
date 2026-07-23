@@ -1,8 +1,5 @@
 # 集成测试配置
 spring:
-  main:
-    allow-bean-definition-overriding: true
-
   datasource:
     url: jdbc:mysql://localhost:3306/dart_test?serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
@@ -28,6 +25,7 @@ spring:
       - org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration
       - org.springframework.boot.webclient.autoconfigure.WebClientAutoConfiguration
       - org.springframework.boot.http.converter.autoconfigure.HttpMessageConvertersAutoConfiguration
+      - org.springframework.boot.http.codec.autoconfigure.CodecsAutoConfiguration
 
   ai:
     deepseek:
