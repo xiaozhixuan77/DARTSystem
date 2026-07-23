@@ -27,9 +27,9 @@ public class ConversationCleanupTask {
                     .apply("id NOT IN (SELECT DISTINCT conversation_id FROM message)");
             Long count = conversationMapper.selectCount(query);
             if (count > 0) {
-                Conversation update = new Conversation();
-                update.setIsDeleted(1);
-                conversationMapper.update(update, query);
+                // 使用 delete(query) 而非 update(entity, query)：
+                // MyBatis-Plus 全局逻辑删除会拦截 update 方法中的 is_deleted 字段设置
+                conversationMapper.delete(query);
                 log.info("清理空会话完成: {} 条", count);
             }
         } catch (Exception e) {

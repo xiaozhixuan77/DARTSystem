@@ -1,5 +1,7 @@
 package com.dart.integration;
 
+import com.dart.entity.User;
+import com.dart.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.springframework.ai.chat.model.ChatModel;
@@ -9,19 +11,23 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 
-/**
- * 集成测试基类 —— 使用 Docker Compose 提供的 MySQL + Redis 服务，
- * 每个测试前清理 DB 表以保证隔离。
- * 通过 TestAiConfig 提供 Mock AI Bean。
- */
+import java.time.LocalDateTime;
+import java.util.List;
+
 @Tag("integration")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Import(TestAiConfig.class)
 public abstract class BaseIntegrationTest {
+
+    private static final List<String> TABLES = List.of(
+            "knowledge_chunk", "knowledge_item", "message",
+            "refresh_token", "conversation", "users"
+    );
 
     @Autowired
     protected ChatModel chatModel;
@@ -32,13 +38,30 @@ public abstract class BaseIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private UserMapper userMapper;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
     @BeforeEach
     void cleanDatabase() {
-        jdbcTemplate.execute("DELETE FROM knowledge_chunk");
-        jdbcTemplate.execute("DELETE FROM knowledge_item");
-        jdbcTemplate.execute("DELETE FROM message");
-        jdbcTemplate.execute("DELETE FROM refresh_token");
-        jdbcTemplate.execute("DELETE FROM conversation");
-        jdbcTemplate.execute("DELETE FROM users");
+        TABLES.forEach(table -> jdbcTemplate.execute("DELETE FROM " + table));
+    }
+
+    /**
+     * 在数据库中创建一个活跃用户，返回其 ID。
+     * 需要 FK 关联的测试可在 {@link BeforeEach} 中调用此方法。
+     */
+    protected Long createTestUser() {
+        User user = new User();
+        user.setUsername("test_" + (System.nanoTime() % 1000000));
+        user.setPasswordHash(passwordEncoder.encode("pass123"));
+        user.setStatus(User.STATUS_ACTIVE);
+        user.setLoginAttempts(0);
+        user.setCreatedAt(LocalDateTime.now());
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.insert(user);
+        return user.getId();
     }
 }

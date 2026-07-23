@@ -3,23 +3,23 @@ package com.dart.integration;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
-import com.dart.entity.User;
 import com.dart.mapper.KnowledgeChunkMapper;
 import com.dart.mapper.KnowledgeItemMapper;
-import com.dart.mapper.UserMapper;
 import com.dart.service.EmbeddingService;
 import com.dart.service.KnowledgeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.ai.embedding.EmbeddingResponseMetadata;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.security.crypto.password.PasswordEncoder;
 
-import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 
@@ -44,26 +44,11 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private StringRedisTemplate redisTemplate;
 
-    @Autowired
-    private UserMapper userMapper;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
     private Long testUserId;
 
     @BeforeEach
-    void createTestUser() {
-        // 注意：BaseIntegrationTest.cleanDatabase() 在此方法之前执行
-        User user = new User();
-        user.setUsername("kb" + (System.nanoTime() % 1000000));
-        user.setPasswordHash(passwordEncoder.encode("pass123"));
-        user.setStatus(User.STATUS_ACTIVE);
-        user.setLoginAttempts(0);
-        user.setCreatedAt(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
-        userMapper.insert(user);
-        testUserId = user.getId();
+    void setUp() {
+        testUserId = createTestUser();
     }
 
     @Test
@@ -89,9 +74,9 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
                         .eq("knowledge_item_id", itemId));
         assertThat(chunks).isNotEmpty();
 
-        Thread.sleep(200);
-        Set<String> redisKeys = redisTemplate.keys("dart:chunk:*");
-        assertThat(redisKeys).isNotNull();
+        // 轮询等待 Redis 写入（最多 2 秒）
+        Set<String> redisKeys = waitForRedisKeys(2000);
+        assertThat(redisKeys).isNotEmpty();
     }
 
     @Test
@@ -108,7 +93,6 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
 
         knowledgeService.deleteKnowledge(testUserId, itemId);
 
-        // 逻辑删除后，selectById 自动过滤 is_deleted=0，返回 null
         KnowledgeItem item = knowledgeItemMapper.selectById(itemId);
         assertThat(item).isNull();
 
@@ -133,7 +117,6 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
 
         knowledgeService.deleteKnowledge(testUserId, itemId);
 
-        // 逻辑删除后 selectById 返回 null
         KnowledgeItem deleted = knowledgeItemMapper.selectById(itemId);
         assertThat(deleted).isNull();
     }
@@ -148,19 +131,41 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
 
         embeddingService.embedAndPersist(testUserId, "Unique", "Content.", sourceUrl, scores);
 
-        boolean exists = knowledgeService.existsBySourceUrl(
-                java.util.Base64.getEncoder().encodeToString(
-                        java.security.MessageDigest.getInstance("SHA-256")
-                                .digest(sourceUrl.getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+        boolean exists = knowledgeService.existsBySourceUrl(sha256(sourceUrl));
         assertThat(exists).isTrue();
     }
+
+    // ────────── 辅助方法 ──────────
 
     private void mockEmbedding() {
         float[] vec = new float[1536];
         for (int i = 0; i < vec.length; i++) vec[i] = 0.01f;
-        var metadata = new EmbeddingResponseMetadata();
-        var embedding = new org.springframework.ai.embedding.Embedding(vec, 0);
-        var response = new EmbeddingResponse(List.of(embedding), metadata);
+        var response = new EmbeddingResponse(
+                List.of(new Embedding(vec, 0)),
+                new EmbeddingResponseMetadata());
         when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(response);
+    }
+
+    private Set<String> waitForRedisKeys(long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        Set<String> keys = null;
+        while (System.currentTimeMillis() < deadline) {
+            keys = redisTemplate.keys("dart:chunk:*");
+            if (keys != null && !keys.isEmpty()) {
+                return keys;
+            }
+            Thread.sleep(100);
+        }
+        return keys;
+    }
+
+    private static String sha256(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(hash);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

@@ -1,9 +1,9 @@
 package com.dart.integration;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.dart.dto.request.LoginRequest;
 import com.dart.dto.request.RefreshTokenRequest;
 import com.dart.dto.request.RegisterRequest;
-import com.dart.entity.RefreshToken;
 import com.dart.entity.User;
 import com.dart.mapper.RefreshTokenMapper;
 import com.dart.mapper.UserMapper;
@@ -48,8 +48,7 @@ class AuthApiIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.data.username").value("alice"));
 
         User user = userMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<User>()
-                        .eq("username", "alice"));
+                new QueryWrapper<User>().eq("username", "alice"));
         assertThat(user).isNotNull();
         assertThat(user.getPasswordHash()).startsWith("$2a$");
     }
@@ -133,7 +132,7 @@ class AuthApiIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.code").value(2004));
 
         User user = userMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<User>()
+                new QueryWrapper<User>()
                         .eq("username", "eve"));
         assertThat(user.getLoginAttempts()).isEqualTo(1);
     }
@@ -157,7 +156,7 @@ class AuthApiIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.code").value(2004));
 
         User user = userMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<User>()
+                new QueryWrapper<User>()
                         .eq("username", "frank"));
         assertThat(user.getStatus()).isEqualTo(User.STATUS_LOCKED);
         assertThat(user.getLockedUntil()).isNotNull();
