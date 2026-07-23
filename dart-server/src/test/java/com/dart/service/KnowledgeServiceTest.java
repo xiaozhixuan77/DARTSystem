@@ -89,14 +89,14 @@ class KnowledgeServiceTest {
         KnowledgeItem item = createItem(1L, 2L, "Others");
         when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
         assertThatThrownBy(() -> knowledgeService.getKnowledgeDetail(1L, 1L))
-                .hasMessageContaining("不存在");
+                .hasMessageContaining("无权访问");
     }
 
     @Test
     void deleteKnowledge_success() {
         KnowledgeItem item = createItem(1L, 1L, "Spring Guide");
         when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
-        when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
+        when(knowledgeItemMapper.deleteById(1L)).thenReturn(1);
         knowledgeService.deleteKnowledge(1L, 1L);
     }
 

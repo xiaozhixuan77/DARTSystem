@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -30,7 +31,8 @@ public class RagService {
     public RagService(EmbeddingService embeddingService, ChatModel chatModel,
                       KnowledgeItemMapper knowledgeItemMapper,
                       KnowledgeChunkMapper knowledgeChunkMapper,
-                      double similarityThreshold, int topK) {
+                      @Value("${agent.rag.similarity-threshold:0.80}") double similarityThreshold,
+                      @Value("${agent.rag.top-k:5}") int topK) {
         this.embeddingService = embeddingService;
         this.chatModel = chatModel;
         this.knowledgeItemMapper = knowledgeItemMapper;

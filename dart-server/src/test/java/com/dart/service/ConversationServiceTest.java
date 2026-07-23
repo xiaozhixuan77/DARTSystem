@@ -134,7 +134,7 @@ class ConversationServiceTest {
         assertThatThrownBy(() -> conversationService.updateConversation(USER_ID, 200L, req))
                 .isInstanceOf(BusinessException.class)
                 .extracting(ex -> ((BusinessException) ex).getErrorCode())
-                .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+                .isEqualTo(ErrorCode.FORBIDDEN);
     }
 
     // === deleteConversation ===
@@ -202,7 +202,7 @@ class ConversationServiceTest {
         assertThatThrownBy(() -> conversationService.deleteConversation(USER_ID, 300L))
                 .isInstanceOf(BusinessException.class)
                 .extracting(ex -> ((BusinessException) ex).getErrorCode())
-                .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+                .isEqualTo(ErrorCode.FORBIDDEN);
     }
 
     @Test
@@ -215,6 +215,6 @@ class ConversationServiceTest {
         assertThatThrownBy(() -> conversationService.getMessages(USER_ID, 400L))
                 .isInstanceOf(BusinessException.class)
                 .extracting(ex -> ((BusinessException) ex).getErrorCode())
-                .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+                .isEqualTo(ErrorCode.FORBIDDEN);
     }
 }

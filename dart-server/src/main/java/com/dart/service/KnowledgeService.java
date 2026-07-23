@@ -39,8 +39,11 @@ public class KnowledgeService {
 
     public KnowledgeDetailVO getKnowledgeDetail(Long userId, Long knowledgeId) {
         KnowledgeItem item = knowledgeItemMapper.selectById(knowledgeId);
-        if (item == null || !item.getUserId().equals(userId) || item.getIsDeleted() != 0) {
+        if (item == null) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_NOT_FOUND);
+        }
+        if (!item.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
         }
 
         QueryWrapper<KnowledgeChunk> chunkQuery = new QueryWrapper<>();
@@ -52,12 +55,13 @@ public class KnowledgeService {
 
     public void deleteKnowledge(Long userId, Long knowledgeId) {
         KnowledgeItem item = knowledgeItemMapper.selectById(knowledgeId);
-        if (item == null || !item.getUserId().equals(userId)) {
+        if (item == null) {
             throw new BusinessException(ErrorCode.KNOWLEDGE_NOT_FOUND);
         }
-        item.setIsDeleted(1);
-        item.setUpdatedAt(LocalDateTime.now());
-        knowledgeItemMapper.updateById(item);
+        if (!item.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        knowledgeItemMapper.deleteById(item.getId());
     }
 
     public boolean existsBySourceUrl(String sourceUrlHash) {

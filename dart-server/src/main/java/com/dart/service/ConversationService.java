@@ -90,8 +90,11 @@ public class ConversationService {
                                    ConversationUpsertRequest request) {
         validateUserId(userId);
         Conversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || !conversation.getUserId().equals(userId)) {
+        if (conversation == null) {
             throw new BusinessException(ErrorCode.CONVERSATION_NOT_FOUND);
+        }
+        if (!conversation.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
         }
 
         if (request.getTitle() != null) {
@@ -109,8 +112,11 @@ public class ConversationService {
     public void deleteConversation(Long userId, Long conversationId) {
         validateUserId(userId);
         Conversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || !conversation.getUserId().equals(userId)) {
+        if (conversation == null) {
             throw new BusinessException(ErrorCode.CONVERSATION_NOT_FOUND);
+        }
+        if (!conversation.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
         }
 
         conversation.setIsDeleted(1);
@@ -122,8 +128,11 @@ public class ConversationService {
     public List<MessageVO> getMessages(Long userId, Long conversationId) {
         validateUserId(userId);
         Conversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || !conversation.getUserId().equals(userId)) {
+        if (conversation == null) {
             throw new BusinessException(ErrorCode.CONVERSATION_NOT_FOUND);
+        }
+        if (!conversation.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
         }
 
         QueryWrapper<Message> query = new QueryWrapper<>();

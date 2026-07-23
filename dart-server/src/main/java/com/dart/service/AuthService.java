@@ -75,7 +75,7 @@ public class AuthService {
         return new RegisterResponse(user.getId(), user.getUsername());
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public LoginResponse login(LoginRequest request) {
         QueryWrapper<User> query = new QueryWrapper<>();
         query.eq("username", request.getUsername());
