@@ -26,7 +26,7 @@ public abstract class BaseIntegrationTest {
 
     private static final List<String> TABLES = List.of(
             "knowledge_chunk", "knowledge_item", "message",
-            "refresh_token", "conversation", "users"
+            "refresh_token", "conversation", "`user`"
     );
 
     @Autowired
