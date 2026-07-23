@@ -8,13 +8,14 @@ spring:
     active: dev
   autoconfigure:
     exclude:
-      # Spring AI 2.0.0
+      # Spring AI 2.0.0 auto-config（RetryTemplate/RetryPolicy/RetryListener 类路径问题 + Jackson 3.x 不兼容）
+      # 由 AiModelConfig 手动创建 ChatModel / EmbeddingModel Bean
       - org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
       - org.springframework.ai.model.embedding.observation.autoconfigure.EmbeddingObservationAutoConfiguration
       - org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration
       - org.springframework.ai.autoconfigure.vectorstore.redis.RedisVectorStoreAutoConfiguration
-      # Spring Boot 3.4.1 新包路径（与旧路径 autoconfigure 类冲突，需定向排除）
+      # Spring Boot 3.4.1 新包路径（与旧路径 autoconfigure 类冲突）
       - org.springframework.boot.http.client.autoconfigure.reactive.ReactiveHttpClientAutoConfiguration
       - org.springframework.boot.http.client.autoconfigure.HttpClientAutoConfiguration
       - org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration
@@ -35,7 +36,7 @@ spring:
     model:
       chat: deepseek
     deepseek:
-      api-key: ${DEEPSEEK_API_KEY}
+      api-key: ${DEEPSEEK_API_KEY:sk-placeholder}
       base-url: https://api.deepseek.com
       chat:
         options:
@@ -43,7 +44,7 @@ spring:
           temperature: 0.7
           max-tokens: 4096
     openai:
-      api-key: ${OPENAI_API_KEY}
+      api-key: ${OPENAI_API_KEY:sk-placeholder}
       base-url: https://api.openai.com
       embedding:
         options:
@@ -77,7 +78,7 @@ mybatis-plus:
 
 # JWT
 jwt:
-  secret: ${JWT_SECRET}
+  secret: ${JWT_SECRET:ZGV2LWRlZmF1bHQtc2VjcmV0LWZvci1sb2NhbC1kZXZlbG9wbWVudC1vbmx5LW5vdC1mb3ItcHJvZHVjdGlvbg==}
   access-token-expiration: 7200
   refresh-token-expiration: 604800
 
