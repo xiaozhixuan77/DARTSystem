@@ -14,10 +14,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingRequest;
-import org.springframework.ai.embedding.EmbeddingResponse;
-import org.springframework.ai.embedding.EmbeddingResponseMetadata;
+
+import static org.mockito.ArgumentMatchers.any;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.data.redis.core.RedisCallback;
@@ -292,15 +291,6 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
     }
 
     // ────────── 辅助方法 ──────────
-
-    private void mockEmbedding() {
-        float[] vec = new float[1536];
-        for (int i = 0; i < vec.length; i++) vec[i] = 0.01f;
-        var response = new EmbeddingResponse(
-                List.of(new Embedding(vec, 0)),
-                new EmbeddingResponseMetadata());
-        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(response);
-    }
 
     private Set<String> waitForRedisKeys(long timeoutMs) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;

@@ -1,13 +1,20 @@
 package com.dart.integration;
 
+import com.dart.config.JwtProperties;
 import com.dart.entity.User;
 import com.dart.mapper.UserMapper;
 import com.dart.security.JwtTokenProvider;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.util.Date;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -22,6 +29,9 @@ class SecurityIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private JwtProperties jwtProperties;
 
     @Autowired
     private UserMapper userMapper;
@@ -110,6 +120,32 @@ class SecurityIntegrationTest extends BaseIntegrationTest {
                         .content("{\"username\":\"sec4\",\"password\":\"pass123\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
+    }
+
+    @Test
+    @DisplayName("过期 Access Token 被拒绝")
+    void expiredAccessTokenIsRejected() throws Exception {
+        registerUser("sec6", "pass123");
+        Long userId = getUserId("sec6");
+
+        // 构造一个 1 小时前过期的 JWT
+        Date now = new Date();
+        Date issuedAt = new Date(now.getTime() - 7200_000L);
+        Date expiredAt = new Date(now.getTime() - 3600_000L);
+        var secretKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtProperties.getSecret()));
+        String expiredToken = Jwts.builder()
+                .id(UUID.randomUUID().toString())
+                .subject(userId.toString())
+                .claim("username", "sec6")
+                .claim("type", "access")
+                .issuedAt(issuedAt)
+                .expiration(expiredAt)
+                .signWith(secretKey)
+                .compact();
+
+        mockMvc.perform(get("/api/conversations")
+                        .header("Authorization", "Bearer " + expiredToken))
+                .andExpect(status().is4xxClientError());
     }
 
     @Test

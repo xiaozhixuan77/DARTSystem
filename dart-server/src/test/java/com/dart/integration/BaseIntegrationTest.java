@@ -6,7 +6,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.embedding.EmbeddingRequest;
+import org.springframework.ai.embedding.EmbeddingResponse;
+import org.springframework.ai.embedding.EmbeddingResponseMetadata;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,6 +25,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -107,5 +113,25 @@ public abstract class BaseIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn().getResponse().getContentAsString();
+    }
+
+    /**
+     * Mock EmbeddingModel 返回统一填充值的 1536 维向量（默认 0.01f）。
+     */
+    protected void mockEmbedding() {
+        mockEmbedding(0.01f);
+    }
+
+    /**
+     * Mock EmbeddingModel 返回指定填充值的 1536 维向量。
+     * 同一向量多次调用产生余弦相似度 1.0（RAG 命中测试用）。
+     */
+    protected void mockEmbedding(float fillValue) {
+        float[] vec = new float[1536];
+        for (int i = 0; i < vec.length; i++) vec[i] = fillValue;
+        var response = new EmbeddingResponse(
+                List.of(new Embedding(vec, 0)),
+                new EmbeddingResponseMetadata());
+        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(response);
     }
 }

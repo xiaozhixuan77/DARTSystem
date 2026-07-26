@@ -15,10 +15,6 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.embedding.Embedding;
-import org.springframework.ai.embedding.EmbeddingRequest;
-import org.springframework.ai.embedding.EmbeddingResponse;
-import org.springframework.ai.embedding.EmbeddingResponseMetadata;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -92,13 +88,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     void ragHitSkipsSearchAndReturnsAnswer() {
         Long userId = createTestUser();
 
-        // 使用统一向量确保余弦相似度 = 1.0
-        float[] vec = new float[1536];
-        for (int i = 0; i < vec.length; i++) vec[i] = 0.02f;
-        var embedResponse = new EmbeddingResponse(
-                List.of(new Embedding(vec, 0)),
-                new EmbeddingResponseMetadata());
-        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(embedResponse);
+        mockEmbedding(0.02f);
 
         ScoredResource scores = new ScoredResource("http://example.com/rag", "RAG Entry",
                 "RAG content for matching test with sufficient length.", 4, 4, 4, 4, 4.0);
@@ -106,9 +96,9 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                 "RAG content for matching test with sufficient length.",
                 "http://example.com/rag", scores);
 
-        // 重置 EmbeddingModel 仍返回相同向量 → 余弦相似度 1.0 ≥ 0.80
+        // 重置后仍返回相同向量 → 余弦相似度 1.0 ≥ 0.80
         Mockito.reset(embeddingModel);
-        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(embedResponse);
+        mockEmbedding(0.02f);
 
         // ChatModel: 第一次 isTechQuery→YES, 第二次 generateAnswer
         when(chatModel.call(any(Prompt.class)))
@@ -132,12 +122,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
         Long userId = createTestUser();
 
         // RAG 无匹配数据 → 走搜索流程
-        float[] vec = new float[1536];
-        for (int i = 0; i < vec.length; i++) vec[i] = 0.01f;
-        var embedResponse = new EmbeddingResponse(
-                List.of(new Embedding(vec, 0)),
-                new EmbeddingResponseMetadata());
-        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(embedResponse);
+        mockEmbedding();
 
         // SearXNG 返回 2 条结果
         when(searXNGClient.search(anyString(), anyInt()))
@@ -180,11 +165,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     void curatorLlmFailureReturnsFallbackReport() {
         Long userId = createTestUser();
 
-        float[] vec = new float[1536];
-        var embedResponse = new EmbeddingResponse(
-                List.of(new Embedding(vec, 0)),
-                new EmbeddingResponseMetadata());
-        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(embedResponse);
+        mockEmbedding();
 
         when(searXNGClient.search(anyString(), anyInt()))
                 .thenReturn(List.of(
@@ -225,11 +206,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     void searxngExceptionGracefulDegradation() {
         Long userId = createTestUser();
 
-        float[] vec = new float[1536];
-        var embedResponse = new EmbeddingResponse(
-                List.of(new Embedding(vec, 0)),
-                new EmbeddingResponseMetadata());
-        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(embedResponse);
+        mockEmbedding();
 
         when(searXNGClient.search(anyString(), anyInt()))
                 .thenThrow(new RuntimeException("SearXNG connection refused"));
@@ -252,11 +229,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     void emptySearchResultsReturnsError() {
         Long userId = createTestUser();
 
-        float[] vec = new float[1536];
-        var embedResponse = new EmbeddingResponse(
-                List.of(new Embedding(vec, 0)),
-                new EmbeddingResponseMetadata());
-        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(embedResponse);
+        mockEmbedding();
 
         when(searXNGClient.search(anyString(), anyInt())).thenReturn(List.of());
 

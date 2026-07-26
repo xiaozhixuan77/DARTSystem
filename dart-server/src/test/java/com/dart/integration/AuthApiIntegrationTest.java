@@ -9,6 +9,8 @@ import com.dart.mapper.RefreshTokenMapper;
 import com.dart.mapper.UserMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 
@@ -70,10 +72,11 @@ class AuthApiIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.code").value(400));
     }
 
-    @Test
-    @DisplayName("密码过短")
-    void registerWithShortPasswordReturns400() throws Exception {
-        var req = newRegisterRequest("charlie", "12");
+    @ParameterizedTest
+    @ValueSource(strings = {"", "1", "ab", "12345"})
+    @DisplayName("过短或空密码被拒绝")
+    void registerWithTooShortPasswordReturns400(String password) throws Exception {
+        var req = newRegisterRequest("charlie" + password.hashCode(), password);
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
