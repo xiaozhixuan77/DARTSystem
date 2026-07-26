@@ -102,6 +102,10 @@ agent:
     similarity-threshold: 0.80
     top-k: 5
 
+# SearXNG
+searxng:
+  base-url: http://localhost:8080
+
 # Knife4j
 springdoc:
   swagger-ui:

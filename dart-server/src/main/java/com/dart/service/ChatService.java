@@ -4,6 +4,7 @@ import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.curator.CuratorAgent;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
+import com.dart.entity.Message;
 import com.dart.exception.ErrorCode;
 import com.dart.mapper.MessageMapper;
 import com.dart.util.SseEvents;
@@ -14,9 +15,11 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -60,38 +63,63 @@ public class ChatService {
     /**
      * 执行完整的搜索-整理流程（供 SSE 端点调用）。
      */
-    public SearchResult executeSearchAndCurate(String query, Long userId, SseEmitter emitter) {
+    @Transactional
+    public SearchResult executeSearchAndCurate(String query, Long userId,
+                                                Long conversationId, SseEmitter emitter) {
+        // 1. 持久化用户消息
+        Message userMsg = new Message();
+        userMsg.setConversationId(conversationId);
+        userMsg.setRole("user");
+        userMsg.setContent(query);
+        userMsg.setCreatedAt(LocalDateTime.now());
+        messageMapper.insert(userMsg);
+
+        // 2. 领域过滤
         if (!isTechQuery(query)) {
             SseUtils.sendError(emitter, ErrorCode.NON_TECH_QUERY.getCode(),
                     ErrorCode.NON_TECH_QUERY.getMessage());
-            return SearchResult.searchResult(errorReport(ErrorCode.NON_TECH_QUERY.getMessage()), List.of());
+            SearchResult errorResult = SearchResult.searchResult(
+                    errorReport(ErrorCode.NON_TECH_QUERY.getMessage()), List.of());
+            persistAssistantMessage(conversationId, errorResult);
+            return errorResult;
         }
 
+        // 3. RAG 检查
         SseUtils.sendStatus(emitter, "rag_check", "正在检查知识库...");
         Optional<RagService.RagResult> ragResult = ragService.retrieve(query, userId);
         if (ragResult.isPresent()) {
-            return SearchResult.ragHit(ragResult.get());
+            SearchResult result = SearchResult.ragHit(ragResult.get());
+            persistAssistantMessage(conversationId, result);
+            return result;
         }
 
+        // 4. Search Agent
         List<ScoredResource> searchResults;
         try {
             searchResults = searchAgent.execute(query, 8, emitter);
         } catch (Exception e) {
             log.error("Search Agent 异常", e);
-            SseUtils.sendError(emitter, ErrorCode.AGENT_EXECUTION_ERROR.getCode(), "搜索服务暂时不可用，请稍后重试");
-            return SearchResult.searchResult(errorReport("搜索服务暂时不可用，请稍后重试"), List.of());
+            SseUtils.sendError(emitter, ErrorCode.AGENT_EXECUTION_ERROR.getCode(),
+                    "搜索服务暂时不可用，请稍后重试");
+            SearchResult errorResult = SearchResult.searchResult(
+                    errorReport("搜索服务暂时不可用，请稍后重试"), List.of());
+            persistAssistantMessage(conversationId, errorResult);
+            return errorResult;
         }
 
         if (searchResults.isEmpty()) {
             SseUtils.sendError(emitter, ErrorCode.NO_QUALITY_RESULTS.getCode(),
                     ErrorCode.NO_QUALITY_RESULTS.getMessage());
-            return SearchResult.searchResult(
+            SearchResult emptyResult = SearchResult.searchResult(
                     new CuratedReport(query,
                             "# " + query + "\n\n未找到高质量资源，请尝试更换关键词。",
                             List.of(), Instant.now()),
                     List.of());
+            persistAssistantMessage(conversationId, emptyResult);
+            return emptyResult;
         }
 
+        // 5. Curator Agent
         CuratedReport report;
         try {
             report = curatorAgent.curate(query, searchResults, emitter);
@@ -104,7 +132,42 @@ public class ChatService {
                     Instant.now());
         }
 
-        return SearchResult.searchResult(report, searchResults);
+        SearchResult result = SearchResult.searchResult(report, searchResults);
+        persistAssistantMessage(conversationId, result);
+        return result;
+    }
+
+    private void persistAssistantMessage(Long conversationId, SearchResult result) {
+        try {
+            Message assistantMsg = new Message();
+            assistantMsg.setConversationId(conversationId);
+            assistantMsg.setRole("assistant");
+            if (result.isRagHit()) {
+                assistantMsg.setContent(result.ragAnswer().answer());
+                assistantMsg.setMetadata("{\"type\":\"rag\"," +
+                        "\"sources\":" + toJsonArray(result.ragAnswer().sourceUrls()) + "}");
+            } else if (result.curatedReport() != null) {
+                assistantMsg.setContent(result.curatedReport().markdown());
+                assistantMsg.setMetadata("{\"type\":\"search\"," +
+                        "\"sources\":" + toJsonArray(result.curatedReport().sources()) +
+                        ",\"resultCount\":" + result.searchResults().size() + "}");
+            }
+            assistantMsg.setCreatedAt(LocalDateTime.now());
+            messageMapper.insert(assistantMsg);
+        } catch (Exception e) {
+            log.error("保存助手消息失败", e);
+        }
+    }
+
+    private static String toJsonArray(List<String> urls) {
+        if (urls == null || urls.isEmpty()) return "[]";
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < urls.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append("\"").append(urls.get(i).replace("\"", "\\\"")).append("\"");
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     /**

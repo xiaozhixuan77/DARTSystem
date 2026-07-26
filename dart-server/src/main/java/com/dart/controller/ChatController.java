@@ -1,7 +1,10 @@
 package com.dart.controller;
 
 import com.dart.dto.request.ChatRequest;
+import com.dart.dto.request.ConversationUpsertRequest;
+import com.dart.dto.response.ConversationVO;
 import com.dart.service.ChatService;
+import com.dart.service.ConversationService;
 import com.dart.util.SecurityUtils;
 import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
@@ -14,21 +17,34 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * 聊天 SSE 流式端点。
- */
 @RestController
 @RequestMapping("/api/chat")
 @RequiredArgsConstructor
 public class ChatController {
 
     private final ChatService chatService;
+    private final ConversationService conversationService;
 
     @PostMapping(value = "/send", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter send(@Valid @RequestBody ChatRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
         SseEmitter emitter = SseUtils.createEmitter(300_000L);
         AtomicBoolean completed = new AtomicBoolean(false);
+
+        // 处理 conversationId：为 null 时自动创建新会话
+        Long conversationId = request.getConversationId();
+        if (conversationId == null) {
+            ConversationVO newConv = conversationService.createConversation(userId);
+            conversationId = newConv.getId();
+            String title = request.getMessage().length() > 50
+                    ? request.getMessage().substring(0, 50)
+                    : request.getMessage();
+            ConversationUpsertRequest convReq = new ConversationUpsertRequest();
+            convReq.setTitle(title);
+            conversationService.updateConversation(userId, conversationId, convReq);
+        }
+
+        final Long finalConversationId = conversationId;
 
         emitter.onCompletion(() -> completed.set(true));
         emitter.onTimeout(() -> completed.set(true));
@@ -37,7 +53,7 @@ public class ChatController {
         Thread.startVirtualThread(() -> {
             try {
                 ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                        request.getMessage(), userId, emitter);
+                        request.getMessage(), userId, finalConversationId, emitter);
 
                 if (completed.get()) return;
 
@@ -49,7 +65,8 @@ public class ChatController {
                 }
 
                 if (!completed.get()) {
-                    SseUtils.sendEvent(emitter, SseEvents.DONE, Map.of("status", "complete"));
+                    SseUtils.sendEvent(emitter, SseEvents.DONE,
+                            Map.of("status", "complete", "conversationId", finalConversationId));
                     SseUtils.completeSafe(emitter);
                 }
             } catch (Exception e) {

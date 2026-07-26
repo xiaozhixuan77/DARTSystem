@@ -51,9 +51,18 @@ public class RagService {
         try {
             float[] queryVec = embeddingService.embed(query);
 
+            // 先查询用户的知识条目 ID，避免 SQL 注入
+            QueryWrapper<KnowledgeItem> itemQuery = new QueryWrapper<>();
+            itemQuery.select("id").eq("user_id", userId).eq("is_deleted", 0);
+            List<Long> userItemIds = knowledgeItemMapper.selectList(itemQuery)
+                    .stream().map(KnowledgeItem::getId).toList();
+
+            if (userItemIds.isEmpty()) {
+                return Optional.empty();
+            }
+
             QueryWrapper<KnowledgeChunk> wrapper = new QueryWrapper<>();
-            wrapper.inSql("knowledge_item_id",
-                    "SELECT id FROM knowledge_item WHERE user_id = " + userId + " AND is_deleted = 0");
+            wrapper.in("knowledge_item_id", userItemIds);
             wrapper.last("LIMIT " + topK);
             List<KnowledgeChunk> chunks = knowledgeChunkMapper.selectList(wrapper);
 

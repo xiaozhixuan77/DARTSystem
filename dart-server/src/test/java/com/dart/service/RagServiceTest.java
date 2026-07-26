@@ -48,6 +48,10 @@ class RagServiceTest {
     void retrieve_withNoChunks_returnsEmpty() {
         float[] emb = new float[1536];
         lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
+        // 用户有知识条目但无 chunk
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        lenient().when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of());
 
         Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
@@ -60,6 +64,15 @@ class RagServiceTest {
         java.util.Arrays.fill(emb, 1.0f);
         when(embeddingService.embed(anyString())).thenReturn(emb);
 
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("Spring Boot Guide");
+        item.setSourceUrl("https://spring.io");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setKnowledgeItemId(1L);
         chunk.setChunkText("Spring Boot 教程内容");
@@ -67,14 +80,6 @@ class RagServiceTest {
         chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
                 EmbeddingService.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
-
-        KnowledgeItem item = new KnowledgeItem();
-        item.setId(1L);
-        item.setUserId(1L);
-        item.setTitle("Spring Boot Guide");
-        item.setSourceUrl("https://spring.io");
-        item.setIsDeleted(0);
-        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
 
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
         when(chatResponse.getResults()).thenReturn(List.of(
@@ -88,7 +93,9 @@ class RagServiceTest {
     void retrieve_withNoMatchingChunks_returnsEmpty() {
         float[] emb = new float[1536];
         lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
-        // embed() 第二次调用返回不同的向量
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        lenient().when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of());
 
         Optional<RagService.RagResult> result = ragService.retrieve("unknown query", 1L);
