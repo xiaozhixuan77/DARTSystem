@@ -49,13 +49,16 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("非技术查询返回 NON_TECH_QUERY 错误")
     void nonTechQueryReturnsError() {
+        Long userId = createTestUser();
+        Long convId = createTestConversation(userId);
+
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("NO")))));
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "今天天气怎么样", 1L, emitter);
+                "今天天气怎么样", userId, convId, emitter);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
@@ -87,6 +90,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     @DisplayName("RAG 命中时跳过搜索直接返回知识库答案")
     void ragHitSkipsSearchAndReturnsAnswer() {
         Long userId = createTestUser();
+        Long convId = createTestConversation(userId);
 
         mockEmbedding(0.02f);
 
@@ -109,7 +113,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "技术问题", userId, emitter);
+                "技术问题", userId, convId, emitter);
 
         assertThat(result.isRagHit()).isTrue();
         assertThat(result.ragAnswer()).isNotNull();
@@ -120,6 +124,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     @DisplayName("RAG 未命中 → 完整搜索→评分→整理流程")
     void fullSearchFlowWhenRagMisses() {
         Long userId = createTestUser();
+        Long convId = createTestConversation(userId);
 
         // RAG 无匹配数据 → 走搜索流程
         mockEmbedding();
@@ -153,7 +158,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "Spring Boot 配置", userId, emitter);
+                "Spring Boot 配置", userId, convId, emitter);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
@@ -164,6 +169,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     @DisplayName("Curator LLM 失败时降级返回 fallback 资源列表")
     void curatorLlmFailureReturnsFallbackReport() {
         Long userId = createTestUser();
+        Long convId = createTestConversation(userId);
 
         mockEmbedding();
 
@@ -190,7 +196,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "Spring Boot 配置", userId, emitter);
+                "Spring Boot 配置", userId, convId, emitter);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
@@ -205,6 +211,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     @DisplayName("SearXNG 搜索异常时 SearchAgent 内部降级返回空结果")
     void searxngExceptionGracefulDegradation() {
         Long userId = createTestUser();
+        Long convId = createTestConversation(userId);
 
         mockEmbedding();
 
@@ -217,7 +224,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "Spring Boot 配置", userId, emitter);
+                "Spring Boot 配置", userId, convId, emitter);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
@@ -228,6 +235,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     @DisplayName("搜索结果为空时返回 NO_QUALITY_RESULTS 错误")
     void emptySearchResultsReturnsError() {
         Long userId = createTestUser();
+        Long convId = createTestConversation(userId);
 
         mockEmbedding();
 
@@ -239,7 +247,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "冷门技术问题", userId, emitter);
+                "冷门技术问题", userId, convId, emitter);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();

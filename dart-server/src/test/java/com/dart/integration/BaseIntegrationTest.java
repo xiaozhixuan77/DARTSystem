@@ -1,6 +1,8 @@
 package com.dart.integration;
 
+import com.dart.entity.Conversation;
 import com.dart.entity.User;
+import com.dart.mapper.ConversationMapper;
 import com.dart.mapper.UserMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,6 +64,9 @@ public abstract class BaseIntegrationTest {
     private UserMapper userMapper;
 
     @Autowired
+    private ConversationMapper conversationMapper;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Autowired
@@ -86,6 +91,17 @@ public abstract class BaseIntegrationTest {
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.insert(user);
         return user.getId();
+    }
+
+    protected Long createTestConversation(Long userId) {
+        Conversation conv = new Conversation();
+        conv.setUserId(userId);
+        conv.setTitle("测试会话");
+        conv.setIsDeleted(0);
+        conv.setCreatedAt(LocalDateTime.now());
+        conv.setUpdatedAt(LocalDateTime.now());
+        conversationMapper.insert(conv);
+        return conv.getId();
     }
 
     protected void registerUser(String username, String password) throws Exception {

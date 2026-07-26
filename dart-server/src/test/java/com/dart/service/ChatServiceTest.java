@@ -25,6 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.dart.entity.Message;
+
 @ExtendWith(MockitoExtension.class)
 class ChatServiceTest {
 
@@ -79,7 +81,7 @@ class ChatServiceTest {
         when(ragService.retrieve(eq("Spring Boot"), eq(1L)))
                 .thenReturn(Optional.of(new RagResult("# Spring Boot 详解", List.of("https://spring.io"))));
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
         assertThat(result.isRagHit()).isTrue();
         assertThat(result.ragAnswer().answer()).contains("Spring Boot");
         verify(searchAgent, never()).execute(anyString(), anyInt(), any());
@@ -94,7 +96,7 @@ class ChatServiceTest {
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
         verify(ragService).retrieve(eq("Spring Boot"), eq(1L));
@@ -107,7 +109,7 @@ class ChatServiceTest {
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
         when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of());
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("obscure query", 1L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("obscure query", 1L, 100L, emitter);
         assertThat(result.ragAnswer()).isNull();
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).contains("未找到");
@@ -120,7 +122,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyString(), anyInt(), any()))
                 .thenThrow(new RuntimeException("network error"));
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("query", 1L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("query", 1L, 100L, emitter);
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).contains("不可用");
     }
