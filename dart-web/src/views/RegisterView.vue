@@ -73,5 +73,5 @@ async function handleSubmit(data: { username: string; password: string; confirmP
 </template>
 
 <style lang="scss" scoped>
-@import '@/assets/styles/auth.scss';
+@use '@/assets/styles/auth.scss';
 </style>
