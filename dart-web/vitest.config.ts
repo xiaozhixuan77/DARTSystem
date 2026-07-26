@@ -13,6 +13,7 @@ export default defineConfig({
     environment: 'happy-dom',
     globals: true,
     css: true,
+    exclude: ['e2e/**', 'node_modules/**'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,vue}'],
