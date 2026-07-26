@@ -7,12 +7,10 @@ import com.dart.dto.request.RegisterRequest;
 import com.dart.entity.User;
 import com.dart.mapper.RefreshTokenMapper;
 import com.dart.mapper.UserMapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -21,12 +19,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class AuthApiIntegrationTest extends BaseIntegrationTest {
-
-    @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Autowired
     private UserMapper userMapper;
@@ -232,24 +224,4 @@ class AuthApiIntegrationTest extends BaseIntegrationTest {
         return req;
     }
 
-    // ────────── 辅助方法 ──────────
-
-    private void registerUser(String username, String password) throws Exception {
-        var req = newRegisterRequest(username, password);
-        mockMvc.perform(post("/api/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200));
-    }
-
-    private String loginAndGetResponse(String username, String password) throws Exception {
-        var req = newLoginRequest(username, password);
-        return mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andReturn().getResponse().getContentAsString();
-    }
 }

@@ -176,6 +176,78 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisplayName("Curator LLM 失败时降级返回 fallback 资源列表")
+    void curatorLlmFailureReturnsFallbackReport() {
+        Long userId = createTestUser();
+
+        float[] vec = new float[1536];
+        var embedResponse = new EmbeddingResponse(
+                List.of(new Embedding(vec, 0)),
+                new EmbeddingResponseMetadata());
+        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(embedResponse);
+
+        when(searXNGClient.search(anyString(), anyInt()))
+                .thenReturn(List.of(
+                        new SearchResult("http://example.com/a", "Resource A", "Snippet A"),
+                        new SearchResult("http://example.com/b", "Resource B", "Snippet B")));
+
+        when(pageFetcher.fetch(anyString()))
+                .thenReturn(new PageContent("http://example.com/a", "Resource A",
+                        "Detailed content about Spring Boot.", 800, 3, true, false, 2026))
+                .thenReturn(new PageContent("http://example.com/b", "Resource B",
+                        "Advanced Java tutorial covering dependency injection and Spring concepts in depth.", 600, 2, false, true, 2025));
+
+        // ChatModel 调用链: isTechQuery + 2×MatchScorer → report generation 抛异常
+        when(chatModel.call(any(Prompt.class)))
+                .thenReturn(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage("YES")))))
+                .thenReturn(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage("5")))))
+                .thenReturn(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage("5")))))
+                .thenThrow(new RuntimeException("LLM 报告生成超时"));
+
+        SseEmitter emitter = new SseEmitter();
+        ChatService.SearchResult result = chatService.executeSearchAndCurate(
+                "Spring Boot 配置", userId, emitter);
+
+        assertThat(result.isRagHit()).isFalse();
+        assertThat(result.curatedReport()).isNotNull();
+        assertThat(result.curatedReport().markdown())
+                .contains("AI 报告生成暂时不可用");
+        assertThat(result.curatedReport().markdown())
+                .contains("Resource A")
+                .contains("Resource B");
+    }
+
+    @Test
+    @DisplayName("SearXNG 搜索异常时 SearchAgent 内部降级返回空结果")
+    void searxngExceptionGracefulDegradation() {
+        Long userId = createTestUser();
+
+        float[] vec = new float[1536];
+        var embedResponse = new EmbeddingResponse(
+                List.of(new Embedding(vec, 0)),
+                new EmbeddingResponseMetadata());
+        when(embeddingModel.call(any(EmbeddingRequest.class))).thenReturn(embedResponse);
+
+        when(searXNGClient.search(anyString(), anyInt()))
+                .thenThrow(new RuntimeException("SearXNG connection refused"));
+
+        when(chatModel.call(any(Prompt.class)))
+                .thenReturn(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage("YES")))));
+
+        SseEmitter emitter = new SseEmitter();
+        ChatService.SearchResult result = chatService.executeSearchAndCurate(
+                "Spring Boot 配置", userId, emitter);
+
+        assertThat(result.isRagHit()).isFalse();
+        assertThat(result.curatedReport()).isNotNull();
+        assertThat(result.curatedReport().markdown()).contains("未找到高质量资源");
+    }
+
+    @Test
     @DisplayName("搜索结果为空时返回 NO_QUALITY_RESULTS 错误")
     void emptySearchResultsReturnsError() {
         Long userId = createTestUser();

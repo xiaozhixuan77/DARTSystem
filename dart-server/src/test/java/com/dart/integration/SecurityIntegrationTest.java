@@ -3,13 +3,11 @@ package com.dart.integration;
 import com.dart.entity.User;
 import com.dart.mapper.UserMapper;
 import com.dart.security.JwtTokenProvider;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -18,12 +16,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class SecurityIntegrationTest extends BaseIntegrationTest {
-
-    @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -129,24 +121,6 @@ class SecurityIntegrationTest extends BaseIntegrationTest {
         mockMvc.perform(get("/api/knowledge/99999")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(jsonPath("$.code").value(5001));
-    }
-
-    private void registerUser(String username, String password) throws Exception {
-        mockMvc.perform(post("/api/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200));
-    }
-
-    private String loginAndGetAccessToken(String username, String password) throws Exception {
-        String resp = mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andReturn().getResponse().getContentAsString();
-        return objectMapper.readTree(resp).get("data").get("accessToken").asText();
     }
 
     private Long getUserId(String username) {
