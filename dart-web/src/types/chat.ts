@@ -11,7 +11,7 @@ export interface MessageVO {
   id: number
   role: 'user' | 'assistant' | 'system'
   content: string
-  metadata: MessageMetadata | null
+  metadata?: MessageMetadata | null
   createdAt: string
 }
 
@@ -37,5 +37,8 @@ export interface ScoreData {
 
 export interface SSEEvent {
   event: 'status' | 'search_result' | 'score' | 'content' | 'done' | 'error'
-  data: any
+  data?: unknown
+  status?: string
+  message?: string
+  code?: number
 }

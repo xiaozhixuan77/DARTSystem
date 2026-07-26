@@ -1,14 +1,14 @@
 export interface KnowledgeItemVO {
-  id: number
+  id?: number
   title: string
-  summary: string
-  sourceUrl: string
-  tags: string[]
-  scoreT: number
-  scoreA: number
-  scoreD: number
-  scoreM: number
-  createdAt: string
+  sourceUrl?: string
+  tags?: string
+  scoreT?: number
+  scoreA?: number
+  scoreD?: number
+  scoreM?: number
+  weightedScore?: number
+  createdAt?: string
 }
 
 export interface KnowledgeItemDetail {

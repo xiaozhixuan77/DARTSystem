@@ -1,22 +1,60 @@
-// Element Plus SCSS 变量覆盖
-// 主色：科技蓝 → 偏紫，体现 AI/智能感
+// DART Design Tokens — OKLch 色彩空间
+// 来源：资料/原型/design-tokens.md + dart-auth-prototype.html
+
+// ─── 核心色 ────────────────────────────────────────────
+$color-bg: oklch(97.5% 0.005 270);
+$color-surface: oklch(100% 0 0);
+$color-fg: oklch(18% 0.03 285);
+$color-muted: oklch(52% 0.02 270);
+$color-border: oklch(90% 0.01 270);
+
+// ─── 强调色 (Utility Blue) ─────────────────────────────
+$color-accent: oklch(58% 0.24 270);
+$color-accent-light: oklch(66% 0.2 270);
+$color-accent-soft: oklch(96% 0.015 270);
+$color-accent-dark: oklch(49% 0.19 270);
+
+// ─── 语义色 ────────────────────────────────────────────
+$color-success: oklch(65% 0.22 145);
+$color-success-soft: oklch(94% 0.05 145);
+$color-warning: oklch(72% 0.19 85);
+$color-warning-soft: oklch(95% 0.04 85);
+$color-danger: oklch(65% 0.22 25);
+$color-danger-soft: oklch(94% 0.05 25);
+
+// ─── 字体 ──────────────────────────────────────────────
+$font-display: 'Iowan Old Style', 'Charter', 'Georgia', 'Songti SC', 'STSong', serif;
+$font-body: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+$font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+// ─── Element Plus 色板覆盖 ─────────────────────────────
 $--el-color-primary: #5B5FEB;
 $--el-color-primary-light-3: #7B7EF0;
 $--el-color-primary-light-5: #A5A6F5;
 $--el-color-primary-dark-2: #484BC4;
-
-// 功能色
 $--el-color-success: #52C41A;
 $--el-color-warning: #FAAD14;
 $--el-color-danger: #FF4D4F;
 $--el-color-info: #909399;
-
-// 背景色
 $--el-bg-color: #F8F9FC;
 $--el-bg-color-overlay: #FFFFFF;
-
-// 字体
 $--el-font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-
-// 圆角
 $--el-border-radius-base: 8px;
+
+// ─── 布局尺寸 ──────────────────────────────────────────
+$sidebar-width: 260px;
+$panel-width: 320px;
+$header-height: 56px;
+
+// ─── 圆角与间距 ────────────────────────────────────────
+$radius: 8px;
+$radius-lg: 12px;
+$gap-md: 16px;
+$gap-lg: 24px;
+$gap-xl: 40px;
+
+// ─── 动效 ──────────────────────────────────────────────
+$ease-out: cubic-bezier(0.2, 0, 0, 1);
+$duration-fast: 0.15s;
+$duration-enter: 0.4s;
+$stagger: 0.06s;
