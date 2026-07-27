@@ -9,6 +9,13 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
     },
   },
+  css: {
+    preprocessorOptions: {
+      scss: {
+        additionalData: `@use "@/assets/styles/variables.scss" as *;`,
+      },
+    },
+  },
   test: {
     environment: 'happy-dom',
     globals: true,
