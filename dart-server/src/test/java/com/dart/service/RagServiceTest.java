@@ -46,7 +46,7 @@ class RagServiceTest {
 
     @Test
     void retrieve_withNoChunks_returnsEmpty() {
-        float[] emb = new float[1536];
+        float[] emb = new float[1024];
         lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
         // 用户有知识条目但无 chunk
         KnowledgeItem item = new KnowledgeItem();
@@ -60,7 +60,7 @@ class RagServiceTest {
 
     @Test
     void retrieve_withMatchingChunks_returnsResult() {
-        float[] emb = new float[1536];
+        float[] emb = new float[1024];
         java.util.Arrays.fill(emb, 1.0f);
         when(embeddingService.embed(anyString())).thenReturn(emb);
 
@@ -91,7 +91,7 @@ class RagServiceTest {
 
     @Test
     void retrieve_withNoMatchingChunks_returnsEmpty() {
-        float[] emb = new float[1536];
+        float[] emb = new float[1024];
         lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
         KnowledgeItem item = new KnowledgeItem();
         item.setId(1L);

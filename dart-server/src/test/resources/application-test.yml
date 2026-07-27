@@ -33,6 +33,10 @@ spring:
       api-key: test-key-not-real
     openai:
       api-key: test-key-not-real
+      base-url: https://api.siliconflow.cn
+      embedding:
+        options:
+          model: BAAI/bge-m3
 
   data:
     redis:

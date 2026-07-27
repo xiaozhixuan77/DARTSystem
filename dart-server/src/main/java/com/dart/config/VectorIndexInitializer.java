@@ -19,7 +19,7 @@ public class VectorIndexInitializer implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         log.info("向量索引初始化器已注册");
         log.info("请确保 Redis Stack 索引已创建: FT.CREATE idx:knowledge_vector "
-                + "ON HASH PREFIX 1 dart:chunk: SCHEMA embedding VECTOR HNSW 6 DIM 1536 "
+                + "ON HASH PREFIX 1 dart:chunk: SCHEMA embedding VECTOR HNSW 6 DIM 1024 "
                 + "DISTANCE_METRIC COSINE TYPE FLOAT32");
     }
 }

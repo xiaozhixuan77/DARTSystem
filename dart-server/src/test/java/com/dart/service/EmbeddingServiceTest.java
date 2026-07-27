@@ -57,15 +57,15 @@ class EmbeddingServiceTest {
     }
 
     @Test
-    void embed_returns1536DimVector() {
-        float[] expectedEmbedding = new float[1536];
+    void embed_returns1024DimVector() {
+        float[] expectedEmbedding = new float[1024];
         expectedEmbedding[0] = 0.5f;
         when(embeddingModel.call(any(EmbeddingRequest.class)))
                 .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
                         List.of(new org.springframework.ai.embedding.Embedding(expectedEmbedding, 0))));
 
         float[] result = embeddingService.embed("测试文本");
-        assertThat(result).hasSize(1536);
+        assertThat(result).hasSize(1024);
         assertThat(result[0]).isEqualTo(0.5f);
         verify(embeddingModel).call(any(EmbeddingRequest.class));
     }
@@ -73,7 +73,7 @@ class EmbeddingServiceTest {
     @Test
     void embedAndPersist_normalFlow_savesToMySQLAndRedis() {
         setupMappersAndRedis();
-        float[] emb = new float[1536];
+        float[] emb = new float[1024];
         when(embeddingModel.call(any(EmbeddingRequest.class)))
                 .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
                         List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
@@ -92,7 +92,7 @@ class EmbeddingServiceTest {
     @Test
     void embedAndPersist_shortContent_createsSingleChunk() {
         setupMappersAndRedis();
-        float[] emb = new float[1536];
+        float[] emb = new float[1024];
         when(embeddingModel.call(any(EmbeddingRequest.class)))
                 .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
                         List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));

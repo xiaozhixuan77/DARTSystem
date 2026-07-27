@@ -132,18 +132,18 @@ public abstract class BaseIntegrationTest {
     }
 
     /**
-     * Mock EmbeddingModel 返回统一填充值的 1536 维向量（默认 0.01f）。
+     * Mock EmbeddingModel 返回统一填充值的 1024 维向量（默认 0.01f）。
      */
     protected void mockEmbedding() {
         mockEmbedding(0.01f);
     }
 
     /**
-     * Mock EmbeddingModel 返回指定填充值的 1536 维向量。
+     * Mock EmbeddingModel 返回指定填充值的 1024 维向量。
      * 同一向量多次调用产生余弦相似度 1.0（RAG 命中测试用）。
      */
     protected void mockEmbedding(float fillValue) {
-        float[] vec = new float[1536];
+        float[] vec = new float[1024];
         for (int i = 0; i < vec.length; i++) vec[i] = fillValue;
         var response = new EmbeddingResponse(
                 List.of(new Embedding(vec, 0)),

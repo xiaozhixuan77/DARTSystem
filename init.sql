@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS `knowledge_chunk` (
     `chunk_index`       INT             NOT NULL COMMENT '分块序号，从0开始',
     `chunk_text`        TEXT            NOT NULL COMMENT '500字左右的分块文本',
     `embedding_id`      VARCHAR(200)    NOT NULL COMMENT 'Redis向量Key: chunk:{itemId}_{chunkIndex}',
-    `embedding`         MEDIUMTEXT      NULL     COMMENT 'Base64编码的1536维向量',
+    `embedding`         MEDIUMTEXT      NULL     COMMENT 'Base64编码的1024维向量',
     `created_at`        DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_embedding_id` (`embedding_id`),
