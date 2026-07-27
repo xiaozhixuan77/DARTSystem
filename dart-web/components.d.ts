@@ -11,14 +11,18 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AgentMessage: typeof import('./src/components/chat/AgentMessage.vue')['default']
     AppSidebar: typeof import('./src/components/sidebar/AppSidebar.vue')['default']
     AuthCard: typeof import('./src/components/auth/AuthCard.vue')['default']
     ChatInput: typeof import('./src/components/chat/ChatInput.vue')['default']
     ChatMessage: typeof import('./src/components/chat/ChatMessage.vue')['default']
     KnowledgeCard: typeof import('./src/components/knowledge/KnowledgeCard.vue')['default']
+    KnowledgeEditDialog: typeof import('./src/components/knowledge/KnowledgeEditDialog.vue')['default']
     KnowledgePanel: typeof import('./src/components/knowledge/KnowledgePanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    ScoreCard: typeof import('./src/components/chat/ScoreCard.vue')['default']
+    SessionContextMenu: typeof import('./src/components/common/SessionContextMenu.vue')['default']
     StreamingStatus: typeof import('./src/components/chat/StreamingStatus.vue')['default']
     WelcomeScreen: typeof import('./src/components/chat/WelcomeScreen.vue')['default']
   }
