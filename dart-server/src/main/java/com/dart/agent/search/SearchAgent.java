@@ -41,9 +41,21 @@ public class SearchAgent {
                     .distinct()
                     .toList();
 
-            // Step 3: 并行抓取
+            // Step 3: 并行抓取（失败时用搜索摘要兜底）
             SseUtils.sendStatus(emitter, "fetching", "正在抓取页面内容...");
             List<com.dart.agent.scoring.PageContent> pages = searchTools.fetchPages(urls);
+            // 抓取失败的 URL 用搜索摘要作为内容
+            java.util.Set<String> fetchedUrls = pages.stream()
+                    .map(com.dart.agent.scoring.PageContent::getUrl)
+                    .collect(java.util.stream.Collectors.toSet());
+            for (SearchResult sr : rawResults) {
+                if (!fetchedUrls.contains(sr.url()) && sr.snippet() != null && !sr.snippet().isBlank()) {
+                    pages.add(new com.dart.agent.scoring.PageContent(
+                            sr.url(), sr.title(), sr.snippet(),
+                            sr.snippet().length(), 0, false, false,
+                            java.time.Year.now().getValue()));
+                }
+            }
             if (pages.isEmpty()) {
                 SseUtils.sendError(emitter, ErrorCode.FETCH_PAGE_ERROR.getCode(), "所有页面抓取失败");
                 return List.of();

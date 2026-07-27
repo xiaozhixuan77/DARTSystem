@@ -40,7 +40,7 @@ spring:
       base-url: https://api.siliconflow.cn
       chat:
         options:
-          model: deepseek-chat
+          model: deepseek-ai/DeepSeek-V4-Flash
           temperature: 0.7
           max-tokens: 4096
     openai:
@@ -87,7 +87,7 @@ agent:
   search:
     max-results: 8
     fetch-timeout-ms: 10000
-    score-threshold: 3.0
+    score-threshold: 1.5
   scoring:
     weights:
       timeliness: 0.15

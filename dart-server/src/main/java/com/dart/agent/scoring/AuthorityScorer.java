@@ -16,20 +16,43 @@ public class AuthorityScorer {
             Map.entry("react.dev", 5),
             Map.entry("vuejs.org", 5),
             Map.entry("developer.mozilla.org", 5),
+            Map.entry("kubernetes.io", 5),
+            Map.entry("learn.microsoft.com", 5),
             // 知名技术社区 (4)
             Map.entry("stackoverflow.com", 4),
             Map.entry("github.com", 4),
             Map.entry("medium.com", 4),
+            Map.entry("wikipedia.org", 4),
+            Map.entry("reddit.com", 4),
+            // 知名技术博客/教程站 (4)
+            Map.entry("baeldung.com", 4),
+            Map.entry("geeksforgeeks.org", 4),
+            Map.entry("w3schools.com", 4),
+            Map.entry("tutorialspoint.com", 4),
+            Map.entry("freecodecamp.org", 4),
+            Map.entry("howtodoinjava.com", 4),
+            Map.entry("jenkov.com", 4),
+            Map.entry("mkyong.com", 4),
+            Map.entry("digitalocean.com", 4),
             // 技术博客平台 (3)
             Map.entry("dev.to", 3),
             Map.entry("juejin.cn", 3),
             Map.entry("segmentfault.com", 3),
             Map.entry("blog.csdn.net", 3),
-            Map.entry("csdn.net", 3)
+            Map.entry("csdn.net", 3),
+            Map.entry("cnblogs.com", 3),
+            Map.entry("zhihu.com", 3),
+            Map.entry("infoq.cn", 3),
+            Map.entry("runoob.com", 3),
+            Map.entry("liaoxuefeng.com", 3),
+            Map.entry("baike.baidu.com", 3),
+            Map.entry("jianshu.com", 3),
+            Map.entry("huaweicloud.com", 3),
+            Map.entry("alibabacloud.com", 3)
     );
 
     private static final Set<String> PERSONAL_DOMAINS = Set.of(
-            "github.io", "vercel.app"
+            "github.io", "vercel.app", "netlify.app", "pages.dev"
     );
 
     public int score(String url) {
