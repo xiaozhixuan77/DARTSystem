@@ -19,7 +19,7 @@ public class SearchTools {
 
     private static final Logger log = LoggerFactory.getLogger(SearchTools.class);
 
-    private final SearXNGClient searXNGClient;
+    private final BingSearchClient bingSearchClient;
     private final PageFetcher pageFetcher;
     private final QualityScorer qualityScorer;
     private final TimelinessScorer timelinessScorer;
@@ -27,9 +27,9 @@ public class SearchTools {
     private final DepthScorer depthScorer;
     private final MatchScorer matchScorer;
 
-    public SearchTools(SearXNGClient searXNGClient, PageFetcher pageFetcher,
+    public SearchTools(BingSearchClient bingSearchClient, PageFetcher pageFetcher,
                        QualityScorer qualityScorer, MatchScorer matchScorer) {
-        this.searXNGClient = searXNGClient;
+        this.bingSearchClient = bingSearchClient;
         this.pageFetcher = pageFetcher;
         this.qualityScorer = qualityScorer;
         this.timelinessScorer = new TimelinessScorer();
@@ -40,7 +40,7 @@ public class SearchTools {
 
     public List<SearchResult> searchWeb(String query, int maxResults) {
         try {
-            return searXNGClient.search(query, maxResults);
+            return bingSearchClient.search(query, maxResults);
         } catch (Exception e) {
             log.error("搜索异常: query={}", query, e);
             return List.of();

@@ -52,9 +52,6 @@ services:
       - ./searxng:/etc/searxng:rw
     environment:
       - SEARXNG_BASE_URL=http://localhost:8080
-      - HTTP_PROXY=http://host.docker.internal:7890
-      - HTTPS_PROXY=http://host.docker.internal:7890
-      - NO_PROXY=localhost,127.0.0.1,mysql,redis-stack,dart-server,dart-mysql,dart-redis
     extra_hosts:
       - "host.docker.internal:host-gateway"
     cap_drop:

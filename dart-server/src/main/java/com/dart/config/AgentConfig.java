@@ -4,20 +4,15 @@ import com.dart.agent.curator.CuratorAgent;
 import com.dart.agent.curator.CuratorTools;
 import com.dart.agent.scoring.MatchScorer;
 import com.dart.agent.scoring.QualityScorer;
+import com.dart.agent.search.BingSearchClient;
 import com.dart.agent.search.PageFetcher;
-import com.dart.agent.search.SearXNGClient;
 import com.dart.agent.search.SearchAgent;
 import com.dart.agent.search.SearchTools;
 import com.dart.agent.splitter.MarkdownSplitter;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.client.RestTemplate;
-
-import java.time.Duration;
 
 /**
  * Agent 层 Bean 注册。
@@ -55,9 +50,6 @@ public class AgentConfig {
     @Value("${agent.scoring.weights.match:0.35}")
     private double wM;
 
-    @Value("${searxng.base-url:http://localhost:8080}")
-    private String searxngBaseUrl;
-
     @Value("${agent.curator.jaccard-threshold:0.85}")
     private double jaccardThreshold;
 
@@ -83,16 +75,8 @@ public class AgentConfig {
     // ────────── Search Agent ──────────
 
     @Bean
-    public RestTemplate restTemplate(RestTemplateBuilder builder) {
-        return builder
-                .connectTimeout(Duration.ofSeconds(5))
-                .readTimeout(Duration.ofSeconds(10))
-                .build();
-    }
-
-    @Bean
-    public SearXNGClient searXNGClient(RestTemplate restTemplate, ObjectMapper objectMapper) {
-        return new SearXNGClient(restTemplate, searxngBaseUrl, objectMapper);
+    public BingSearchClient bingSearchClient() {
+        return new BingSearchClient();
     }
 
     @Bean
@@ -101,9 +85,9 @@ public class AgentConfig {
     }
 
     @Bean
-    public SearchTools searchTools(SearXNGClient searXNGClient, PageFetcher pageFetcher,
+    public SearchTools searchTools(BingSearchClient bingSearchClient, PageFetcher pageFetcher,
                                    QualityScorer qualityScorer, MatchScorer matchScorer) {
-        return new SearchTools(searXNGClient, pageFetcher, qualityScorer, matchScorer);
+        return new SearchTools(bingSearchClient, pageFetcher, qualityScorer, matchScorer);
     }
 
     @Bean

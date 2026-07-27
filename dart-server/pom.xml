@@ -159,6 +159,13 @@
             <version>${mybatis-plus.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- .env 文件加载（开发环境自动读取 API Key，不进 Git） -->
+        <dependency>
+            <groupId>io.github.cdimascio</groupId>
+            <artifactId>dotenv-java</artifactId>
+            <version>3.0.2</version>
+        </dependency>
     </dependencies>
 
     <dependencyManagement>

@@ -18,7 +18,7 @@ import static org.mockito.Mockito.when;
 class SearchToolsTest {
 
     @Mock
-    private SearXNGClient searXNGClient;
+    private BingSearchClient bingSearchClient;
     @Mock
     private PageFetcher pageFetcher;
     @Mock
@@ -30,14 +30,14 @@ class SearchToolsTest {
     @BeforeEach
     void setUp() {
         qualityScorer = new QualityScorer(0.15, 0.30, 0.20, 0.35, 3.0);
-        searchTools = new SearchTools(searXNGClient, pageFetcher, qualityScorer, matchScorer);
-        lenient().when(searXNGClient.search(any(), anyInt())).thenReturn(List.of());
+        searchTools = new SearchTools(bingSearchClient, pageFetcher, qualityScorer, matchScorer);
+        lenient().when(bingSearchClient.search(any(), anyInt())).thenReturn(List.of());
         lenient().when(matchScorer.evaluate(anyString(), anyString())).thenReturn(3);
     }
 
     @Test
     void searchWeb_returnsResults() {
-        when(searXNGClient.search(eq("Spring Boot"), anyInt()))
+        when(bingSearchClient.search(eq("Spring Boot"), anyInt()))
                 .thenReturn(List.of(
                         new SearchResult("https://spring.io", "Spring Framework", "Official docs"),
                         new SearchResult("https://example.com", "Example", "A tutorial")
@@ -50,13 +50,13 @@ class SearchToolsTest {
 
     @Test
     void searchWeb_whenClientReturnsEmpty_returnsEmpty() {
-        when(searXNGClient.search(any(), anyInt())).thenReturn(List.of());
+        when(bingSearchClient.search(any(), anyInt())).thenReturn(List.of());
         assertThat(searchTools.searchWeb("unknown", 8)).isEmpty();
     }
 
     @Test
     void searchWeb_whenClientThrows_returnsEmpty() {
-        when(searXNGClient.search(any(), anyInt())).thenThrow(new RuntimeException("timeout"));
+        when(bingSearchClient.search(any(), anyInt())).thenThrow(new RuntimeException("timeout"));
         assertThat(searchTools.searchWeb("error", 8)).isEmpty();
     }
 
