@@ -36,8 +36,8 @@ spring:
     model:
       chat: deepseek
     deepseek:
-      api-key: ${DEEPSEEK_API_KEY:sk-placeholder}
-      base-url: https://api.deepseek.com
+      api-key: ${SILICONFLOW_API_KEY:sk-placeholder}
+      base-url: https://api.siliconflow.cn
       chat:
         options:
           model: deepseek-chat
