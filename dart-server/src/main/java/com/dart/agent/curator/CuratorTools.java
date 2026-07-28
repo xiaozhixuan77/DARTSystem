@@ -20,7 +20,7 @@ public class CuratorTools {
 
     private static final int MIN_REPORT_LENGTH = 200;
     private static final int MAX_REPORT_LENGTH = 12000;
-    private static final int MAX_CONTENT_PER_RESOURCE = 4000;
+    private static final int MAX_CONTENT_PER_RESOURCE = 800;
 
     private final ChatModel chatModel;
     private final double jaccardThreshold;
