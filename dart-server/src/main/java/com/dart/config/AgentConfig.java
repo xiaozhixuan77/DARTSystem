@@ -83,7 +83,7 @@ public class AgentConfig {
     public RestTemplate restTemplate(RestTemplateBuilder builder) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(10));
-        factory.setReadTimeout(Duration.ofSeconds(60));
+        factory.setReadTimeout(Duration.ofSeconds(180));
         return new RestTemplate(factory);
     }
 

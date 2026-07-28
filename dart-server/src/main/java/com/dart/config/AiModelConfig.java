@@ -72,7 +72,7 @@ public class AiModelConfig {
                         "model", deepseekModel,
                         "messages", List.of(Map.of("role", "user", "content", content)),
                         "temperature", 0.7,
-                        "max_tokens", 4096
+                        "max_tokens", 2048
                 );
 
                 HttpHeaders headers = new HttpHeaders();

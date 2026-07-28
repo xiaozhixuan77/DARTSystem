@@ -85,7 +85,7 @@ jwt:
 # Agent 配置
 agent:
   search:
-    max-results: 8
+    max-results: 6
     fetch-timeout-ms: 10000
     score-threshold: 1.5
   scoring:

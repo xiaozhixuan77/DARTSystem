@@ -20,7 +20,7 @@ public class CuratorTools {
 
     private static final int MIN_REPORT_LENGTH = 200;
     private static final int MAX_REPORT_LENGTH = 12000;
-    private static final int MAX_CONTENT_PER_RESOURCE = 800;
+    private static final int MAX_CONTENT_PER_RESOURCE = 250;
 
     private final ChatModel chatModel;
     private final double jaccardThreshold;
@@ -69,7 +69,7 @@ public class CuratorTools {
     }
 
     /**
-     * LLM 生成结构化 Markdown 报告。
+     * LLM 生成结构化 Markdown 报告。首次尝试全量资源，失败后用 Top 3 缩量重试。
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources) {
         if (resources == null || resources.isEmpty()) {
@@ -81,8 +81,9 @@ public class CuratorTools {
             return singleResourceReport(query, resources.getFirst());
         }
 
-        String prompt = buildReportPrompt(query, resources);
+        // 首次尝试：全量资源
         try {
+            String prompt = buildReportPrompt(query, resources);
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResults()
                     .getFirst()
@@ -92,7 +93,26 @@ public class CuratorTools {
             List<String> sources = resources.stream().map(ScoredResource::getUrl).toList();
             return new CuratedReport(query, markdown, sources, Instant.now());
         } catch (Exception e) {
-            log.warn("LLM 报告生成失败，降级使用 fallbackReport", e);
+            log.warn("LLM 报告生成首次尝试失败（{} 个资源），使用 Top 3 缩量重试", resources.size(), e);
+        }
+
+        // 缩量重试：仅取 Top 3 资源
+        int retryCount = Math.min(3, resources.size());
+        List<ScoredResource> topResources = resources.subList(0, retryCount);
+        try {
+            String prompt = buildReportPrompt(query, topResources);
+            String response = chatModel.call(new Prompt(new UserMessage(prompt)))
+                    .getResults()
+                    .getFirst()
+                    .getOutput()
+                    .getText();
+            String markdown = cleanAndTruncate(response);
+            // 报告基于 Top 3 生成，但来源列表保留全部资源的 URL
+            List<String> sources = resources.stream().map(ScoredResource::getUrl).toList();
+            log.info("LLM 报告缩量重试成功（{} 个资源）", retryCount);
+            return new CuratedReport(query, markdown, sources, Instant.now());
+        } catch (Exception e2) {
+            log.warn("LLM 报告缩量重试也失败，降级使用 fallbackReport", e2);
             return fallbackReport(query, resources);
         }
     }
