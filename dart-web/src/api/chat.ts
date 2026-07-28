@@ -1,5 +1,4 @@
 import { getAccessToken } from './client'
-import type { SSEEvent } from '@/types/chat'
 
 type SSECallback = {
   onStatus?: (status: string, message: string) => void
@@ -31,7 +30,9 @@ export function sendMessage(
     signal: abortController.signal
   }).then(async (response) => {
     if (!response.ok) {
-      callbacks.onError?.(response.status, '请求失败')
+      // 非 200 响应是 JSON 错误
+      const errBody = await response.json().catch(() => null)
+      callbacks.onError?.(response.status, errBody?.message || '请求失败')
       return
     }
     const reader = response.body?.getReader()
@@ -39,6 +40,7 @@ export function sendMessage(
 
     const decoder = new TextDecoder()
     let buffer = ''
+    let currentEvent = ''
 
     try {
       while (true) {
@@ -51,34 +53,12 @@ export function sendMessage(
 
         for (const line of lines) {
           if (line.startsWith('event:')) {
-            buffer = line + '\n' + buffer
-            continue
-          }
-          if (line.startsWith('data:')) {
-            const jsonStr = line.slice(5).trim()
-            if (!jsonStr) continue
-            try {
-              const event: SSEEvent = JSON.parse(jsonStr)
-              switch (event.event) {
-                case 'status':
-                  callbacks.onStatus?.(event.status || '', event.message || '')
-                  break
-                case 'search_result':
-                  callbacks.onSearchResult?.(event.data)
-                  break
-                case 'content':
-                  callbacks.onContent?.(event.data as string)
-                  break
-                case 'done':
-                  callbacks.onDone?.(event.data as { status: string; conversationId?: number })
-                  break
-                case 'error':
-                  callbacks.onError?.(event.code || 500, event.message || '未知错误')
-                  break
-              }
-            } catch {
-              // 非 JSON 数据行（如 [DONE] 等），忽略
-            }
+            currentEvent = line.slice(6).trim()
+          } else if (line.startsWith('data:')) {
+            const payload = line.slice(5).trim()
+            if (!payload) continue
+            dispatch(currentEvent, payload)
+            currentEvent = ''
           }
         }
       }
@@ -92,6 +72,39 @@ export function sendMessage(
       callbacks.onError?.(0, '网络错误')
     }
   })
+
+  function dispatch(event: string, payload: string) {
+    try {
+      const data = JSON.parse(payload)
+      switch (event) {
+        case 'status':
+          callbacks.onStatus?.(data.phase || '', data.message || '')
+          break
+        case 'search_result':
+          callbacks.onSearchResult?.(data)
+          break
+        case 'curated_report':
+          // curated_report 由后端直接发送，作为 search_result 处理
+          callbacks.onSearchResult?.(data)
+          break
+        case 'content':
+          // content 事件：data 是裸字符串，不是 JSON
+          callbacks.onContent?.(payload)
+          break
+        case 'done':
+          callbacks.onDone?.(data)
+          break
+        case 'error':
+          callbacks.onError?.(data.code || 500, data.message || '未知错误')
+          break
+      }
+    } catch {
+      // 非 JSON（如 content 中的纯文本），直接当内容处理
+      if (event === 'content') {
+        callbacks.onContent?.(payload)
+      }
+    }
+  }
 
   return () => abortController.abort()
 }
