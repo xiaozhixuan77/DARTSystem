@@ -2,80 +2,57 @@ package com.dart.agent.scoring;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.chat.messages.UserMessage;
 
 /**
- * 语义匹配评分：调用 LLM 评估查询与页面内容的语义匹配度（1-5）。
- * LLM 异常或无法解析时降级返回 3（默认值），不中断评分流程。
+ * 语义匹配评分：基于关键词命中率评估查询与页面内容的匹配度（1-5）。
+ * 不使用 LLM，速度极快（每页 < 1ms），适合对搜索结果的实时评分场景。
  */
 public class MatchScorer {
 
     private static final Logger log = LoggerFactory.getLogger(MatchScorer.class);
 
-    private final ChatModel chatModel;
-
-    public MatchScorer(ChatModel chatModel) {
-        this.chatModel = chatModel;
+    public MatchScorer() {
+        // 无 LLM 依赖，纯轻量计算
     }
 
+    /**
+     * 基于关键词命中率和标题匹配计算得分 1-5。
+     */
     public int evaluate(String query, String content) {
-        if (query == null || query.isBlank()) {
-            return 1;
+        if (query == null || query.isBlank()) return 1;
+        if (content == null || content.isBlank()) return 1;
+
+        String lowerQuery = query.toLowerCase();
+        String lowerContent = content.toLowerCase();
+
+        // 分词：按空格和常见分隔符拆分
+        String[] keywords = lowerQuery.split("[\\s,，.。、;；:：!！?？]+");
+        if (keywords.length == 0) return 1;
+
+        // 计算关键词命中率
+        int hits = 0;
+        int total = 0;
+        for (String kw : keywords) {
+            if (kw.length() < 2) continue; // 跳过大短的词
+            total++;
+            if (lowerContent.contains(kw)) hits++;
         }
-        if (content == null || content.isBlank()) {
-            return 1;
-        }
-        String promptText = buildPrompt(query, content);
-        try {
-            String response = chatModel.call(new Prompt(new UserMessage(promptText)))
-                    .getResults()
-                    .getFirst()
-                    .getOutput()
-                    .getText()
-                    .trim();
-            return parseScore(response);
-        } catch (Exception e) {
-            log.warn("LLM 语义匹配评分失败，降级使用默认值 3", e);
-            return 3;
-        }
-    }
 
-    private String buildPrompt(String query, String content) {
-        return """
-                你是一个技术资源评估专家。请评估以下页面内容与用户查询的语义匹配程度。
+        if (total == 0) return 1;
 
-                评分标准（1-5分）：
-                - 5：完全匹配，内容直接回答查询问题
-                - 4：高度相关，内容覆盖查询的大部分要点
-                - 3：部分相关，内容涉及查询相关领域但不够聚焦
-                - 2：弱相关，内容仅涉及相关概念
-                - 1：不相关，内容与查询基本无关
+        double hitRate = (double) hits / total;
 
-                用户查询：%s
+        // 额外加分：标题中出现查询词（content 的前 200 字符视为标题区域）
+        String titleRegion = content.length() > 200 ? content.substring(0, 200).toLowerCase() : lowerContent;
+        boolean titleMatch = titleRegion.contains(lowerQuery) ||
+                keywords.length >= 2 && titleRegion.contains(keywords[0]) && titleRegion.contains(keywords[1]);
 
-                页面内容（摘要）：%s
-
-                请仅输出一个 1-5 的整数分数，不要输出其他内容。""".formatted(query, truncate(content));
-    }
-
-    private String truncate(String content) {
-        if (content.length() <= 1000) {
-            return content;
-        }
-        return content.substring(0, 1000) + "...";
-    }
-
-    private int parseScore(String text) {
-        try {
-            int score = Integer.parseInt(text);
-            if (score < 1) return 1;
-            if (score > 5) return 5;
-            return score;
-        } catch (NumberFormatException e) {
-            log.warn("LLM 返回无法解析的分数: '{}'，降级使用默认值 3", text);
-            return 3;
-        }
+        // 评分映射
+        if (hitRate >= 0.8 && titleMatch) return 5;
+        if (hitRate >= 0.8) return 4;
+        if (hitRate >= 0.6) return 4;
+        if (hitRate >= 0.4) return 3;
+        if (hitRate >= 0.2) return 2;
+        return 1;
     }
 }
