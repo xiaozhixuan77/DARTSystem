@@ -2,9 +2,9 @@ package com.dart.integration;
 
 import com.dart.agent.scoring.PageContent;
 import com.dart.agent.scoring.ScoredResource;
+import com.dart.agent.search.BingSearchClient;
 import com.dart.agent.search.PageFetcher;
 import com.dart.agent.search.SearchResult;
-import com.dart.agent.search.SearXNGClient;
 import com.dart.service.ChatService;
 import com.dart.service.EmbeddingService;
 import org.junit.jupiter.api.AfterEach;
@@ -36,14 +36,14 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     private EmbeddingService embeddingService;
 
     @MockBean
-    private SearXNGClient searXNGClient;
+    private BingSearchClient bingSearchClient;
 
     @MockBean
     private PageFetcher pageFetcher;
 
     @AfterEach
     void resetMocks() {
-        Mockito.reset(chatModel, embeddingModel, searXNGClient, pageFetcher);
+        Mockito.reset(chatModel, embeddingModel, bingSearchClient, pageFetcher);
     }
 
     @Test
@@ -129,8 +129,8 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
         // RAG 无匹配数据 → 走搜索流程
         mockEmbedding();
 
-        // SearXNG 返回 2 条结果
-        when(searXNGClient.search(anyString(), anyInt()))
+        // Bing 返回 2 条结果
+        when(bingSearchClient.search(anyString(), anyInt()))
                 .thenReturn(List.of(
                         new SearchResult("http://example.com/a", "Result A", "Snippet A"),
                         new SearchResult("http://example.com/b", "Result B", "Snippet B")));
@@ -173,16 +173,18 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         mockEmbedding();
 
-        when(searXNGClient.search(anyString(), anyInt()))
+        when(bingSearchClient.search(anyString(), anyInt()))
                 .thenReturn(List.of(
                         new SearchResult("http://example.com/a", "Resource A", "Snippet A"),
                         new SearchResult("http://example.com/b", "Resource B", "Snippet B")));
 
         when(pageFetcher.fetch(anyString()))
                 .thenReturn(new PageContent("http://example.com/a", "Resource A",
-                        "Detailed content about Spring Boot.", 800, 3, true, false, 2026))
+                        "Spring Boot configuration guide with detailed examples and code snippets.",
+                        800, 3, true, false, 2026))
                 .thenReturn(new PageContent("http://example.com/b", "Resource B",
-                        "Advanced Java tutorial covering dependency injection and Spring concepts in depth.", 600, 2, false, true, 2025));
+                        "Advanced Spring Boot tutorial covering dependency injection and configuration in depth.",
+                        800, 3, false, true, 2026));
 
         // ChatModel 调用链: isTechQuery + 2×MatchScorer → report generation 抛异常
         when(chatModel.call(any(Prompt.class)))
@@ -208,15 +210,15 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("SearXNG 搜索异常时 SearchAgent 内部降级返回空结果")
-    void searxngExceptionGracefulDegradation() {
+    @DisplayName("Bing 搜索异常时 SearchAgent 内部降级返回空结果")
+    void bingExceptionGracefulDegradation() {
         Long userId = createTestUser();
         Long convId = createTestConversation(userId);
 
         mockEmbedding();
 
-        when(searXNGClient.search(anyString(), anyInt()))
-                .thenThrow(new RuntimeException("SearXNG connection refused"));
+        when(bingSearchClient.search(anyString(), anyInt()))
+                .thenThrow(new RuntimeException("Bing connection refused"));
 
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
@@ -239,7 +241,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         mockEmbedding();
 
-        when(searXNGClient.search(anyString(), anyInt())).thenReturn(List.of());
+        when(bingSearchClient.search(anyString(), anyInt())).thenReturn(List.of());
 
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(

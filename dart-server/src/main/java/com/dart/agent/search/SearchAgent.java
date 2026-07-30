@@ -11,7 +11,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.List;
 
 /**
- * Search Agent — 搜索编排：SearXNG 搜索 → 并行抓取 → 四维评分 → 筛选 Top-N。
+ * Search Agent — 搜索编排：Bing 搜索 → 并行抓取 → 四维评分 → 筛选 Top-N。
  */
 public class SearchAgent {
 
@@ -25,7 +25,7 @@ public class SearchAgent {
 
     public List<ScoredResource> execute(String query, int maxResults, SseEmitter emitter) {
         try {
-            // Step 1: SearXNG 搜索
+            // Step 1: 搜索
             SseUtils.sendStatus(emitter, "searching", "正在搜索相关资源...");
             List<SearchResult> rawResults = searchTools.searchWeb(query, maxResults);
             if (rawResults.isEmpty()) {

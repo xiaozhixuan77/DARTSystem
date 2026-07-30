@@ -70,9 +70,6 @@ agent:
     similarity-threshold: 0.80
     top-k: 5
 
-searxng:
-  base-url: http://localhost:8080
-
 mybatis-plus:
   global-config:
     db-config:

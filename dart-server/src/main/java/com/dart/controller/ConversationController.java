@@ -41,8 +41,13 @@ public class ConversationController {
     }
 
     @PostMapping
-    public ApiResponse<ConversationVO> create() {
-        return ApiResponse.ok(conversationService.createConversation(requireUserId()));
+    public ApiResponse<ConversationVO> create(@Valid @RequestBody ConversationUpsertRequest request) {
+        return ApiResponse.ok(conversationService.createConversation(requireUserId(), request));
+    }
+
+    @GetMapping("/{id}")
+    public ApiResponse<ConversationVO> getById(@PathVariable Long id) {
+        return ApiResponse.ok(conversationService.getConversation(requireUserId(), id));
     }
 
     @GetMapping("/{id}/messages")

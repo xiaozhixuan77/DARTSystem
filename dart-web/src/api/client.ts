@@ -65,8 +65,14 @@ client.interceptors.response.use(
     const originalRequest = error.config
     if (!originalRequest) return Promise.reject(error)
 
-    // 401 → Token 刷新
-    if (error.response?.status === 401) {
+    // 401 / 403 → Token 刷新或退登
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      // 刷新接口自身失败 → 直接退登，避免死循环
+      if (originalRequest.url?.endsWith('/auth/refresh')) {
+        redirectToLogin()
+        return Promise.reject(error)
+      }
+
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           refreshQueue.push({
@@ -97,6 +103,10 @@ client.interceptors.response.use(
           queueRefresh(data.data.accessToken)
           return client(originalRequest)
         }
+        // 业务码非 200（refresh token 过期/已撤销）→ 退登
+        rejectQueue(error)
+        redirectToLogin()
+        return Promise.reject(error)
       } catch {
         rejectQueue(error)
         redirectToLogin()

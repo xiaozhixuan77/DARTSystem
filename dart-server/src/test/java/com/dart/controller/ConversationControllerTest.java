@@ -85,9 +85,11 @@ class ConversationControllerTest {
     void create_returnsCreatedConversation() throws Exception {
         ConversationVO vo = new ConversationVO(200L, "新对话", null, 0,
                 LocalDateTime.of(2026, 7, 20, 10, 0));
-        when(conversationService.createConversation(1L)).thenReturn(vo);
+        when(conversationService.createConversation(any(Long.class), any(ConversationUpsertRequest.class))).thenReturn(vo);
 
-        mockMvc.perform(post("/api/conversations"))
+        mockMvc.perform(post("/api/conversations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"新对话\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.id").value(200))

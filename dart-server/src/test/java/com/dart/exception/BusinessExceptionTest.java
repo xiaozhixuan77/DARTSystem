@@ -17,9 +17,9 @@ class BusinessExceptionTest {
 
     @Test
     void constructor_withErrorCodeAndSuggestion() {
-        BusinessException ex = new BusinessException(ErrorCode.SEARXNG_TIMEOUT, "请检查网络连接后重试");
+        BusinessException ex = new BusinessException(ErrorCode.SEARCH_TIMEOUT, "请检查网络连接后重试");
 
-        assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.SEARXNG_TIMEOUT);
+        assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.SEARCH_TIMEOUT);
         assertThat(ex.getMessage()).isEqualTo("搜索引擎响应超时，请稍后重试");
         assertThat(ex.getSuggestion()).isEqualTo("请检查网络连接后重试");
     }

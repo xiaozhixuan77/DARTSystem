@@ -13,7 +13,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 搜索工具集 — 组合 SearXNG 搜索、Jsoup 并行抓取、四维评分。
+ * 搜索工具集 — 组合 Bing 搜索、Jsoup 并行抓取、四维评分。
  */
 public class SearchTools {
 

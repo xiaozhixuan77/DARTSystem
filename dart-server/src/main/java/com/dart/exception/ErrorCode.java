@@ -21,8 +21,8 @@ public enum ErrorCode {
 
     // ===== 搜索 (3xxx) =====
     NON_TECH_QUERY(3001, "仅支持技术/编程领域搜索"),
-    SEARXNG_TIMEOUT(3002, "搜索引擎响应超时，请稍后重试"),
-    SEARXNG_ERROR(3003, "搜索引擎服务异常"),
+    SEARCH_TIMEOUT(3002, "搜索引擎响应超时，请稍后重试"),
+    SEARCH_ERROR(3003, "搜索引擎服务异常"),
     FETCH_PAGE_TIMEOUT(3004, "页面抓取超时"),
     FETCH_PAGE_ERROR(3005, "页面抓取失败"),
     NO_QUALITY_RESULTS(3006, "未找到高质量资源，请尝试更换关键词"),

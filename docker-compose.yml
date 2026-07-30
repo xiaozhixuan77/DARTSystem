@@ -43,27 +43,6 @@ services:
     networks:
       - dart-network
 
-  searxng:
-    image: searxng/searxng:latest
-    container_name: dart-searxng
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./searxng:/etc/searxng:rw
-    environment:
-      - SEARXNG_BASE_URL=http://localhost:8080
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
-      - DAC_OVERRIDE
-    networks:
-      - dart-network
-
 volumes:
   mysql_data:
   redis_data:

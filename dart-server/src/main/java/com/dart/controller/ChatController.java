@@ -34,14 +34,13 @@ public class ChatController {
         // 处理 conversationId：为 null 时自动创建新会话
         Long conversationId = request.getConversationId();
         if (conversationId == null) {
-            ConversationVO newConv = conversationService.createConversation(userId);
-            conversationId = newConv.getId();
             String title = request.getMessage().length() > 50
                     ? request.getMessage().substring(0, 50)
                     : request.getMessage();
             ConversationUpsertRequest convReq = new ConversationUpsertRequest();
             convReq.setTitle(title);
-            conversationService.updateConversation(userId, conversationId, convReq);
+            ConversationVO newConv = conversationService.createConversation(userId, convReq);
+            conversationId = newConv.getId();
         }
 
         final Long finalConversationId = conversationId;

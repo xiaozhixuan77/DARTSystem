@@ -1,0 +1,79 @@
+# Mapper 测试专用配置（H2 MySQL 兼容模式）
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=MySQL;NON_KEYWORDS=USER;DATABASE_TO_LOWER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  sql:
+    init:
+      mode: never
+
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
+      - org.springframework.ai.model.embedding.observation.autoconfigure.EmbeddingObservationAutoConfiguration
+      - org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration
+      - org.springframework.ai.autoconfigure.vectorstore.redis.RedisVectorStoreAutoConfiguration
+      - org.springframework.boot.http.client.autoconfigure.reactive.ReactiveHttpClientAutoConfiguration
+      - org.springframework.boot.http.client.autoconfigure.HttpClientAutoConfiguration
+      - org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration
+      - org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration
+      - org.springframework.boot.webclient.autoconfigure.WebClientAutoConfiguration
+      - org.springframework.boot.http.converter.autoconfigure.HttpMessageConvertersAutoConfiguration
+      - org.springframework.boot.http.codec.autoconfigure.CodecsAutoConfiguration
+
+  ai:
+    deepseek:
+      api-key: test-key-not-real
+      base-url: https://api.siliconflow.cn
+    openai:
+      api-key: test-key-not-real
+      base-url: https://api.siliconflow.cn
+      embedding:
+        options:
+          model: BAAI/bge-m3
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+jwt:
+  secret: dGhpc0lzQVRlc3RTZWNyZXRGb3JKV1RTaWduaW5nUHVycG9zZXM=
+  access-token-expiration: 300
+  refresh-token-expiration: 1800
+
+agent:
+  curator:
+    jaccard-threshold: 0.85
+  search:
+    max-results: 5
+    fetch-timeout-ms: 2000
+    score-threshold: 3.0
+  scoring:
+    weights:
+      timeliness: 0.15
+      authority: 0.30
+      depth: 0.20
+      match: 0.35
+  chunk:
+    size: 500
+    overlap: 50
+    min-length: 20
+  rag:
+    similarity-threshold: 0.80
+    top-k: 5
+
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: auto
+    banner: false
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  level:
+    com.dart: DEBUG

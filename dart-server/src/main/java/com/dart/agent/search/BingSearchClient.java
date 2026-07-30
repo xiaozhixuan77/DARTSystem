@@ -13,7 +13,6 @@ import java.util.Set;
 
 /**
  * Bing 搜索客户端 — 直连 cn.bing.com，多页抓取，解析 HTML 搜索结果。
- * 替代 SearXNG，无需代理，适用于国内网络环境。
  */
 public class BingSearchClient {
 

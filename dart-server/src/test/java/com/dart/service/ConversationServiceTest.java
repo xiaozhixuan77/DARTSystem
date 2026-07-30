@@ -82,10 +82,12 @@ class ConversationServiceTest {
             return 1;
         }).when(conversationMapper).insert(any(Conversation.class));
 
-        ConversationVO result = conversationService.createConversation(USER_ID);
+        ConversationUpsertRequest req = new ConversationUpsertRequest();
+        req.setTitle("测试会话");
+        ConversationVO result = conversationService.createConversation(USER_ID, req);
 
         assertThat(result.getId()).isEqualTo(200L);
-        assertThat(result.getTitle()).isEqualTo("新对话");
+        assertThat(result.getTitle()).isEqualTo("测试会话");
         assertThat(result.getMessageCount()).isZero();
         verify(conversationMapper).insert(any(Conversation.class));
     }

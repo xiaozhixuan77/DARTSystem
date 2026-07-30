@@ -67,12 +67,14 @@ public class ConversationService {
         return countMap;
     }
 
-    public ConversationVO createConversation(Long userId) {
+    public ConversationVO createConversation(Long userId, ConversationUpsertRequest request) {
         validateUserId(userId);
 
         Conversation conversation = new Conversation();
         conversation.setUserId(userId);
-        conversation.setTitle("新对话");
+        conversation.setTitle(request.getTitle() != null && !request.getTitle().isBlank()
+                ? request.getTitle() : "新对话");
+        conversation.setTags(request.getTags());
         conversation.setIsDeleted(0);
         conversationMapper.insert(conversation);
 
@@ -80,7 +82,25 @@ public class ConversationService {
         return ConversationVO.builder()
                 .id(conversation.getId())
                 .title(conversation.getTitle())
+                .tags(conversation.getTags())
                 .messageCount(0)
+                .updatedAt(conversation.getUpdatedAt())
+                .build();
+    }
+
+    public ConversationVO getConversation(Long userId, Long conversationId) {
+        validateUserId(userId);
+        Conversation conversation = conversationMapper.selectById(conversationId);
+        if (conversation == null) {
+            throw new BusinessException(ErrorCode.CONVERSATION_NOT_FOUND);
+        }
+        if (!conversation.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        return ConversationVO.builder()
+                .id(conversation.getId())
+                .title(conversation.getTitle())
+                .tags(conversation.getTags())
                 .updatedAt(conversation.getUpdatedAt())
                 .build();
     }
