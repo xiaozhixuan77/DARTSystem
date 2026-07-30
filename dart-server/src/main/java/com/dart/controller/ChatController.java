@@ -56,7 +56,10 @@ public class ChatController {
 
                 if (completed.get()) return;
 
-                if (result.isRagHit()) {
+                if (result.isClarification()) {
+                    SseUtils.sendEvent(emitter, SseEvents.CONTENT,
+                            result.clarification().content());
+                } else if (result.isRagHit()) {
                     SseUtils.sendEvent(emitter, SseEvents.CONTENT, result.ragAnswer().answer());
                 } else if (result.curatedReport() != null) {
                     SseUtils.sendEvent(emitter, SseEvents.CONTENT,
