@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
+import { useScrollToBottom } from '@/composables/useScrollToBottom'
 import AppSidebar from '@/components/sidebar/AppSidebar.vue'
 import ChatMessage from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -13,6 +14,21 @@ import KnowledgePanel from '@/components/knowledge/KnowledgePanel.vue'
 const route = useRoute()
 const chatStore = useChatStore()
 const authStore = useAuthStore()
+
+const messageListRef = ref<HTMLElement | null>(null)
+const scrollTrigger = computed(() =>
+  chatStore.messages.length * 1000 + chatStore.streamingContent.length
+)
+const { onScroll } = useScrollToBottom(messageListRef, scrollTrigger)
+
+// 切换会话时立即滚动到底部
+watch(() => chatStore.currentId, () => {
+  nextTick(() => {
+    if (messageListRef.value) {
+      messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+    }
+  })
+})
 
 onMounted(() => {
   authStore.initAuth()
@@ -42,7 +58,7 @@ function handleSend(message: string) {
 
       <StreamingStatus />
 
-      <div class="message-list" v-if="chatStore.messages.length > 0">
+      <div ref="messageListRef" class="message-list" v-if="chatStore.messages.length > 0" @scroll="onScroll">
         <ChatMessage
           v-for="msg in chatStore.messages" :key="msg.id"
           :message="msg"

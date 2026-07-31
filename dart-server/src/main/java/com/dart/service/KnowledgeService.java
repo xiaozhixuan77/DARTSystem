@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.dart.dto.response.KnowledgeDetailVO;
 import com.dart.dto.response.KnowledgeItemVO;
+import com.dart.dto.response.PageResult;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
 import com.dart.exception.BusinessException;
@@ -25,16 +26,17 @@ public class KnowledgeService {
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
 
-    public List<KnowledgeItemVO> listUserKnowledge(Long userId, int page, int size) {
+    public PageResult<KnowledgeItemVO> listUserKnowledge(Long userId, int page, int size) {
         Page<KnowledgeItem> p = new Page<>(page, size);
         QueryWrapper<KnowledgeItem> query = new QueryWrapper<>();
         query.eq("user_id", userId)
                 .eq("is_deleted", 0)
                 .orderByDesc("created_at");
         p = knowledgeItemMapper.selectPage(p, query);
-        return p.getRecords().stream()
+        List<KnowledgeItemVO> records = p.getRecords().stream()
                 .map(this::toVO)
                 .toList();
+        return new PageResult<>(records, p.getTotal());
     }
 
     public KnowledgeDetailVO getKnowledgeDetail(Long userId, Long knowledgeId) {

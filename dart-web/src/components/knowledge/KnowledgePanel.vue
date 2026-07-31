@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import KnowledgeCard from './KnowledgeCard.vue'
+import KnowledgeEditDialog from './KnowledgeEditDialog.vue'
 
 const store = useKnowledgeStore()
 
@@ -10,6 +11,10 @@ onMounted(() => {
 })
 
 const tags = ['全部', 'Go', 'Vue', 'K8s', '数据库']
+
+function handleCloseDetail() {
+  store.selectedItem = null
+}
 </script>
 
 <template>
@@ -52,6 +57,13 @@ const tags = ['全部', 'Go', 'Vue', 'K8s', '数据库']
       <button @click="store.page++; store.loadItems()" :disabled="store.page >= Math.ceil(store.total / store.size)">下一页</button>
     </div>
   </aside>
+
+  <KnowledgeEditDialog
+    :visible="!!store.selectedItem"
+    :item="store.selectedItem"
+    @save="handleCloseDetail"
+    @close="handleCloseDetail"
+  />
 </template>
 
 <style lang="scss" scoped>

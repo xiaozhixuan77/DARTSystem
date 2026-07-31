@@ -2,6 +2,7 @@ package com.dart.controller;
 
 import com.dart.dto.response.KnowledgeDetailVO;
 import com.dart.dto.response.KnowledgeItemVO;
+import com.dart.dto.response.PageResult;
 import com.dart.entity.User;
 import com.dart.exception.GlobalExceptionHandler;
 import com.dart.security.UserPrincipal;
@@ -73,12 +74,12 @@ class KnowledgeControllerTest {
     @Test
     void listKnowledge_returnsList() throws Exception {
         when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt()))
-                .thenReturn(List.of(createItem(1L, "Spring Guide")));
+                .thenReturn(new PageResult<>(List.of(createItem(1L, "Spring Guide")), 1));
 
         mockMvc.perform(get("/api/knowledge")
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].title").value("Spring Guide"));
+                .andExpect(jsonPath("$.data.records[0].title").value("Spring Guide"));
     }
 
     @Test

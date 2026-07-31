@@ -61,8 +61,9 @@ class KnowledgeServiceTest {
                 .thenReturn(mockPage);
 
         var result = knowledgeService.listUserKnowledge(1L, 1, 10);
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).getTitle()).isEqualTo("Spring Guide");
+        assertThat(result.getRecords()).hasSize(1);
+        assertThat(result.getRecords().get(0).getTitle()).isEqualTo("Spring Guide");
+        assertThat(result.getTotal()).isEqualTo(0L);
     }
 
     @Test
