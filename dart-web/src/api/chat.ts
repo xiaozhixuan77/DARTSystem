@@ -41,6 +41,15 @@ export function sendMessage(
     const decoder = new TextDecoder()
     let buffer = ''
     let currentEvent = ''
+    let dataBuffer = ''
+
+    function flushEvent() {
+      if (!dataBuffer) return
+      const event = currentEvent || 'message'
+      dispatch(event, dataBuffer)
+      currentEvent = ''
+      dataBuffer = ''
+    }
 
     try {
       while (true) {
@@ -53,15 +62,20 @@ export function sendMessage(
 
         for (const line of lines) {
           if (line.startsWith('event:')) {
+            flushEvent()
             currentEvent = line.slice(6).trim()
           } else if (line.startsWith('data:')) {
-            const payload = line.slice(5).trim()
-            if (!payload) continue
-            dispatch(currentEvent, payload)
-            currentEvent = ''
+            // SSE spec: data 以单个空格开头时去掉空格，否则保留
+            const raw = line.slice(5)
+            const data = raw.startsWith(' ') ? raw.slice(1) : raw
+            dataBuffer += (dataBuffer ? '\n' : '') + data
+          } else if (line.trim() === '') {
+            // SSE spec: 空行表示事件结束
+            flushEvent()
           }
         }
       }
+      flushEvent()
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         callbacks.onError?.(0, '连接中断')

@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch, nextTick } from 'vue'
+import { onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
-import { useScrollToBottom } from '@/composables/useScrollToBottom'
 import AppSidebar from '@/components/sidebar/AppSidebar.vue'
 import ChatMessage from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -16,18 +15,34 @@ const chatStore = useChatStore()
 const authStore = useAuthStore()
 
 const messageListRef = ref<HTMLElement | null>(null)
-const scrollTrigger = computed(() =>
-  chatStore.messages.length * 1000 + chatStore.streamingContent.length
-)
-const { onScroll } = useScrollToBottom(messageListRef, scrollTrigger)
+let userScrolledUp = false
 
-// 切换会话时立即滚动到底部
+function scrollToBottom() {
+  const el = messageListRef.value
+  if (!el || userScrolledUp) return
+  el.scrollTop = el.scrollHeight
+}
+
+function onScroll() {
+  const el = messageListRef.value
+  if (!el) return
+  const threshold = 60
+  userScrolledUp = el.scrollTop + el.clientHeight < el.scrollHeight - threshold
+}
+
+// 流式内容变化时滚动（flush: 'post' 确保 DOM 更新后执行）
+watch(() => chatStore.streamingContent, () => scrollToBottom(), { flush: 'post' })
+
+// 新消息到达时滚动
+watch(() => chatStore.messages.length, () => {
+  userScrolledUp = false
+  nextTick(scrollToBottom)
+})
+
+// 切换会话时滚动到底部
 watch(() => chatStore.currentId, () => {
-  nextTick(() => {
-    if (messageListRef.value) {
-      messageListRef.value.scrollTop = messageListRef.value.scrollHeight
-    }
-  })
+  userScrolledUp = false
+  nextTick(scrollToBottom)
 })
 
 onMounted(() => {
@@ -40,6 +55,7 @@ onMounted(() => {
 })
 
 function handleSend(message: string) {
+  userScrolledUp = false
   chatStore.send(message)
 }
 </script>
@@ -86,6 +102,7 @@ function handleSend(message: string) {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
 }
 .chat-header {
   padding: 14px $gap-lg;
@@ -103,6 +120,7 @@ function handleSend(message: string) {
 }
 .message-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: $gap-lg 0;
 }

@@ -103,10 +103,11 @@ export const useChatStore = defineStore('chat', () => {
       onDone(data) {
         isStreaming.value = false
         streamingStatus.value = ''
-        if (data.conversationId && !currentId.value) {
-          currentId.value = data.conversationId
+        const convId = data.conversationId || currentId.value
+        if (convId) {
+          // 从服务端重新加载消息，获取 metadata（引导芯片等）
+          selectConversation(convId)
         }
-        // 刷新会话列表
         loadConversations()
       },
       onError(code, msg) {
