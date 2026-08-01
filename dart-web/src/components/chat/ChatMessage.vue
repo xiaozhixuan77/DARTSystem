@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { useMarkdown } from '@/composables/useMarkdown'
 import type { MessageVO } from '@/types/chat'
 
 const props = defineProps<{ message: MessageVO }>()
-const { render } = useMarkdown()
+const { render, renderMermaidDiagrams } = useMarkdown()
 
+const contentRef = ref<HTMLElement | null>(null)
 const isUser = computed(() => props.message.role === 'user')
 const renderedContent = computed(() => {
   if (isUser.value) return props.message.content
   return render(props.message.content)
+})
+
+watch(renderedContent, async () => {
+  await nextTick()
+  if (contentRef.value) {
+    await renderMermaidDiagrams(contentRef.value)
+  }
 })
 </script>
 
@@ -23,6 +31,7 @@ const renderedContent = computed(() => {
       >{{ message.content }}</div>
       <div
         v-else
+        ref="contentRef"
         class="message-content markdown"
         v-html="renderedContent"
       />
@@ -64,6 +73,12 @@ const renderedContent = computed(() => {
   &.markdown :deep(blockquote) {
     border-left: 3px solid $color-accent;
     margin: 8px 0; padding-left: 12px; color: $color-muted;
+  }
+  &.markdown :deep(.mermaid) {
+    display: flex; justify-content: center;
+    padding: 16px 0; margin: 12px 0;
+    background: white; border-radius: $radius;
+    svg { max-width: 100%; }
   }
 }
 </style>

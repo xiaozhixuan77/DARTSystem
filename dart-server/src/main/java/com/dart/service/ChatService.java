@@ -161,7 +161,7 @@ public class ChatService {
     // ─── 追问生成 ────────────────────────────────────────────
 
     /**
-     * 基于报告内容，由 LLM 生成 2-3 条自然语言追问建议。
+     * 基于知识图谱报告内容，由 LLM 生成 2-3 条自然语言追问建议。
      * 失败时返回 null，不影响主流程。
      */
     private String generateFollowUp(String query, String reportMarkdown) {
@@ -171,17 +171,17 @@ public class ChatService {
                     : reportMarkdown;
             String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
             String prompt = """
-                    根据以下技术报告的已有内容，提出2-3个读者可能感兴趣的追问方向。
-                    追问应：与报告主题相关但不重复、自然对话语气、中文、每条一行以"- "开头。
+                    以下是一份知识学习报告（含 Mermaid 知识图谱和结构化章节），根据报告已覆盖的内容，提出2-3个读者可能感兴趣的追问方向。
+                    追问应与知识图谱的分支主题相关但不重复已讲内容，以自然对话语气、中文写出。
 
                     用户查询：<user_query>%s</user_query>
                     报告摘要：
                     %s
 
-                    输出格式（仅输出追问，不要其他文字）：
-                    - 追问1
-                    - 追问2
-                    - 追问3
+                    严格按以下格式输出（每条追问以"- "开头，不要编号，不要加粗，不要空行）：
+                    - 追问问题1
+                    - 追问问题2
+                    - 追问问题3
                     """.formatted(sanitized, truncated);
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResults().getFirst().getOutput().getText().trim();

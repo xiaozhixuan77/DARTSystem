@@ -68,11 +68,15 @@ public class AiModelConfig {
                 String content = prompt.getInstructions().stream()
                         .map(m -> m.getText())
                         .reduce("", (a, b) -> a + "\n" + b);
+                int maxTokens = 4096;
+                if (prompt.getOptions() != null && prompt.getOptions().getMaxTokens() != null) {
+                    maxTokens = prompt.getOptions().getMaxTokens();
+                }
                 Map<String, Object> body = Map.of(
                         "model", deepseekModel,
                         "messages", List.of(Map.of("role", "user", "content", content)),
                         "temperature", 0.7,
-                        "max_tokens", 2048
+                        "max_tokens", maxTokens
                 );
 
                 HttpHeaders headers = new HttpHeaders();

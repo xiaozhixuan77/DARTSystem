@@ -1,6 +1,13 @@
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
+import mermaid from 'mermaid'
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  mindmap: { useMaxWidth: true }
+})
 
 const md: MarkdownIt = new MarkdownIt({
   html: false,
@@ -16,11 +23,38 @@ const md: MarkdownIt = new MarkdownIt({
   }
 })
 
+const MERMAID_FENCE_RE = /```mermaid\s*\n([\s\S]*?)```/g
+
 export function useMarkdown() {
   function render(text: string): string {
-    const raw = md.render(text)
-    return DOMPurify.sanitize(raw) as unknown as string
+    // 提取 mermaid 代码块，替换为唯一占位符，避免 DOMPurify 处理
+    const mermaidBlocks: string[] = []
+    const preprocessed = text.replace(MERMAID_FENCE_RE, (_, content: string) => {
+      const idx = mermaidBlocks.length
+      mermaidBlocks.push(content.trim())
+      return `MERMAID_BLOCK_${idx}`
+    })
+
+    const raw = md.render(preprocessed)
+    const sanitized = DOMPurify.sanitize(raw) as unknown as string
+
+    // 将占位符替换回 <div class="mermaid"> 块（占位符可能被 DOMPurify 去掉 <p> 包装）
+    return sanitized.replace(/MERMAID_BLOCK_(\d+)/g, (_, idx: string) => {
+      const i = parseInt(idx, 10)
+      return `<div class="mermaid">${mermaidBlocks[i]}</div>`
+    })
   }
 
-  return { render }
+  /**
+   * 在容器元素上运行 mermaid.run()，需在 DOM 更新后调用。
+   */
+  async function renderMermaidDiagrams(container?: HTMLElement) {
+    try {
+      await mermaid.run(container ? { querySelector: '.mermaid' } : undefined)
+    } catch (e) {
+      console.warn('Mermaid 渲染失败', e)
+    }
+  }
+
+  return { render, renderMermaidDiagrams }
 }

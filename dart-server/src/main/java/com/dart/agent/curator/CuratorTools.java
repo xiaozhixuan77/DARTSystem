@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 
 import java.time.Instant;
@@ -18,9 +19,9 @@ public class CuratorTools {
 
     private static final Logger log = LoggerFactory.getLogger(CuratorTools.class);
 
-    private static final int MIN_REPORT_LENGTH = 200;
-    private static final int MAX_REPORT_LENGTH = 12000;
-    private static final int MAX_CONTENT_PER_RESOURCE = 250;
+    private static final int MIN_REPORT_LENGTH = 800;
+    private static final int MAX_REPORT_LENGTH = 8000;
+    private static final int MAX_CONTENT_PER_RESOURCE = 1500;
 
     private final ChatModel chatModel;
     private final double jaccardThreshold;
@@ -84,7 +85,8 @@ public class CuratorTools {
         // 首次尝试：全量资源
         try {
             String prompt = buildReportPrompt(query, resources);
-            String response = chatModel.call(new Prompt(new UserMessage(prompt)))
+            ChatOptions options = ChatOptions.builder().maxTokens(8192).build();
+            String response = chatModel.call(new Prompt(new UserMessage(prompt), options))
                     .getResults()
                     .getFirst()
                     .getOutput()
@@ -101,7 +103,8 @@ public class CuratorTools {
         List<ScoredResource> topResources = resources.subList(0, retryCount);
         try {
             String prompt = buildReportPrompt(query, topResources);
-            String response = chatModel.call(new Prompt(new UserMessage(prompt)))
+            ChatOptions options = ChatOptions.builder().maxTokens(8192).build();
+            String response = chatModel.call(new Prompt(new UserMessage(prompt), options))
                     .getResults()
                     .getFirst()
                     .getOutput()
@@ -149,7 +152,7 @@ public class CuratorTools {
                     .append(" A:").append(r.getScoreA())
                     .append(" D:").append(r.getScoreD())
                     .append(" M:").append(r.getScoreM()).append("\n");
-            sb.append("- **摘要**: ").append(truncateContent(r.getContent(), 300)).append("\n\n");
+            sb.append("- **摘要**: ").append(truncateContent(r.getContent(), MAX_CONTENT_PER_RESOURCE)).append("\n\n");
             rank++;
         }
 
@@ -189,18 +192,64 @@ public class CuratorTools {
 
     private String buildReportPrompt(String query, List<ScoredResource> resources) {
         StringBuilder sb = new StringBuilder();
-        sb.append("你是一个技术资源整理专家。请根据以下搜索结果，生成一份结构化的 Markdown 技术学习报告。\n\n");
-        sb.append("搜索主题：").append(query).append("\n\n");
-        sb.append("要求：\n");
-        sb.append("1. 使用 # 标题开始，按章节组织内容\n");
-        sb.append("2. 每个资源条目包含来源 URL\n");
-        sb.append("3. 引用评分数据时不调整数值\n");
-        sb.append("4. 不以[根据搜索结果]等开头\n");
-        sb.append("5. 信息不足时标注[信息不足，建议访问原文]\n");
-        sb.append("6. 代码块标注语言类型\n\n");
+        sb.append("""
+                你是一个技术教育专家。请根据以下搜索结果，生成一份结构化的知识学习报告。
 
-        sb.append("---\n\n");
-        sb.append("搜索结果（按质量评分排序）：\n\n");
+                搜索主题：""").append(query).append("""
+
+
+
+                ## 输出结构（严格按以下顺序）
+
+                ### 1. 知识全景 — Mermaid 思维导图
+                用 ```mermaid
+                mindmap``` 语法绘制知识全景图。
+                - 根节点为搜索主题
+                - 一级分支 3-5 个（主要知识方向）
+                - 每个一级分支下 2-4 个二级节点（具体知识点）
+                - 仅输出 mermaid 代码块即可
+
+                ### 2. 📖 核心概念
+                - 从搜索结果中提取 3-6 个关键概念
+                - 每个概念给出：简明定义 + 关键特征 + 适用场景
+                - 标注概念之间的关联（如"A是B的基础""A与C互补"）
+
+                ### 3. 🔬 关键原理
+                - 选取 2-4 个核心技术原理深入讲解
+                - 用通俗语言解释，避免直接复制原文
+                - 若信息不足标注 [信息不足，建议访问原文]
+
+                ### 4. 💻 代码示例
+                - 提供 2-3 个可直接运行的代码示例
+                - 代码块标注语言类型
+                - 每个示例带一行注释说明用途
+                - 若搜索结果缺少代码，根据常识补充
+
+                ### 5. ⚠️ 常见误区与 FAQ
+                - 3-5 个该主题下开发者常犯的误区，每个附正确做法
+                - 2-3 个常见问答
+
+                ### 6. 🚀 进阶学习方向
+                - 3-4 个与该主题相关的进阶方向
+                - 每个方向一句话描述学习目标
+
+                ### 7. 📚 参考文献
+                - 列出本次使用的所有来源
+                - 格式：序号. [标题](URL)
+
+                ## 写作规范
+                - 总字数 2000-4000 字
+                - 中文撰写，技术术语保留英文原名
+                - 正文自包含，可独立阅读，不要在正文中引用"资源1""资源2"等编号
+                - 不要以"根据搜索结果"等开头
+                - 信息不足处标注 [信息不足]
+                - 直接输出 Markdown，不要额外说明
+
+                ---
+
+                搜索结果（按质量评分排序）：
+
+                """);
 
         int idx = 1;
         for (ScoredResource r : resources) {
