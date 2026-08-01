@@ -24,12 +24,14 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 核心编排服务：LLM 领域过滤 → RAG 检查 → Search Agent → Curator Agent → 持久化。
+ * 核心编排服务：LLM 领域过滤 → RAG 检查 → Search Agent → Curator Agent → 追问生成 → 持久化。
  */
 @Service
 public class ChatService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
+
+    private static final int FOLLOW_UP_MAX_REPORT_CHARS = 3000;
 
     private final ChatModel chatModel;
     private final SearchAgent searchAgent;
@@ -50,25 +52,17 @@ public class ChatService {
     }
 
     public record SearchResult(RagService.RagResult ragAnswer,
-                               CuratedReport curatedReport, List<ScoredResource> searchResults,
-                               ClarificationData clarification) {
+                               CuratedReport curatedReport, List<ScoredResource> searchResults) {
         public boolean isRagHit() { return ragAnswer != null; }
-        public boolean isClarification() { return clarification != null; }
         public static SearchResult ragHit(RagService.RagResult answer) {
-            return new SearchResult(answer, null, List.of(), null);
+            return new SearchResult(answer, null, List.of());
         }
         public static SearchResult searchResult(CuratedReport report, List<ScoredResource> resources) {
-            return new SearchResult(null, report, resources, null);
-        }
-        public static SearchResult clarification(ClarificationData data) {
-            return new SearchResult(null, null, List.of(), data);
+            return new SearchResult(null, report, resources);
         }
     }
 
-    public record QueryAnalysis(boolean isTech, boolean isVague,
-                                String detectedTopic, List<String> clarifyingQuestions) {}
-
-    public record ClarificationData(String content, String metadataJson) {}
+    public record QueryAnalysis(boolean isTech) {}
 
     /**
      * 执行完整的搜索-整理流程（供 SSE 端点调用）。
@@ -84,22 +78,14 @@ public class ChatService {
         userMsg.setCreatedAt(LocalDateTime.now());
         messageMapper.insert(userMsg);
 
-        // 2. 查询分析：领域判断 + 模糊度检测
-        QueryAnalysis analysis = analyzeQuery(query);
-        if (!analysis.isTech()) {
+        // 2. 领域过滤
+        if (!isTechQuery(query)) {
             SseUtils.sendError(emitter, ErrorCode.NON_TECH_QUERY.getCode(),
                     ErrorCode.NON_TECH_QUERY.getMessage());
             SearchResult errorResult = SearchResult.searchResult(
                     errorReport(ErrorCode.NON_TECH_QUERY.getMessage()), List.of());
             persistAssistantMessage(conversationId, errorResult);
             return errorResult;
-        }
-
-        if (analysis.isVague()) {
-            SseUtils.sendStatus(emitter, "clarifying", "正在分析需求...");
-            ClarificationData clarification = buildClarification(analysis);
-            persistClarificationMessage(conversationId, clarification);
-            return SearchResult.clarification(clarification);
         }
 
         // 3. RAG 检查
@@ -143,17 +129,75 @@ public class ChatService {
             report = curatorAgent.curate(query, searchResults, emitter);
         } catch (Exception e) {
             log.error("Curator Agent 异常", e);
-            report = new CuratedReport(query,
-                    "# " + query + "\n\n> AI 报告生成暂时不可用，以下为按质量评分排序的原始搜索结果。\n\n"
-                            + buildSimpleResourceList(searchResults),
-                    searchResults.stream().map(ScoredResource::getUrl).toList(),
-                    Instant.now());
+            report = buildFallbackReport(query, searchResults);
+        }
+
+        // 6. 追问生成（异步，失败不影响主流程）
+        String followUp = generateFollowUp(query, report.markdown());
+        if (followUp != null && !followUp.isBlank()) {
+            report = appendFollowUp(report, followUp);
         }
 
         SearchResult result = SearchResult.searchResult(report, searchResults);
         persistAssistantMessage(conversationId, result);
         return result;
     }
+
+    private CuratedReport buildFallbackReport(String query, List<ScoredResource> resources) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# ").append(query).append("\n\n");
+        sb.append("> AI 报告生成暂时不可用，以下为按质量评分排序的原始搜索结果。\n\n");
+        int i = 1;
+        for (ScoredResource r : resources) {
+            sb.append("## ").append(i).append(". ").append(r.getTitle())
+                    .append(" ⭐").append(String.format("%.1f", r.getWeightedScore())).append("\n\n");
+            sb.append("- 来源: ").append(r.getUrl()).append("\n\n");
+            i++;
+        }
+        return new CuratedReport(query, sb.toString(),
+                resources.stream().map(ScoredResource::getUrl).toList(), Instant.now());
+    }
+
+    // ─── 追问生成 ────────────────────────────────────────────
+
+    /**
+     * 基于报告内容，由 LLM 生成 2-3 条自然语言追问建议。
+     * 失败时返回 null，不影响主流程。
+     */
+    private String generateFollowUp(String query, String reportMarkdown) {
+        try {
+            String truncated = reportMarkdown.length() > FOLLOW_UP_MAX_REPORT_CHARS
+                    ? reportMarkdown.substring(0, FOLLOW_UP_MAX_REPORT_CHARS)
+                    : reportMarkdown;
+            String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
+            String prompt = """
+                    根据以下技术报告的已有内容，提出2-3个读者可能感兴趣的追问方向。
+                    追问应：与报告主题相关但不重复、自然对话语气、中文、每条一行以"- "开头。
+
+                    用户查询：<user_query>%s</user_query>
+                    报告摘要：
+                    %s
+
+                    输出格式（仅输出追问，不要其他文字）：
+                    - 追问1
+                    - 追问2
+                    - 追问3
+                    """.formatted(sanitized, truncated);
+            String response = chatModel.call(new Prompt(new UserMessage(prompt)))
+                    .getResults().getFirst().getOutput().getText().trim();
+            return response.isBlank() ? null : response;
+        } catch (Exception e) {
+            log.warn("追问生成失败，跳过", e);
+            return null;
+        }
+    }
+
+    private CuratedReport appendFollowUp(CuratedReport report, String followUp) {
+        String markdown = report.markdown() + "\n\n---\n\n## 进一步探索\n\n" + followUp;
+        return new CuratedReport(report.title(), markdown, report.sources(), report.generatedAt());
+    }
+
+    // ─── 持久化 ──────────────────────────────────────────────
 
     private void persistAssistantMessage(Long conversationId, SearchResult result) {
         try {
@@ -177,20 +221,6 @@ public class ChatService {
         }
     }
 
-    private void persistClarificationMessage(Long conversationId, ClarificationData clarification) {
-        try {
-            Message msg = new Message();
-            msg.setConversationId(conversationId);
-            msg.setRole("assistant");
-            msg.setContent(clarification.content());
-            msg.setMetadata(clarification.metadataJson());
-            msg.setCreatedAt(LocalDateTime.now());
-            messageMapper.insert(msg);
-        } catch (Exception e) {
-            log.error("保存引导消息失败", e);
-        }
-    }
-
     private static String toJsonArray(List<String> urls) {
         if (urls == null || urls.isEmpty()) return "[]";
         StringBuilder sb = new StringBuilder("[");
@@ -202,96 +232,31 @@ public class ChatService {
         return sb.toString();
     }
 
+    // ─── 领域判断 ────────────────────────────────────────────
+
     /**
-     * LLM 查询分析：一次性判断是否技术领域 + 是否模糊 + 生成引导问题。
-     * 用户输入用 XML 标签包裹防止 prompt 注入。
+     * LLM 前置判断是否为技术领域问题。用户输入用 XML 标签包裹防止 prompt 注入。
      */
-    public QueryAnalysis analyzeQuery(String query) {
+    public boolean isTechQuery(String query) {
         try {
             String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
             String prompt = """
-                    分析用户查询，仅输出 JSON（不要其他文字）：
+                    判断以下用户输入是否属于技术/编程领域。
+                    仅输出 YES 或 NO：
                     <user_query>%s</user_query>
-                    规则：
-                    - 非技术问题 → {"isTech":false}
-                    - 清晰的技术问题 → {"isTech":true,"isVague":false}
-                    - 模糊的技术查询（单关键词、过于宽泛、缺少上下文）→
-                      {"isTech":true,"isVague":true,"detectedTopic":"主题","clarifyingQuestions":["引导1","引导2","引导3"]}
-                    引导问题应帮助用户缩小范围，2-4个选项，每个不超过15字，使用中文。
                     """.formatted(sanitized);
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResults().getFirst().getOutput().getText().trim();
-            return parseQueryAnalysis(response);
+            return "YES".equalsIgnoreCase(response);
         } catch (Exception e) {
-            log.warn("查询分析失败，默认当作清晰技术查询处理", e);
-            return new QueryAnalysis(true, false, null, List.of());
+            log.warn("LLM 领域判断失败，默认为技术查询", e);
+            return true;
         }
     }
 
-    private QueryAnalysis parseQueryAnalysis(String json) {
-        try {
-            com.fasterxml.jackson.databind.ObjectMapper mapper =
-                    new com.fasterxml.jackson.databind.ObjectMapper();
-            com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(json);
-            boolean isTech = node.has("isTech") && node.get("isTech").asBoolean();
-            boolean isVague = node.has("isVague") && node.get("isVague").asBoolean();
-            String topic = node.has("detectedTopic") ? node.get("detectedTopic").asText() : null;
-            List<String> questions = new java.util.ArrayList<>();
-            if (node.has("clarifyingQuestions")) {
-                for (com.fasterxml.jackson.databind.JsonNode q : node.get("clarifyingQuestions")) {
-                    questions.add(q.asText());
-                }
-            }
-            return new QueryAnalysis(isTech, isVague, topic, questions);
-        } catch (Exception e) {
-            log.warn("解析查询分析 JSON 失败: {}", json, e);
-            return new QueryAnalysis(true, false, null, List.of());
-        }
-    }
-
-    private ClarificationData buildClarification(QueryAnalysis analysis) {
-        StringBuilder content = new StringBuilder();
-        content.append("你想了解 **").append(analysis.detectedTopic()).append("** 的哪个方面呢？");
-        content.append("可以试试更具体地描述你的需求，比如：\n");
-        for (String q : analysis.clarifyingQuestions()) {
-            content.append("\n- ").append(q);
-        }
-
-        StringBuilder meta = new StringBuilder("{\"type\":\"clarification\",");
-        meta.append("\"detectedTopic\":\"").append(escapeJson(analysis.detectedTopic())).append("\",");
-        meta.append("\"clarifyingQuestions\":[");
-        for (int i = 0; i < analysis.clarifyingQuestions().size(); i++) {
-            if (i > 0) meta.append(",");
-            meta.append("\"").append(escapeJson(analysis.clarifyingQuestions().get(i))).append("\"");
-        }
-        meta.append("]}");
-
-        return new ClarificationData(content.toString(), meta.toString());
-    }
-
-    private static String escapeJson(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
-
-    /** @deprecated 使用 {@link #analyzeQuery(String)} 替代 */
-    public boolean isTechQuery(String query) {
-        return analyzeQuery(query).isTech();
-    }
+    // ─── 工具方法 ────────────────────────────────────────────
 
     private CuratedReport errorReport(String message) {
         return new CuratedReport("搜索错误", "# 搜索错误\n\n" + message, List.of(), Instant.now());
-    }
-
-    private String buildSimpleResourceList(List<ScoredResource> resources) {
-        StringBuilder sb = new StringBuilder();
-        int i = 1;
-        for (ScoredResource r : resources) {
-            sb.append("## ").append(i).append(". ").append(r.getTitle())
-                    .append(" ⭐").append(String.format("%.1f", r.getWeightedScore())).append("\n\n");
-            sb.append("- 来源: ").append(r.getUrl()).append("\n\n");
-            i++;
-        }
-        return sb.toString();
     }
 }
