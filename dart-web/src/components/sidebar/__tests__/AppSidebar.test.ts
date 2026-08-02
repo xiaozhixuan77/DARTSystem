@@ -1,9 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { deleteConversation } from '@/api/conversation'
 import AppSidebar from '../AppSidebar.vue'
+
+vi.mock('element-plus', () => ({
+  ElMessage: { success: vi.fn() },
+  ElMessageBox: { confirm: vi.fn() }
+}))
 
 vi.mock('@/api/conversation', () => ({
   listConversations: vi.fn(),
@@ -105,5 +113,133 @@ describe('AppSidebar.vue', () => {
     await wrapper.find('.logout-btn').trigger('click')
 
     expect(mockPush).toHaveBeenCalledWith('/login')
+  })
+
+  // === 会话删除 ===
+
+  const conv = (id: number, title: string) => ({
+    id, title, tags: [], lastMessage: '', messageCount: 0, updatedAt: ''
+  })
+
+  async function rightClickFirstSession(wrapper: ReturnType<typeof mount>) {
+    await wrapper.find('.session-item').trigger('contextmenu', { clientX: 100, clientY: 200 })
+  }
+
+  it('右键会话显示上下文菜单', async () => {
+    const store = useChatStore()
+    store.conversations = [conv(1, 'Go 并发')]
+    const wrapper = mount(AppSidebar)
+
+    await rightClickFirstSession(wrapper)
+
+    expect(wrapper.find('.context-menu').exists()).toBe(true)
+    expect(wrapper.find('.context-menu').attributes('style')).toContain('left: 100px')
+    expect(wrapper.find('.context-menu').attributes('style')).toContain('top: 200px')
+  })
+
+  it('点击删除触发确认框且携带会话标题', async () => {
+    const store = useChatStore()
+    store.conversations = [conv(1, 'Go 并发')]
+    const wrapper = mount(AppSidebar)
+
+    await rightClickFirstSession(wrapper)
+    await wrapper.find('.menu-item.danger').trigger('click')
+
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
+    expect(String(vi.mocked(ElMessageBox.confirm).mock.calls[0][0])).toContain('Go 并发')
+  })
+
+  it('确认后删除会话并移除列表项', async () => {
+    vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as any)
+    vi.mocked(deleteConversation).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null, data: undefined
+    })
+    const store = useChatStore()
+    store.conversations = [conv(1, 'A'), conv(2, 'B')]
+    const wrapper = mount(AppSidebar)
+
+    await rightClickFirstSession(wrapper)
+    await wrapper.find('.menu-item.danger').trigger('click')
+    await flushPromises()
+
+    expect(deleteConversation).toHaveBeenCalledWith(1)
+    expect(wrapper.findAll('.session-item')).toHaveLength(1)
+    expect(ElMessage.success).toHaveBeenCalledWith('会话已删除')
+  })
+
+  it('取消确认时不删除', async () => {
+    vi.mocked(ElMessageBox.confirm).mockRejectedValue('cancel')
+    const store = useChatStore()
+    store.conversations = [conv(1, 'A'), conv(2, 'B')]
+    const wrapper = mount(AppSidebar)
+
+    await rightClickFirstSession(wrapper)
+    await wrapper.find('.menu-item.danger').trigger('click')
+    await flushPromises()
+
+    expect(deleteConversation).not.toHaveBeenCalled()
+    expect(wrapper.findAll('.session-item')).toHaveLength(2)
+  })
+
+  it('删除当前会话后跳转 /chat', async () => {
+    vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as any)
+    vi.mocked(deleteConversation).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null, data: undefined
+    })
+    const store = useChatStore()
+    store.conversations = [conv(1, 'A'), conv(2, 'B')]
+    store.currentId = 1
+    const wrapper = mount(AppSidebar)
+
+    await rightClickFirstSession(wrapper)
+    await wrapper.find('.menu-item.danger').trigger('click')
+    await flushPromises()
+
+    expect(mockPush).toHaveBeenCalledWith('/chat')
+  })
+
+  it('删除非当前会话不跳转', async () => {
+    vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as any)
+    vi.mocked(deleteConversation).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null, data: undefined
+    })
+    const store = useChatStore()
+    store.conversations = [conv(1, 'A'), conv(2, 'B')]
+    store.currentId = 2
+    const wrapper = mount(AppSidebar)
+
+    await rightClickFirstSession(wrapper)
+    await wrapper.find('.menu-item.danger').trigger('click')
+    await flushPromises()
+
+    expect(deleteConversation).toHaveBeenCalledWith(1)
+    expect(mockPush).not.toHaveBeenCalled()
+  })
+
+  it('点击窗口其他位置关闭菜单', async () => {
+    const store = useChatStore()
+    store.conversations = [conv(1, 'A')]
+    const wrapper = mount(AppSidebar)
+
+    await rightClickFirstSession(wrapper)
+    expect(wrapper.find('.context-menu').exists()).toBe(true)
+
+    window.dispatchEvent(new Event('click'))
+    await nextTick()
+
+    expect(wrapper.find('.context-menu').exists()).toBe(false)
+  })
+
+  it('滚动会话列表关闭菜单', async () => {
+    const store = useChatStore()
+    store.conversations = [conv(1, 'A')]
+    const wrapper = mount(AppSidebar)
+
+    await rightClickFirstSession(wrapper)
+    expect(wrapper.find('.context-menu').exists()).toBe(true)
+
+    await wrapper.find('.session-list').trigger('scroll')
+
+    expect(wrapper.find('.context-menu').exists()).toBe(false)
   })
 })
