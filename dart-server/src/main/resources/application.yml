@@ -80,6 +80,11 @@ mybatis-plus:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
+# 会话清理配置
+conversation:
+  cleanup:
+    max-conversations-per-user: 50
+
 # JWT
 jwt:
   secret: ${JWT_SECRET:ZGV2LWRlZmF1bHQtc2VjcmV0LWZvci1sb2NhbC1kZXZlbG9wbWVudC1vbmx5LW5vdC1mb3ItcHJvZHVjdGlvbg==}

@@ -145,15 +145,51 @@ public class ConversationService {
     }
 
     private void softDeleteConversation(Conversation conversation) {
-        conversation.setIsDeleted(1);
-        conversation.setUpdatedAt(LocalDateTime.now());
-        conversationMapper.updateById(conversation);
+        // 不能用 updateById 设置 is_deleted：
+        // MyBatis-Plus 全局逻辑删除会拦截 update 中的 is_deleted 字段，deleteById 才会被翻译为 SET is_deleted=1
+        conversationMapper.deleteById(conversation.getId());
     }
 
     private void deleteMessages(Long conversationId) {
         QueryWrapper<Message> query = new QueryWrapper<>();
         query.eq("conversation_id", conversationId);
         messageMapper.delete(query);
+    }
+
+    @Transactional
+    public void cleanupExcessConversations(int maxPerUser) {
+        if (maxPerUser < 1) {
+            log.warn("会话保留上限配置无效: {}, 跳过清理", maxPerUser);
+            return;
+        }
+
+        QueryWrapper<Conversation> usersQuery = new QueryWrapper<>();
+        usersQuery.select("user_id", "count(1) as cnt")
+                .eq("is_deleted", 0)
+                .groupBy("user_id")
+                .having("count(1) > {0}", maxPerUser);
+        List<Map<String, Object>> rows = conversationMapper.selectMaps(usersQuery);
+
+        for (Map<String, Object> row : rows) {
+            Long userId = ((Number) row.get("user_id")).longValue();
+            int excess = ((Number) row.get("cnt")).intValue() - maxPerUser;
+            if (excess <= 0) {
+                continue;
+            }
+
+            QueryWrapper<Conversation> oldQuery = new QueryWrapper<>();
+            oldQuery.eq("user_id", userId)
+                    .eq("is_deleted", 0)
+                    .orderByAsc("updated_at")
+                    .last("LIMIT " + excess);
+            List<Conversation> oldOnes = conversationMapper.selectList(oldQuery);
+
+            for (Conversation conv : oldOnes) {
+                softDeleteConversation(conv);
+                deleteMessages(conv.getId());
+            }
+            log.info("超量会话清理: userId={}, 清理 {} 条", userId, oldOnes.size());
+        }
     }
 
     public List<MessageVO> getMessages(Long userId, Long conversationId) {

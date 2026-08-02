@@ -166,9 +166,7 @@ class ConversationServiceTest {
 
         conversationService.deleteConversation(USER_ID, CONV_ID);
 
-        ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
-        verify(conversationMapper).updateById(captor.capture());
-        assertThat(captor.getValue().getIsDeleted()).isEqualTo(1);
+        verify(conversationMapper).deleteById(CONV_ID);
 
         ArgumentCaptor<QueryWrapper> deleteCaptor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(messageMapper).delete(deleteCaptor.capture());
@@ -261,9 +259,7 @@ class ConversationServiceTest {
 
         conversationService.cleanupExcessConversations(2);
 
-        ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
-        verify(conversationMapper).updateById(captor.capture());
-        assertThat(captor.getValue().getIsDeleted()).isEqualTo(1);
+        verify(conversationMapper).deleteById(1L);
         verify(messageMapper).delete(any(QueryWrapper.class));
     }
 
@@ -273,7 +269,7 @@ class ConversationServiceTest {
 
         conversationService.cleanupExcessConversations(2);
 
-        verify(conversationMapper, never()).updateById(any());
+        verify(conversationMapper, never()).deleteById((Long) any());
         verify(messageMapper, never()).delete(any());
     }
 
@@ -284,7 +280,7 @@ class ConversationServiceTest {
 
         conversationService.cleanupExcessConversations(2);
 
-        verify(conversationMapper, never()).updateById(any());
+        verify(conversationMapper, never()).deleteById((Long) any());
         verify(messageMapper, never()).delete(any());
     }
 
@@ -315,7 +311,8 @@ class ConversationServiceTest {
 
         conversationService.cleanupExcessConversations(2);
 
-        verify(conversationMapper, times(2)).updateById(any(Conversation.class));
+        verify(conversationMapper).deleteById(11L);
+        verify(conversationMapper).deleteById(22L);
         verify(messageMapper, times(2)).delete(any(QueryWrapper.class));
     }
 }

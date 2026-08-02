@@ -118,10 +118,10 @@ class ScheduledTaskIntegrationTest extends BaseIntegrationTest {
 
         conversationService.cleanupExcessConversations(2);
 
-        assertThat(isSoftDeleted(oldest.getId())).isTrue();
-        assertThat(isSoftDeleted(old.getId())).isTrue();
-        assertThat(isSoftDeleted(recent.getId())).isFalse();
-        assertThat(isSoftDeleted(newest.getId())).isFalse();
+        assertThat(isDeleted(oldest.getId())).isTrue();
+        assertThat(isDeleted(old.getId())).isTrue();
+        assertThat(isDeleted(recent.getId())).isFalse();
+        assertThat(isDeleted(newest.getId())).isFalse();
     }
 
     @Test
@@ -134,9 +134,9 @@ class ScheduledTaskIntegrationTest extends BaseIntegrationTest {
 
         conversationService.cleanupExcessConversations(1);
 
-        assertThat(isSoftDeleted(oldest.getId())).isTrue();
+        assertThat(isDeleted(oldest.getId())).isTrue();
         assertThat(countMessages(oldest.getId())).isZero();
-        assertThat(isSoftDeleted(newest.getId())).isFalse();
+        assertThat(isDeleted(newest.getId())).isFalse();
         assertThat(countMessages(newest.getId())).isEqualTo(1);
     }
 
@@ -153,11 +153,11 @@ class ScheduledTaskIntegrationTest extends BaseIntegrationTest {
 
         conversationService.cleanupExcessConversations(2);
 
-        assertThat(isSoftDeleted(aOld.getId())).isTrue();
-        assertThat(isSoftDeleted(a1.getId())).isFalse();
-        assertThat(isSoftDeleted(a2.getId())).isFalse();
-        assertThat(isSoftDeleted(b1.getId())).isFalse();
-        assertThat(isSoftDeleted(b2.getId())).isFalse();
+        assertThat(isDeleted(aOld.getId())).isTrue();
+        assertThat(isDeleted(a1.getId())).isFalse();
+        assertThat(isDeleted(a2.getId())).isFalse();
+        assertThat(isDeleted(b1.getId())).isFalse();
+        assertThat(isDeleted(b2.getId())).isFalse();
     }
 
     @Test
@@ -168,7 +168,7 @@ class ScheduledTaskIntegrationTest extends BaseIntegrationTest {
 
         conversationService.cleanupExcessConversations(0);
 
-        assertThat(isSoftDeleted(conv.getId())).isFalse();
+        assertThat(isDeleted(conv.getId())).isFalse();
         assertThat(countMessages(conv.getId())).isEqualTo(1);
     }
 
@@ -283,14 +283,6 @@ class ScheduledTaskIntegrationTest extends BaseIntegrationTest {
      */
     private boolean isDeleted(Long id) {
         return conversationMapper.selectById(id) == null;
-    }
-
-    /**
-     * 测试环境无全局逻辑删除配置，selectById 不过滤 is_deleted，直接读字段。
-     */
-    private boolean isSoftDeleted(Long id) {
-        Conversation conv = conversationMapper.selectById(id);
-        return conv != null && conv.getIsDeleted() == 1;
     }
 
     private void insertMessages(Long conversationId, int count) {
