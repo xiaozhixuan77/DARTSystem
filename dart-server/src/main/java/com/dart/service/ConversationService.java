@@ -139,10 +139,21 @@ public class ConversationService {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
 
+        softDeleteConversation(conversation);
+        deleteMessages(conversationId);
+        log.info("Conversation soft-deleted: id={}", conversationId);
+    }
+
+    private void softDeleteConversation(Conversation conversation) {
         conversation.setIsDeleted(1);
         conversation.setUpdatedAt(LocalDateTime.now());
         conversationMapper.updateById(conversation);
-        log.info("Conversation soft-deleted: id={}", conversationId);
+    }
+
+    private void deleteMessages(Long conversationId) {
+        QueryWrapper<Message> query = new QueryWrapper<>();
+        query.eq("conversation_id", conversationId);
+        messageMapper.delete(query);
     }
 
     public List<MessageVO> getMessages(Long userId, Long conversationId) {
