@@ -27,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -166,6 +167,10 @@ class ConversationServiceTest {
         ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
         verify(conversationMapper).updateById(captor.capture());
         assertThat(captor.getValue().getIsDeleted()).isEqualTo(1);
+
+        ArgumentCaptor<QueryWrapper> deleteCaptor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(messageMapper).delete(deleteCaptor.capture());
+        assertThat(deleteCaptor.getValue().getSqlSegment()).contains("conversation_id");
     }
 
     @Test
@@ -176,6 +181,7 @@ class ConversationServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(ex -> ((BusinessException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.CONVERSATION_NOT_FOUND);
+        verify(messageMapper, never()).delete(any());
     }
 
     // === getMessages ===
@@ -221,6 +227,7 @@ class ConversationServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(ex -> ((BusinessException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.FORBIDDEN);
+        verify(messageMapper, never()).delete(any());
     }
 
     @Test
