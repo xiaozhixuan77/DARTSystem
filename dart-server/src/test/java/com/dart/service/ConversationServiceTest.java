@@ -92,6 +92,22 @@ class ConversationServiceTest {
         verify(conversationMapper).insert(any(Conversation.class));
     }
 
+    @Test
+    void createConversation_nullRequest_usesDefaultTitle() {
+        doAnswer(inv -> {
+            Conversation c = inv.getArgument(0, Conversation.class);
+            c.setId(201L);
+            return 1;
+        }).when(conversationMapper).insert(any(Conversation.class));
+
+        // 前端创建会话可不传 body
+        ConversationVO result = conversationService.createConversation(USER_ID, null);
+
+        assertThat(result.getId()).isEqualTo(201L);
+        assertThat(result.getTitle()).isEqualTo("新对话");
+        verify(conversationMapper).insert(any(Conversation.class));
+    }
+
     // === updateConversation ===
 
     @Test

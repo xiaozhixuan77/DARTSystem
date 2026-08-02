@@ -8,7 +8,7 @@ export async function listConversations(): Promise<ApiResponse<ConversationVO[]>
 }
 
 export async function createConversation(): Promise<ApiResponse<ConversationVO>> {
-  const { data } = await client.post<ApiResponse<ConversationVO>>('/conversations')
+  const { data } = await client.post<ApiResponse<ConversationVO>>('/conversations', {})
   return data
 }
 

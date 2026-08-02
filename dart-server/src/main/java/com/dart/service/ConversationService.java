@@ -72,9 +72,9 @@ public class ConversationService {
 
         Conversation conversation = new Conversation();
         conversation.setUserId(userId);
-        conversation.setTitle(request.getTitle() != null && !request.getTitle().isBlank()
+        conversation.setTitle(request != null && request.getTitle() != null && !request.getTitle().isBlank()
                 ? request.getTitle() : "新对话");
-        conversation.setTags(request.getTags());
+        conversation.setTags(request != null ? request.getTags() : null);
         conversation.setIsDeleted(0);
         conversationMapper.insert(conversation);
 

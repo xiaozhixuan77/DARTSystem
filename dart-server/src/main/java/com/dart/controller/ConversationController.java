@@ -41,7 +41,9 @@ public class ConversationController {
     }
 
     @PostMapping
-    public ApiResponse<ConversationVO> create(@Valid @RequestBody ConversationUpsertRequest request) {
+    public ApiResponse<ConversationVO> create(
+            @RequestBody(required = false) @Valid ConversationUpsertRequest request) {
+        // 前端创建会话可不传 body（默认标题"新对话"）
         return ApiResponse.ok(conversationService.createConversation(requireUserId(), request));
     }
 
