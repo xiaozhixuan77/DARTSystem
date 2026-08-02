@@ -6,7 +6,9 @@ import mermaid from 'mermaid'
 mermaid.initialize({
   startOnLoad: false,
   theme: 'base',
-  mindmap: { useMaxWidth: true }
+  mindmap: { useMaxWidth: true },
+  // 渲染失败时保留原始文本（流式中间态可能触发不完整代码块渲染）
+  suppressErrorRendering: true
 })
 
 const md: MarkdownIt = new MarkdownIt({

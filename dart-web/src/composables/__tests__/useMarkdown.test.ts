@@ -1,18 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useMarkdown } from '../useMarkdown'
 
-vi.mock('mermaid', () => ({
+const mermaidMock = vi.hoisted(() => ({
   default: {
     initialize: vi.fn(),
     run: vi.fn().mockResolvedValue(undefined)
   }
 }))
+vi.mock('mermaid', () => mermaidMock)
 
 describe('useMarkdown', () => {
   const { render, renderMermaidDiagrams } = useMarkdown()
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    // 不清 initialize 调用记录（useMarkdown 模块加载时已调用）
+    mermaidMock.default.run.mockClear()
   })
 
   it('渲染纯文本包含原文', () => {
@@ -86,6 +88,13 @@ describe('useMarkdown', () => {
     const container = document.createElement('div')
     await renderMermaidDiagrams(container)
     expect(mermaid.run).toHaveBeenCalled()
+  })
+
+  it('mermaid 初始化配置 suppressErrorRendering', async () => {
+    const { default: mermaid } = await import('mermaid')
+    expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({
+      suppressErrorRendering: true
+    }))
   })
 
   it('不含 mermaid 代码块时正常渲染', () => {

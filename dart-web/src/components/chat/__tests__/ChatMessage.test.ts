@@ -1,11 +1,22 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { reactive } from 'vue'
 import ChatMessage from '../ChatMessage.vue'
+import { useChatStore } from '@/stores/chat'
+import type { MessageVO } from '@/types/chat'
+
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    run: vi.fn().mockResolvedValue(undefined)
+  }
+}))
 
 describe('ChatMessage.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.clearAllMocks()
   })
 
   it('渲染用户消息', () => {
@@ -73,5 +84,53 @@ describe('ChatMessage.vue', () => {
       }
     })
     expect(wrapper.find('.message-row.user').exists()).toBe(true)
+  })
+
+  // === Mermaid 渲染时序 ===
+
+  it('历史消息挂载时渲染 Mermaid', async () => {
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: { id: 2, role: 'assistant', content: '```mermaid\nmindmap\n  root((Java))\n```', createdAt: '' }
+      }
+    })
+    await flushPromises()
+    const { default: mermaid } = await import('mermaid')
+    expect(mermaid.run).toHaveBeenCalled()
+    expect(wrapper.find('.mermaid').exists()).toBe(true)
+  })
+
+  it('流式中消息内容更新不重复渲染 Mermaid', async () => {
+    const store = useChatStore()
+    store.isStreaming = true
+    const message = reactive<MessageVO>({ id: 2, role: 'assistant', content: '', createdAt: '' })
+    mount(ChatMessage, { props: { message } })
+    await flushPromises()
+    const { default: mermaid } = await import('mermaid')
+    const runMock = vi.mocked(mermaid.run)
+    const callsAfterMount = runMock.mock.calls.length
+
+    // 流式中内容逐步更新
+    message.content = '```mermaid\nmindmap\n  root((Java))\n```'
+    await flushPromises()
+    expect(runMock.mock.calls.length).toBe(callsAfterMount)
+  })
+
+  it('流式结束后渲染完整 Mermaid', async () => {
+    const store = useChatStore()
+    store.isStreaming = true
+    const message = reactive<MessageVO>({
+      id: 2, role: 'assistant',
+      content: '```mermaid\nmindmap\n  root((Java))\n```', createdAt: ''
+    })
+    mount(ChatMessage, { props: { message } })
+    await flushPromises()
+    const { default: mermaid } = await import('mermaid')
+    const runMock = vi.mocked(mermaid.run)
+    const callsBefore = runMock.mock.calls.length
+
+    store.isStreaming = false
+    await flushPromises()
+    expect(runMock.mock.calls.length).toBeGreaterThan(callsBefore)
   })
 })

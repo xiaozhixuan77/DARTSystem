@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, onMounted, nextTick } from 'vue'
 import { useMarkdown } from '@/composables/useMarkdown'
+import { useChatStore } from '@/stores/chat'
 import type { MessageVO } from '@/types/chat'
 
 const props = defineProps<{ message: MessageVO }>()
+const chatStore = useChatStore()
 const { render, renderMermaidDiagrams } = useMarkdown()
 
 const contentRef = ref<HTMLElement | null>(null)
@@ -13,10 +15,20 @@ const renderedContent = computed(() => {
   return render(props.message.content)
 })
 
-watch(renderedContent, async () => {
+async function runMermaid() {
   await nextTick()
   if (contentRef.value) {
     await renderMermaidDiagrams(contentRef.value)
+  }
+}
+
+// 历史消息/消息重建：挂载时渲染（流式中间态不渲染，避免不完整代码块失败）
+onMounted(runMermaid)
+
+// 流式结束（内容完整）后渲染一次，覆盖消息原地更新的场景
+watch(() => chatStore.isStreaming, async (now, prev) => {
+  if (prev === true && now === false) {
+    await runMermaid()
   }
 })
 </script>
