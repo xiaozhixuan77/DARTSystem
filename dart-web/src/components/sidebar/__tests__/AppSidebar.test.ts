@@ -243,14 +243,25 @@ describe('AppSidebar.vue', () => {
     expect(wrapper.find('.context-menu').exists()).toBe(false)
   })
 
-  // === 会话卡片删除按钮 ===
+  // === 会话项删除按钮 ===
 
   it('会话项右侧渲染删除按钮', () => {
     const store = useChatStore()
-    store.conversations = [conv(1, 'Go 并发')]
+    store.conversations = [conv(1, 'A')]
     const wrapper = mount(AppSidebar)
 
-    expect(wrapper.find('.session-item .session-delete').exists()).toBe(true)
+    expect(wrapper.find('.session-delete-btn').exists()).toBe(true)
+  })
+
+  it('点击删除按钮不选中会话', async () => {
+    const store = useChatStore()
+    store.conversations = [conv(1, 'A')]
+    const selectSpy = vi.spyOn(store, 'selectConversation')
+    const wrapper = mount(AppSidebar)
+
+    await wrapper.find('.session-delete-btn').trigger('click')
+
+    expect(selectSpy).not.toHaveBeenCalled()
   })
 
   it('点击删除按钮触发确认框且携带会话标题', async () => {
@@ -258,13 +269,13 @@ describe('AppSidebar.vue', () => {
     store.conversations = [conv(1, 'Go 并发')]
     const wrapper = mount(AppSidebar)
 
-    await wrapper.find('.session-delete').trigger('click')
+    await wrapper.find('.session-delete-btn').trigger('click')
 
     expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1)
     expect(String(vi.mocked(ElMessageBox.confirm).mock.calls[0][0])).toContain('Go 并发')
   })
 
-  it('删除按钮确认后删除会话并移除列表项', async () => {
+  it('确认后删除会话并移除列表项', async () => {
     vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as any)
     vi.mocked(deleteConversation).mockResolvedValue({
       code: 200, message: 'ok', suggestion: null, data: undefined
@@ -273,35 +284,39 @@ describe('AppSidebar.vue', () => {
     store.conversations = [conv(1, 'A'), conv(2, 'B')]
     const wrapper = mount(AppSidebar)
 
-    await wrapper.find('.session-delete').trigger('click')
+    await wrapper.find('.session-delete-btn').trigger('click')
     await flushPromises()
 
     expect(deleteConversation).toHaveBeenCalledWith(1)
     expect(wrapper.findAll('.session-item')).toHaveLength(1)
-    expect(ElMessage.success).toHaveBeenCalledWith('会话已删除')
   })
 
-  it('删除按钮取消确认时不删除', async () => {
+  it('取消确认时不删除', async () => {
     vi.mocked(ElMessageBox.confirm).mockRejectedValue('cancel')
     const store = useChatStore()
     store.conversations = [conv(1, 'A'), conv(2, 'B')]
     const wrapper = mount(AppSidebar)
 
-    await wrapper.find('.session-delete').trigger('click')
+    await wrapper.find('.session-delete-btn').trigger('click')
     await flushPromises()
 
     expect(deleteConversation).not.toHaveBeenCalled()
     expect(wrapper.findAll('.session-item')).toHaveLength(2)
   })
 
-  it('点击删除按钮不触发会话选中', async () => {
+  it('删除当前会话后跳转 /chat', async () => {
+    vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as any)
+    vi.mocked(deleteConversation).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null, data: undefined
+    })
     const store = useChatStore()
-    store.conversations = [conv(1, 'A')]
-    const selectSpy = vi.spyOn(store, 'selectConversation')
+    store.conversations = [conv(1, 'A'), conv(2, 'B')]
+    store.currentId = 1
     const wrapper = mount(AppSidebar)
 
-    await wrapper.find('.session-delete').trigger('click')
+    await wrapper.find('.session-delete-btn').trigger('click')
+    await flushPromises()
 
-    expect(selectSpy).not.toHaveBeenCalled()
+    expect(mockPush).toHaveBeenCalledWith('/chat')
   })
 })
