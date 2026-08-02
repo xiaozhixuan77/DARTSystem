@@ -168,7 +168,7 @@ describe('useChatStore', () => {
 
   it('删除当前会话时调用 API、移除列表并清空状态', async () => {
     vi.mocked(deleteConversation).mockResolvedValue({
-      code: 200, message: 'ok', suggestion: null, data: null
+      code: 200, message: 'ok', suggestion: null, data: undefined
     })
     const store = useChatStore()
     presetConversations(store)
@@ -187,7 +187,7 @@ describe('useChatStore', () => {
 
   it('删除非当前会话不影响当前状态', async () => {
     vi.mocked(deleteConversation).mockResolvedValue({
-      code: 200, message: 'ok', suggestion: null, data: null
+      code: 200, message: 'ok', suggestion: null, data: undefined
     })
     const store = useChatStore()
     presetConversations(store)
