@@ -32,21 +32,17 @@ function closeContextMenu() {
   menuVisible.value = false
 }
 
-async function handleDeleteConversation() {
-  const id = menuConversationId.value
-  if (id == null) return
+async function confirmAndDeleteConversation(id: number, title: string) {
   const isCurrent = chatStore.currentId === id
   try {
     await ElMessageBox.confirm(
-      `确定删除会话「${menuConversationTitle.value}」吗？删除后不可恢复。`,
+      `确定删除会话「${title}」吗？删除后不可恢复。`,
       '删除会话',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
     )
   } catch {
-    closeContextMenu()
     return
   }
-  closeContextMenu()
   if (isCurrent) {
     // 删除流式生成中的会话，避免消息写入已删除会话
     chatStore.cancelStreaming()
@@ -56,6 +52,13 @@ async function handleDeleteConversation() {
     ElMessage.success('会话已删除')
     if (isCurrent) router.replace('/chat')
   }
+}
+
+async function handleDeleteConversation() {
+  const id = menuConversationId.value
+  if (id == null) return
+  closeContextMenu()
+  await confirmAndDeleteConversation(id, menuConversationTitle.value)
 }
 
 onMounted(() => {
@@ -111,6 +114,15 @@ function handleLogout() {
             {{ new Date(conv.updatedAt).toLocaleDateString('zh-CN') }}
           </span>
         </div>
+        <button
+          class="session-delete-btn"
+          title="删除会话"
+          @click.stop="confirmAndDeleteConversation(conv.id!, conv.title)"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+        </button>
       </div>
       <div v-if="chatStore.conversations.length === 0" class="session-empty">
         暂无会话
@@ -200,13 +212,30 @@ function handleLogout() {
   padding: 0 $gap-md;
 }
 .session-item {
-  padding: 12px;
+  position: relative;
+  padding: 12px 28px 12px 12px;
   border-radius: $radius;
   cursor: pointer;
   margin-bottom: 4px;
   transition: background $duration-fast ease;
   &:hover { background: $color-accent-soft; }
   &.active { background: $color-accent-soft; }
+  &:hover .session-delete-btn { opacity: 1; }
+}
+.session-delete-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  border: none;
+  background: none;
+  color: $color-muted;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: opacity $duration-fast ease, color $duration-fast ease;
+  &:hover { color: $color-danger; }
 }
 .session-title {
   font-size: 14px; font-weight: 500;
