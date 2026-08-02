@@ -1,5 +1,6 @@
 package com.dart.integration;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.dart.entity.Conversation;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
@@ -9,6 +10,7 @@ import com.dart.mapper.KnowledgeChunkMapper;
 import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.MessageMapper;
 import com.dart.service.ConversationCleanupTask;
+import com.dart.service.ConversationService;
 import com.dart.service.DataConsistencyTask;
 import com.dart.util.RedisKeyConstants;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +46,9 @@ class ScheduledTaskIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private StringRedisTemplate redisTemplate;
+
+    @Autowired
+    private ConversationService conversationService;
 
     private Long testUserId;
 
@@ -99,6 +104,72 @@ class ScheduledTaskIntegrationTest extends BaseIntegrationTest {
         assertThat(isDeleted(active.getId())).isFalse();
         // 无消息的会话被清理
         assertThat(isDeleted(empty.getId())).isTrue();
+    }
+
+    // ────────── 超量会话清理 ──────────
+
+    @Test
+    @DisplayName("超量会话按更新时间清理最旧的部分")
+    void cleanupExcessConversationsRemovesOldest() {
+        Conversation oldest = createConversation(40);
+        Conversation old = createConversation(30);
+        Conversation recent = createConversation(20);
+        Conversation newest = createConversation(10);
+
+        conversationService.cleanupExcessConversations(2);
+
+        assertThat(isSoftDeleted(oldest.getId())).isTrue();
+        assertThat(isSoftDeleted(old.getId())).isTrue();
+        assertThat(isSoftDeleted(recent.getId())).isFalse();
+        assertThat(isSoftDeleted(newest.getId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("清理时物理删除被清会话的消息")
+    void cleanupExcessRemovesMessagesOfCleanedConversations() {
+        Conversation oldest = createConversation(40);
+        insertMessages(oldest.getId(), 2);
+        Conversation newest = createConversation(10);
+        insertMessages(newest.getId(), 1);
+
+        conversationService.cleanupExcessConversations(1);
+
+        assertThat(isSoftDeleted(oldest.getId())).isTrue();
+        assertThat(countMessages(oldest.getId())).isZero();
+        assertThat(isSoftDeleted(newest.getId())).isFalse();
+        assertThat(countMessages(newest.getId())).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("未超量用户不受影响")
+    void cleanupExcessOnlyAffectsExceedingUsers() {
+        Long userA = createTestUser();
+        Long userB = createTestUser();
+        Conversation aOld = createConversationFor(userA, 40);
+        Conversation a1 = createConversationFor(userA, 30);
+        Conversation a2 = createConversationFor(userA, 20);
+        Conversation b1 = createConversationFor(userB, 40);
+        Conversation b2 = createConversationFor(userB, 30);
+
+        conversationService.cleanupExcessConversations(2);
+
+        assertThat(isSoftDeleted(aOld.getId())).isTrue();
+        assertThat(isSoftDeleted(a1.getId())).isFalse();
+        assertThat(isSoftDeleted(a2.getId())).isFalse();
+        assertThat(isSoftDeleted(b1.getId())).isFalse();
+        assertThat(isSoftDeleted(b2.getId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("maxPerUser 小于 1 时不清理任何会话")
+    void cleanupExcessWithInvalidLimitDoesNothing() {
+        Conversation conv = createConversation(40);
+        insertMessages(conv.getId(), 1);
+
+        conversationService.cleanupExcessConversations(0);
+
+        assertThat(isSoftDeleted(conv.getId())).isFalse();
+        assertThat(countMessages(conv.getId())).isEqualTo(1);
     }
 
     // ────────── 向量补偿 ──────────
@@ -192,8 +263,12 @@ class ScheduledTaskIntegrationTest extends BaseIntegrationTest {
     // ────────── 辅助 ──────────
 
     private Conversation createConversation(int daysAgo) {
+        return createConversationFor(testUserId, daysAgo);
+    }
+
+    private Conversation createConversationFor(Long userId, int daysAgo) {
         Conversation conv = new Conversation();
-        conv.setUserId(testUserId);
+        conv.setUserId(userId);
         conv.setTitle("Test conversation");
         conv.setIsDeleted(0);
         conv.setCreatedAt(LocalDateTime.now().minusDays(daysAgo));
@@ -208,5 +283,30 @@ class ScheduledTaskIntegrationTest extends BaseIntegrationTest {
      */
     private boolean isDeleted(Long id) {
         return conversationMapper.selectById(id) == null;
+    }
+
+    /**
+     * 测试环境无全局逻辑删除配置，selectById 不过滤 is_deleted，直接读字段。
+     */
+    private boolean isSoftDeleted(Long id) {
+        Conversation conv = conversationMapper.selectById(id);
+        return conv != null && conv.getIsDeleted() == 1;
+    }
+
+    private void insertMessages(Long conversationId, int count) {
+        for (int i = 0; i < count; i++) {
+            Message msg = new Message();
+            msg.setConversationId(conversationId);
+            msg.setRole("user");
+            msg.setContent("Msg " + i);
+            msg.setCreatedAt(LocalDateTime.now());
+            messageMapper.insert(msg);
+        }
+    }
+
+    private Long countMessages(Long conversationId) {
+        QueryWrapper<Message> query = new QueryWrapper<>();
+        query.eq("conversation_id", conversationId);
+        return messageMapper.selectCount(query);
     }
 }

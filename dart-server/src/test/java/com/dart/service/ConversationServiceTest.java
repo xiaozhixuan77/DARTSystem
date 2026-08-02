@@ -28,7 +28,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -241,5 +243,79 @@ class ConversationServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(ex -> ((BusinessException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.FORBIDDEN);
+    }
+
+    // === cleanupExcessConversations ===
+
+    @Test
+    void cleanupExcessConversations_removesOldestBeyondLimit() {
+        when(conversationMapper.selectMaps(any(QueryWrapper.class)))
+                .thenReturn(List.of(Map.of("user_id", 1L, "cnt", 3L)));
+
+        Conversation oldest = new Conversation();
+        oldest.setId(1L);
+        oldest.setUserId(1L);
+        oldest.setIsDeleted(0);
+        when(conversationMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(oldest));
+
+        conversationService.cleanupExcessConversations(2);
+
+        ArgumentCaptor<Conversation> captor = ArgumentCaptor.forClass(Conversation.class);
+        verify(conversationMapper).updateById(captor.capture());
+        assertThat(captor.getValue().getIsDeleted()).isEqualTo(1);
+        verify(messageMapper).delete(any(QueryWrapper.class));
+    }
+
+    @Test
+    void cleanupExcessConversations_noUsersExceedLimit_noop() {
+        when(conversationMapper.selectMaps(any(QueryWrapper.class))).thenReturn(List.of());
+
+        conversationService.cleanupExcessConversations(2);
+
+        verify(conversationMapper, never()).updateById(any());
+        verify(messageMapper, never()).delete(any());
+    }
+
+    @Test
+    void cleanupExcessConversations_userWithinLimit_noop() {
+        when(conversationMapper.selectMaps(any(QueryWrapper.class)))
+                .thenReturn(List.of(Map.of("user_id", 1L, "cnt", 2L)));
+
+        conversationService.cleanupExcessConversations(2);
+
+        verify(conversationMapper, never()).updateById(any());
+        verify(messageMapper, never()).delete(any());
+    }
+
+    @Test
+    void cleanupExcessConversations_invalidLimit_skips() {
+        conversationService.cleanupExcessConversations(0);
+
+        verifyNoInteractions(conversationMapper, messageMapper);
+    }
+
+    @Test
+    void cleanupExcessConversations_deleteMessagesPerConversation() {
+        when(conversationMapper.selectMaps(any(QueryWrapper.class)))
+                .thenReturn(List.of(
+                        Map.of("user_id", 1L, "cnt", 3L),
+                        Map.of("user_id", 2L, "cnt", 3L)));
+
+        Conversation old1 = new Conversation();
+        old1.setId(11L);
+        old1.setUserId(1L);
+        old1.setIsDeleted(0);
+        Conversation old2 = new Conversation();
+        old2.setId(22L);
+        old2.setUserId(2L);
+        old2.setIsDeleted(0);
+        when(conversationMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(old1), List.of(old2));
+
+        conversationService.cleanupExcessConversations(2);
+
+        verify(conversationMapper, times(2)).updateById(any(Conversation.class));
+        verify(messageMapper, times(2)).delete(any(QueryWrapper.class));
     }
 }
