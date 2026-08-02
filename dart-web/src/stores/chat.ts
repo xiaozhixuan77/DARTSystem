@@ -59,7 +59,7 @@ export const useChatStore = defineStore('chat', () => {
     return 0
   }
 
-  async function removeConversation(id: number) {
+  async function removeConversation(id: number): Promise<boolean> {
     try {
       await deleteConversation(id)
       conversations.value = conversations.value.filter((c) => c.id !== id)
@@ -67,7 +67,9 @@ export const useChatStore = defineStore('chat', () => {
         currentId.value = null
         messages.value = []
       }
+      return true
     } catch { /* ignore */ }
+    return false
   }
 
   function send(message: string) {
