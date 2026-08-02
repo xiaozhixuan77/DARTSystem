@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { registerAndLogin, gotoChat } from './helpers'
 
 const uniqueUser = `e2e_${Date.now()}`
 const password = 'testpass123'
@@ -45,36 +46,28 @@ test.describe('认证流程', () => {
     await expect(page).toHaveURL(/\/login/, { timeout: 5000 })
   })
 
-  test('登录后 Token 持久化到 localStorage', async ({ page }) => {
-    await page.goto('/login')
-    // 手动设置 token 模拟登录后状态
-    await page.evaluate(() => {
-      localStorage.setItem('accessToken', 'test-access-token')
-      localStorage.setItem('refreshToken', 'test-refresh-token')
-      localStorage.setItem('userInfo', JSON.stringify({ userId: 1, username: 'persist_test' }))
-    })
+  test('登录后 Token 持久化到 localStorage', async ({ page, request }) => {
+    await registerAndLogin(page, request)
+    await gotoChat(page)
 
-    await page.goto('/chat')
+    const tokenBefore = await page.evaluate(() => localStorage.getItem('accessToken'))
+    expect(tokenBefore).toBeTruthy()
+
+    // 刷新页面后 token 仍在，登录态保持
+    await page.reload()
     await page.waitForLoadState('networkidle')
 
-    const token = await page.evaluate(() => localStorage.getItem('accessToken'))
-    expect(token).toBe('test-access-token')
+    const tokenAfter = await page.evaluate(() => localStorage.getItem('accessToken'))
+    expect(tokenAfter).toBe(tokenBefore)
   })
 
-  test('退出登录清除状态并跳转', async ({ page }) => {
-    await page.evaluate(() => {
-      localStorage.setItem('accessToken', 'e2e-test-token')
-      localStorage.setItem('refreshToken', 'e2e-test-refresh')
-      localStorage.setItem('userInfo', JSON.stringify({ userId: 1, username: 'logout_test' }))
-    })
-    await page.goto('/chat')
-    await page.waitForLoadState('networkidle')
+  test('退出登录清除状态并跳转', async ({ page, request }) => {
+    await registerAndLogin(page, request)
+    await gotoChat(page)
 
     // 点击退出按钮
-    const logoutBtn = page.locator('.logout-btn')
-    if (await logoutBtn.isVisible()) {
-      await logoutBtn.click()
-    }
+    await expect(page.locator('.logout-btn')).toBeVisible()
+    await page.locator('.logout-btn').click()
 
     // 应该跳转到登录页
     await expect(page).toHaveURL(/\/login/, { timeout: 5000 })

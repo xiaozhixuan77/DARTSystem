@@ -1,15 +1,10 @@
 import { test, expect } from '@playwright/test'
+import { registerAndLogin, gotoChat } from './helpers'
 
 test.describe('UI 交互', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/login')
-    await page.evaluate(() => {
-      localStorage.setItem('accessToken', 'e2e-test-token')
-      localStorage.setItem('refreshToken', 'e2e-test-refresh')
-      localStorage.setItem('userInfo', JSON.stringify({ userId: 1, username: 'ui_test' }))
-    })
-    await page.goto('/chat')
-    await page.waitForLoadState('networkidle')
+  test.beforeEach(async ({ page, request }) => {
+    await registerAndLogin(page, request)
+    await gotoChat(page)
   })
 
   test('Enter 发送消息', async ({ page }) => {

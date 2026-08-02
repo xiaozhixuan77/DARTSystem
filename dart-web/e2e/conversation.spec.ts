@@ -1,28 +1,11 @@
 import { test, expect } from '@playwright/test'
+import { registerAndLogin, gotoChat } from './helpers'
 
 test.describe('会话管理', () => {
   // 假 token 会被后端 401 踢回登录页，统一用 API 真实注册登录
   test.beforeEach(async ({ page, request }) => {
-    const user = `e2e_${Date.now()}`
-    await request.post('/api/auth/register', {
-      data: { username: user, password: 'testpass123' }
-    })
-    const loginResp = await request.post('/api/auth/login', {
-      data: { username: user, password: 'testpass123' }
-    })
-    const loginJson = await loginResp.json()
-    await page.goto('/login')
-    await page.evaluate(({ access, refresh, name }) => {
-      localStorage.setItem('accessToken', access)
-      localStorage.setItem('refreshToken', refresh)
-      localStorage.setItem('userInfo', JSON.stringify({ userId: 1, username: name }))
-    }, {
-      access: loginJson.data.accessToken,
-      refresh: loginJson.data.refreshToken,
-      name: user
-    })
-    await page.goto('/chat')
-    await page.waitForLoadState('networkidle')
+    await registerAndLogin(page, request)
+    await gotoChat(page)
   })
 
   test('"新搜索"按钮创建会话', async ({ page }) => {
