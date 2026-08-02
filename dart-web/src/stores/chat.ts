@@ -35,6 +35,17 @@ export const useChatStore = defineStore('chat', () => {
     } catch { /* ignore */ }
   }
 
+  /**
+   * 不清空现有消息，直接覆盖为服务端最新消息。
+   * SSE 中断兜底用：报告可能已生成入库，重新拉取即可显示。
+   */
+  async function reloadMessages(id: number) {
+    try {
+      const res = await getMessages(id)
+      if (res.code === 200) messages.value = res.data
+    } catch { /* 保留现有消息 */ }
+  }
+
   async function newConversation(): Promise<number> {
     try {
       const res = await createConversation()
@@ -87,6 +98,11 @@ export const useChatStore = defineStore('chat', () => {
 
     abortFn = sendMessage(message, convId, {
       onStatus(status, msg) {
+        if (status === 'conversation') {
+          // 后端提前告知会话 id，SSE 中断时可据此拉取已生成的消息
+          currentId.value = Number(msg)
+          return
+        }
         streamingStatus.value = status === 'rag_check' ? '正在检索知识库...'
           : status === 'searching' ? '正在搜索...'
           : status === 'curating' ? '正在整理结果...'
@@ -116,7 +132,12 @@ export const useChatStore = defineStore('chat', () => {
         error.value = msg
         const last = messages.value[messages.value.length - 1]
         if (last && last.role === 'assistant' && !last.content) {
-          last.content = '错误：' + msg
+          // SSE 中断但报告可能已生成入库 → 重新拉取兜底
+          if (currentId.value) {
+            reloadMessages(currentId.value)
+          } else {
+            last.content = '错误：' + msg
+          }
         }
       }
     })

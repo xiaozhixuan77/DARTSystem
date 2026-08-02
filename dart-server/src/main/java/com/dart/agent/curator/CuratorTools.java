@@ -12,6 +12,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 /**
@@ -93,29 +96,38 @@ public class CuratorTools {
         String resourcesText = buildResourcesText(resources);
         List<String> sections = new ArrayList<>();
 
-        // 节 1：思维导图 + 学习目标（后续节的上下文锚点）
+        // 节 1：思维导图 + 学习目标（后续节的上下文锚点），串行先行
         SseUtils.sendStatus(emitter, "curating", "正在绘制知识全景...");
         String mindmapSection = generateSection(query, resourcesText, "",
                 buildMindmapPrompt(query), "mindmap");
         sections.add(mindmapSection);
 
-        // 节 2：核心概念（携带思维导图锚点）
-        SseUtils.sendStatus(emitter, "curating", "正在讲解核心概念...");
-        String conceptSection = generateSection(query, resourcesText, mindmapSection,
-                buildConceptPrompt(query), "concepts");
-        sections.add(conceptSection);
-
-        // 节 3：关键原理 + 代码示例
-        SseUtils.sendStatus(emitter, "curating", "正在解析原理与代码示例...");
-        String principleCodeSection = generateSection(query, resourcesText, mindmapSection,
-                buildPrincipleCodePrompt(query), "principles_code");
-        sections.add(principleCodeSection);
-
-        // 节 4：误区 FAQ + 进阶方向 + 参考文献
-        SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
-        String faqAdvanceSection = generateSection(query, resourcesText, mindmapSection,
-                buildFaqAdvancePrompt(query), "faq_advance");
-        sections.add(faqAdvanceSection);
+        // 节 2/3/4 并行生成（均依赖节 1 锚点，互不依赖），将总时长从 ~7 分钟降到 ~2 分钟
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<String>> futures = new ArrayList<>(3);
+            String[] names = {"concepts", "principles_code", "faq_advance"};
+            String[] prompts = {
+                    buildConceptPrompt(query),
+                    buildPrincipleCodePrompt(query),
+                    buildFaqAdvancePrompt(query)};
+            String[] statuses = {"正在讲解核心概念...", "正在解析原理与代码示例...", "正在整理误区与进阶方向..."};
+            for (int i = 0; i < 3; i++) {
+                final int idx = i;
+                futures.add(pool.submit(() -> {
+                    SseUtils.sendStatus(emitter, "curating", statuses[idx]);
+                    return generateSection(query, resourcesText, mindmapSection,
+                            prompts[idx], names[idx]);
+                }));
+            }
+            for (Future<String> f : futures) {
+                sections.add(f.get());
+            }
+        } catch (Exception e) {
+            log.warn("并行分节生成异常，追加占位节", e);
+            while (sections.size() < 4) {
+                sections.add(SECTION_FAILED);
+            }
+        }
 
         // 所有节全部失败 → 降级为纯搜索结果列表
         if (sections.stream().allMatch(s -> s.equals(SECTION_FAILED))) {

@@ -110,13 +110,27 @@ class CuratorToolsTest {
         curatorTools = new CuratorTools(chatModel, 0.85);
     }
 
+    /**
+     * 并行生成时调用顺序不定，按 Prompt 内容分发各节响应。
+     */
     private void stubFourSections() {
-        when(chatResponse.getResults())
-                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_MINDMAP))))
-                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))
-                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_PRINCIPLE_CODE))))
-                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
-        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            String section;
+            if (text.contains("核心概念")) {
+                section = SECTION_CONCEPT;
+            } else if (text.contains("关键原理")) {
+                section = SECTION_PRINCIPLE_CODE;
+            } else if (text.contains("常见误区")) {
+                section = SECTION_FAQ_ADVANCE;
+            } else {
+                section = SECTION_MINDMAP;
+            }
+            ChatResponse resp = new ChatResponse(
+                    List.of(new Generation(new AssistantMessage(section))));
+            return resp;
+        });
     }
 
     private List<ScoredResource> fourResources() {
@@ -250,16 +264,23 @@ class CuratorToolsTest {
 
     @Test
     void generateReport_oneSectionFails_keepsOthersWithPlaceholder() {
-        // 第 3 次调用（原理+代码节）抛异常 → getResults() 实际只被调用 3 次（节1/节2/节4）
-        when(chatResponse.getResults())
-                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_MINDMAP))))
-                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))
-                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
-        when(chatModel.call(any(Prompt.class)))
-                .thenReturn(chatResponse)
-                .thenReturn(chatResponse)
-                .thenThrow(new RuntimeException("timeout"))
-                .thenReturn(chatResponse);
+        // 原理+代码节抛异常，其余节按 Prompt 内容正常返回
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("关键原理")) {
+                throw new RuntimeException("timeout");
+            }
+            String section;
+            if (text.contains("核心概念")) {
+                section = SECTION_CONCEPT;
+            } else if (text.contains("常见误区")) {
+                section = SECTION_FAQ_ADVANCE;
+            } else {
+                section = SECTION_MINDMAP;
+            }
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
+        });
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("🧭");

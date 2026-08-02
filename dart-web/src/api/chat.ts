@@ -18,6 +18,7 @@ export function sendMessage(
   callbacks: SSECallback
 ): () => void {
   const abortController = new AbortController()
+  let receivedDone = false
   const token = getAccessToken()
 
   fetch('/api/chat/send', {
@@ -76,6 +77,10 @@ export function sendMessage(
         }
       }
       flushEvent()
+      // 流正常结束但未收到 done → 连接被服务器提前关闭，报告可能已生成
+      if (!receivedDone) {
+        callbacks.onError?.(0, '连接中断')
+      }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         callbacks.onError?.(0, '连接中断')
@@ -106,6 +111,7 @@ export function sendMessage(
           callbacks.onContent?.(payload)
           break
         case 'done':
+          receivedDone = true
           callbacks.onDone?.(data)
           break
         case 'error':

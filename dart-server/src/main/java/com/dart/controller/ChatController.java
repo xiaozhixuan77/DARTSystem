@@ -51,6 +51,9 @@ public class ChatController {
 
         Thread.startVirtualThread(() -> {
             try {
+                // 提前告知前端会话 id，SSE 中断时前端可据此拉取已生成的消息
+                SseUtils.sendStatus(emitter, "conversation", String.valueOf(finalConversationId));
+
                 ChatService.SearchResult result = chatService.executeSearchAndCurate(
                         request.getMessage(), userId, finalConversationId, emitter);
 

@@ -14,6 +14,23 @@ vi.mock('@/api/chat', () => ({
 }))
 
 import { listConversations, createConversation, getMessages } from '@/api/conversation'
+import { sendMessage } from '@/api/chat'
+
+type Callbacks = {
+  onStatus?: (status: string, message: string) => void
+  onContent?: (chunk: string) => void
+  onDone?: (data: { status: string; conversationId?: number }) => void
+  onError?: (code: number, message: string) => void
+}
+
+function captureCallbacks(): Callbacks {
+  const callbacks: Callbacks = {}
+  vi.mocked(sendMessage).mockImplementation((_msg, _convId, cb) => {
+    Object.assign(callbacks, cb)
+    return () => {}
+  })
+  return callbacks
+}
 
 describe('useChatStore', () => {
   beforeEach(() => {
@@ -95,5 +112,48 @@ describe('useChatStore', () => {
 
     expect(store.isStreaming).toBe(false)
     expect(store.streamingStatus).toBe('')
+  })
+
+  // === SSE 断流兜底 ===
+
+  it('conversation 状态事件设置当前会话 id', () => {
+    const store = useChatStore()
+    const cb = captureCallbacks()
+    store.send('hello')
+    cb.onStatus?.('conversation', '55')
+    expect(store.currentId).toBe(55)
+  })
+
+  it('onError 时已有会话则拉取最新消息兜底', async () => {
+    const store = useChatStore()
+    const cb = captureCallbacks()
+    store.send('hello')
+    cb.onStatus?.('conversation', '55')
+    vi.mocked(getMessages).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: [
+        { id: 1, role: 'user', content: 'hello', metadata: null, createdAt: '' },
+        { id: 2, role: 'assistant', content: '完整报告', metadata: null, createdAt: '' }
+      ]
+    })
+
+    cb.onError?.(0, '连接中断')
+    await vi.waitFor(() => {
+      expect(getMessages).toHaveBeenCalledWith(55)
+    })
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages[1].content).toBe('完整报告')
+  })
+
+  it('onError 时无会话 id 则显示错误消息', () => {
+    const store = useChatStore()
+    const cb = captureCallbacks()
+    store.send('hello')
+    cb.onError?.(0, '连接中断')
+
+    expect(store.isStreaming).toBe(false)
+    const last = store.messages[store.messages.length - 1]
+    expect(last.content).toContain('错误')
+    expect(getMessages).not.toHaveBeenCalled()
   })
 })
