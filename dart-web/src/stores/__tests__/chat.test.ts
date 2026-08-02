@@ -13,7 +13,7 @@ vi.mock('@/api/chat', () => ({
   sendMessage: vi.fn()
 }))
 
-import { listConversations, createConversation, getMessages } from '@/api/conversation'
+import { listConversations, createConversation, deleteConversation, getMessages } from '@/api/conversation'
 import { sendMessage } from '@/api/chat'
 
 type Callbacks = {
@@ -155,5 +155,63 @@ describe('useChatStore', () => {
     const last = store.messages[store.messages.length - 1]
     expect(last.content).toContain('错误')
     expect(getMessages).not.toHaveBeenCalled()
+  })
+
+  // === 删除会话 ===
+
+  function presetConversations(store: ReturnType<typeof useChatStore>) {
+    store.conversations.push(
+      { id: 1, title: 'A', tags: [], lastMessage: '', messageCount: 0, updatedAt: '' },
+      { id: 2, title: 'B', tags: [], lastMessage: '', messageCount: 0, updatedAt: '' }
+    )
+  }
+
+  it('删除当前会话时调用 API、移除列表并清空状态', async () => {
+    vi.mocked(deleteConversation).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null, data: null
+    })
+    const store = useChatStore()
+    presetConversations(store)
+    store.currentId = 1
+    store.messages.push({ id: 1, role: 'user', content: 'x', metadata: null, createdAt: '' })
+
+    const ok = await store.removeConversation(1)
+
+    expect(ok).toBe(true)
+    expect(deleteConversation).toHaveBeenCalledWith(1)
+    expect(store.conversations).toHaveLength(1)
+    expect(store.conversations[0].id).toBe(2)
+    expect(store.currentId).toBeNull()
+    expect(store.messages).toHaveLength(0)
+  })
+
+  it('删除非当前会话不影响当前状态', async () => {
+    vi.mocked(deleteConversation).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null, data: null
+    })
+    const store = useChatStore()
+    presetConversations(store)
+    store.currentId = 2
+    store.messages.push({ id: 1, role: 'user', content: 'x', metadata: null, createdAt: '' })
+
+    const ok = await store.removeConversation(1)
+
+    expect(ok).toBe(true)
+    expect(store.conversations).toHaveLength(1)
+    expect(store.currentId).toBe(2)
+    expect(store.messages).toHaveLength(1)
+  })
+
+  it('API 失败时返回 false 且本地状态不变', async () => {
+    vi.mocked(deleteConversation).mockRejectedValue(new Error('network'))
+    const store = useChatStore()
+    presetConversations(store)
+    store.currentId = 1
+
+    const ok = await store.removeConversation(1)
+
+    expect(ok).toBe(false)
+    expect(store.conversations).toHaveLength(2)
+    expect(store.currentId).toBe(1)
   })
 })
