@@ -35,7 +35,7 @@ vi.mock('@/api/knowledge', () => ({
 // 需要 stub 路由
 const mockPush = vi.fn()
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: mockPush })
+  useRouter: () => ({ push: mockPush, replace: mockPush })
 }))
 
 describe('AppSidebar.vue', () => {

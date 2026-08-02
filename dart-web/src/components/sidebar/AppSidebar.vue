@@ -1,17 +1,70 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import SessionContextMenu from '@/components/common/SessionContextMenu.vue'
+import type { ConversationVO } from '@/types/chat'
 
 const chatStore = useChatStore()
 const authStore = useAuthStore()
 const router = useRouter()
 const knowledgeStore = useKnowledgeStore()
 
+const menuVisible = ref(false)
+const menuX = ref(0)
+const menuY = ref(0)
+const menuConversationId = ref<number | null>(null)
+const menuConversationTitle = ref('')
+
+function openContextMenu(conv: ConversationVO, e: MouseEvent) {
+  e.preventDefault()
+  menuConversationId.value = conv.id ?? null
+  menuConversationTitle.value = conv.title
+  menuX.value = Math.min(e.clientX, window.innerWidth - 160)
+  menuY.value = Math.min(e.clientY, window.innerHeight - 96)
+  menuVisible.value = true
+}
+
+function closeContextMenu() {
+  menuVisible.value = false
+}
+
+async function handleDeleteConversation() {
+  const id = menuConversationId.value
+  if (id == null) return
+  const isCurrent = chatStore.currentId === id
+  try {
+    await ElMessageBox.confirm(
+      `确定删除会话「${menuConversationTitle.value}」吗？删除后不可恢复。`,
+      '删除会话',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    closeContextMenu()
+    return
+  }
+  closeContextMenu()
+  if (isCurrent) {
+    // 删除流式生成中的会话，避免消息写入已删除会话
+    chatStore.cancelStreaming()
+  }
+  const ok = await chatStore.removeConversation(id)
+  if (ok) {
+    ElMessage.success('会话已删除')
+    if (isCurrent) router.replace('/chat')
+  }
+}
+
 onMounted(() => {
   chatStore.loadConversations()
+  window.addEventListener('click', closeContextMenu)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeContextMenu)
 })
 
 function handleNewSession() {
@@ -42,13 +95,14 @@ function handleLogout() {
       新搜索
     </button>
 
-    <div class="session-list">
+    <div class="session-list" @scroll="closeContextMenu">
       <div
         v-for="conv in chatStore.conversations"
         :key="conv.id"
         class="session-item"
         :class="{ active: conv.id === chatStore.currentId }"
         @click="chatStore.selectConversation(conv.id!)"
+        @contextmenu="openContextMenu(conv, $event)"
       >
         <div class="session-title">{{ conv.title }}</div>
         <div class="session-meta">
@@ -62,6 +116,15 @@ function handleLogout() {
         暂无会话
       </div>
     </div>
+
+    <SessionContextMenu
+      :visible="menuVisible"
+      :x="menuX"
+      :y="menuY"
+      :conversation-title="menuConversationTitle"
+      @delete="handleDeleteConversation"
+      @rename="closeContextMenu"
+    />
 
     <div class="sidebar-footer">
       <button class="panel-toggle" @click="knowledgeStore.togglePanel">
