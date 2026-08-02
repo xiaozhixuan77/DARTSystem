@@ -23,7 +23,8 @@ public class SseUtils {
     public static void sendEvent(SseEmitter emitter, String eventName, Object data) {
         try {
             emitter.send(SseEmitter.event().name(eventName).data(data));
-        } catch (IOException e) {
+        } catch (Exception e) {
+            // emitter 可能已被客户端断开/超时关闭，发送失败不应中断主流程
             log.debug("SSE 事件发送失败: event={}", eventName, e);
         }
     }

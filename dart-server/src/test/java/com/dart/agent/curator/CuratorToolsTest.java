@@ -12,11 +12,13 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,74 +32,74 @@ class CuratorToolsTest {
 
     private CuratorTools curatorTools;
 
-    private static final String VALID_REPORT = """
+    private static final String SECTION_MINDMAP = """
             ## 🧭 知识全景
 
             ```mermaid
             mindmap
-              root((Spring Boot))
-                核心概念
-                  自动配置
-                  起步依赖
-                关键原理
-                  IoC容器
-                  条件装配
+              root((Java))
+                基础语法
+                  数据类型
+                  控制流
+                面向对象
+                  类与接口
+                  继承与多态
+                进阶特性
+                  泛型
+                  并发编程
             ```
 
-            ---
+            ## 🎯 学习目标
 
+            学完本节，你将掌握：
+            1. Java 基本语法与数据类型
+            2. 面向对象核心思想
+            """;
+
+    private static final String SECTION_CONCEPT = """
             ## 📖 核心概念
 
-            ### 自动配置
-            Spring Boot 根据类路径依赖自动配置应用组件...
+            ### 1. 面向对象（OOP）
+            - **定义**：基于对象封装数据与行为的编程范式，Java 的核心设计思想。
+            - **机制**：通过类（Class）定义模板，实例化（new）创建对象；封装、继承、多态三大特性支撑代码复用与扩展。
+            - **示例**：定义 User 类封装用户属性与行为。
+            - **关联**：是理解泛型、集合框架的基础。
+            """;
 
-            ### 起步依赖
-            起步依赖是一组预定义的 Maven/Gradle 依赖集合...
-
-            ---
-
+    private static final String SECTION_PRINCIPLE_CODE = """
             ## 🔬 关键原理
 
-            ### IoC 容器原理
-            Spring Boot 的 IoC 容器通过依赖注入管理 Bean 的生命周期...
-
-            ---
+            ### 1. JVM 内存模型
+            Java 程序运行在 JVM 之上，堆内存存放对象实例，栈内存存放方法调用帧。
 
             ## 💻 代码示例
 
+            ### 示例1：Hello World
             ```java
-            @SpringBootApplication
-            public class DemoApplication {
+            public class Hello {
                 public static void main(String[] args) {
-                    SpringApplication.run(DemoApplication.class, args);
+                    System.out.println("Hello Java");
                 }
             }
             ```
+            """;
 
-            ---
-
+    private static final String SECTION_FAQ_ADVANCE = """
             ## ⚠️ 常见误区与 FAQ
 
-            **误区1：Spring Boot 不需要理解 Spring**
-            实际上理解 Spring 核心原理能帮你更好地排查自动配置问题...
-
-            **Q1: Spring Boot 和 Spring MVC 的关系？**
-            Spring Boot 是脚手架，Spring MVC 是 Web 框架...
-
-            ---
+            **误区1：数组和 ArrayList 混用**
+            正确做法：根据长度是否固定选择。
 
             ## 🚀 进阶学习方向
 
-            1. Spring Cloud 微服务体系
-            2. Spring Security 安全框架
-
-            ---
+            1. 深入 JVM 调优
 
             ## 📚 参考文献
 
-            1. [Spring Boot 官方文档](https://spring.io)
-            2. [Medium Guide](https://medium.com)
+            1. [Java 官方文档](https://docs.oracle.com)
             """;
+
+    private static final String SECTION_FAILED = "> ⚠️ 本节内容生成失败，请稍后重试或访问参考文献了解详情。";
 
     private static ScoredResource makeResource(String url, String title, String content, double score) {
         return new ScoredResource(url, title, content, 5, 4, 4, 4, score);
@@ -106,6 +108,23 @@ class CuratorToolsTest {
     @BeforeEach
     void setUp() {
         curatorTools = new CuratorTools(chatModel, 0.85);
+    }
+
+    private void stubFourSections() {
+        when(chatResponse.getResults())
+                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_MINDMAP))))
+                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))
+                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_PRINCIPLE_CODE))))
+                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
+        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+    }
+
+    private List<ScoredResource> fourResources() {
+        return List.of(
+                makeResource("https://a.com", "Resource A", "content a ".repeat(200), 4.5),
+                makeResource("https://b.com", "Resource B", "content b ".repeat(200), 4.2),
+                makeResource("https://c.com", "Resource C", "content c ".repeat(200), 4.0),
+                makeResource("https://d.com", "Resource D", "content d ".repeat(200), 3.8));
     }
 
     // === 去重 ===
@@ -136,43 +155,64 @@ class CuratorToolsTest {
         assertThat(deduped.get(0).getUrl()).isEqualTo("https://a.com");
     }
 
-    // === 报告生成 ===
+    // === 分节报告生成 ===
 
     @Test
-    void generateReport_normalFlow_returnsReport() {
-        when(chatResponse.getResults()).thenReturn(
-                List.of(new Generation(new AssistantMessage(VALID_REPORT))));
-        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+    void generateReport_normalFlow_returnsJoinedReport() {
+        stubFourSections();
 
-        ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "content ".repeat(200), 4.5);
-        ScoredResource r2 = makeResource("https://medium.com", "Medium Guide", "content ".repeat(200), 4.0);
-        CuratedReport report = curatorTools.generateReport("Spring Boot学习", List.of(r1, r2));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report).isNotNull();
-        assertThat(report.markdown()).contains("Spring Boot");
+        assertThat(report.markdown()).contains("Java");
+        assertThat(report.markdown()).contains("🧭");
+        assertThat(report.markdown()).contains("📖");
+        assertThat(report.markdown()).contains("📚");
+    }
+
+    @Test
+    void generateReport_callsLLMFourTimes() {
+        stubFourSections();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        verify(chatModel, times(4)).call(any(Prompt.class));
+    }
+
+    @Test
+    void generateReport_sectionsInOrder() {
+        stubFourSections();
+
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        String md = report.markdown();
+        int idxMindmap = md.indexOf("🧭");
+        int idxConcept = md.indexOf("📖");
+        int idxPrinciple = md.indexOf("🔬");
+        int idxCode = md.indexOf("💻");
+        int idxFaq = md.indexOf("⚠️");
+        int idxAdvance = md.indexOf("🚀");
+        int idxRef = md.indexOf("📚");
+        assertThat(idxMindmap).isLessThan(idxConcept);
+        assertThat(idxConcept).isLessThan(idxPrinciple);
+        assertThat(idxPrinciple).isLessThan(idxCode);
+        assertThat(idxCode).isLessThan(idxFaq);
+        assertThat(idxFaq).isLessThan(idxAdvance);
+        assertThat(idxAdvance).isLessThan(idxRef);
     }
 
     @Test
     void generateReport_includesMermaidMindmap() {
-        when(chatResponse.getResults()).thenReturn(
-                List.of(new Generation(new AssistantMessage(VALID_REPORT))));
-        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+        stubFourSections();
 
-        ScoredResource r1 = makeResource("https://a.com", "Resource A", "content ".repeat(200), 4.5);
-        ScoredResource r2 = makeResource("https://b.com", "Resource B", "content ".repeat(200), 4.0);
-        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("```mermaid");
         assertThat(report.markdown()).contains("mindmap");
+        assertThat(report.markdown()).contains("root((Java))");
     }
 
     @Test
     void generateReport_includesAllSixModules() {
-        when(chatResponse.getResults()).thenReturn(
-                List.of(new Generation(new AssistantMessage(VALID_REPORT))));
-        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+        stubFourSections();
 
-        ScoredResource r1 = makeResource("https://a.com", "Resource A", "content ".repeat(200), 4.5);
-        ScoredResource r2 = makeResource("https://b.com", "Resource B", "content ".repeat(200), 4.0);
-        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("📖");
         assertThat(report.markdown()).contains("🔬");
         assertThat(report.markdown()).contains("💻");
@@ -183,59 +223,78 @@ class CuratorToolsTest {
 
     @Test
     void generateReport_includesReferencesSection() {
-        when(chatResponse.getResults()).thenReturn(
-                List.of(new Generation(new AssistantMessage(VALID_REPORT))));
-        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+        stubFourSections();
 
-        ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "content ".repeat(200), 4.5);
-        ScoredResource r2 = makeResource("https://medium.com", "Medium Guide", "content ".repeat(200), 4.0);
-        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("参考文献");
-        assertThat(report.markdown()).contains("https://spring.io");
+        assertThat(report.markdown()).contains("https://docs.oracle.com");
     }
 
     @Test
     void generateReport_contentTruncatedAt1500() {
-        when(chatResponse.getResults()).thenReturn(
-                List.of(new Generation(new AssistantMessage(VALID_REPORT))));
-        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse);
+        stubFourSections();
 
         String longContent = "ABCDEFGHIJ".repeat(200); // 2000 chars, > 1500
         ScoredResource r1 = makeResource("https://a.com", "Title A", longContent, 4.5);
         ScoredResource r2 = makeResource("https://b.com", "Title B", "short content ".repeat(20), 4.0);
-        curatorTools.generateReport("test query", List.of(r1, r2));
+        curatorTools.generateReport("test query", List.of(r1, r2), new SseEmitter(0L));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
-        verify(chatModel).call(captor.capture());
-        String promptText = captor.getValue().getInstructions().getFirst().getText();
-        // 旧阈值 250 字符时仅保留前 25 个重复单元，新阈值 1500 应保留 100 个以上
-        assertThat(promptText).contains("ABCDEFGHIJ".repeat(100));
+        verify(chatModel, times(4)).call(captor.capture());
+        for (Prompt p : captor.getAllValues()) {
+            String promptText = p.getInstructions().getFirst().getText();
+            // 旧阈值 250 字符时仅保留前 25 个重复单元，新阈值 1500 应保留 100 个以上
+            assertThat(promptText).contains("ABCDEFGHIJ".repeat(100));
+        }
     }
 
     @Test
-    void generateReport_llmThrows_returnsFallback() {
+    void generateReport_oneSectionFails_keepsOthersWithPlaceholder() {
+        // 第 3 次调用（原理+代码节）抛异常 → getResults() 实际只被调用 3 次（节1/节2/节4）
+        when(chatResponse.getResults())
+                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_MINDMAP))))
+                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))
+                .thenReturn(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
+        when(chatModel.call(any(Prompt.class)))
+                .thenReturn(chatResponse)
+                .thenReturn(chatResponse)
+                .thenThrow(new RuntimeException("timeout"))
+                .thenReturn(chatResponse);
+
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        assertThat(report.markdown()).contains("🧭");
+        assertThat(report.markdown()).contains("📖");
+        assertThat(report.markdown()).contains("生成失败");
+        assertThat(report.markdown()).contains("📚");
+        // 失败的节内容不出现
+        assertThat(report.markdown()).doesNotContain("JVM 内存模型");
+    }
+
+    @Test
+    void generateReport_allSectionsFail_returnsFallback() {
         when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "content ".repeat(200), 4.5);
         ScoredResource r2 = makeResource("https://medium.com", "Medium Guide", "content ".repeat(200), 4.0);
-        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2));
+        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2), new SseEmitter(0L));
         assertThat(report.markdown()).contains("Spring Boot");
         assertThat(report.sources()).isNotEmpty();
+        assertThat(report.markdown()).contains("搜索结果");
     }
 
     @Test
     void generateReport_emptyInput_returnsEmptyReport() {
-        CuratedReport report = curatorTools.generateReport("query", List.of());
+        CuratedReport report = curatorTools.generateReport("query", List.of(), new SseEmitter(0L));
         assertThat(report.title()).isEqualTo("query");
         assertThat(report.markdown()).contains("未找到相关内容");
     }
 
     @Test
     void generateReport_singleResource_skipsLLM() {
-        // 单资源不调用 LLM，直接生成报告
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "Spring content ".repeat(100), 4.5);
-        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1));
+        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1), new SseEmitter(0L));
         assertThat(report.markdown()).contains("Spring Boot");
         assertThat(report.markdown()).contains("Spring Official");
+        verify(chatModel, times(0)).call(any(Prompt.class));
     }
 
     // === 验证 ===

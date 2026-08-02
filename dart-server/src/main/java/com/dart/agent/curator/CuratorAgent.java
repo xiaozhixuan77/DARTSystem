@@ -32,7 +32,7 @@ public class CuratorAgent {
                 return curatorTools.fallbackReport(query, searchResults);
             }
 
-            CuratedReport report = curatorTools.generateReport(query, deduped);
+            CuratedReport report = curatorTools.generateReport(query, deduped, emitter);
 
             if (!curatorTools.validateReport(report)) {
                 log.warn("报告校验失败，降级使用 fallbackReport");
