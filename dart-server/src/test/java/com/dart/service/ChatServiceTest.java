@@ -107,6 +107,45 @@ class ChatServiceTest {
     // === executeSearchAndCurate ===
 
     @Test
+    void executeSearchAndCurate_optimizedQueryUsedInAllStages() {
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
+
+        // isTechQuery 第一次调用 → YES; optimizeQuery 第二次调用 → 优化词
+        when(chatResponse.getResults())
+                .thenReturn(List.of(new Generation(new AssistantMessage("YES"))))
+                .thenReturn(List.of(new Generation(new AssistantMessage("优化后的技术问题描述"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        assertThat(result.isRagHit()).isFalse();
+        verify(ragService).retrieve(eq("优化后的技术问题描述"), eq(1L));
+        verify(searchAgent).execute(eq("优化后的技术问题描述"), anyInt(), any());
+        verify(curatorAgent).curate(eq("优化后的技术问题描述"), anyList(), any());
+    }
+
+    @Test
+    void executeSearchAndCurate_optimizationFails_usesOriginalQuery() {
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
+        // isTechQuery 与 optimizeQuery 均抛异常 → isTechQuery 降级 true，优化降级原文
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        assertThat(result.isRagHit()).isFalse();
+        verify(searchAgent).execute(eq("Spring Boot"), anyInt(), any());
+    }
+
+    @Test
     void executeSearchAndCurate_ragHits_returnsRagAnswer() {
         when(ragService.retrieve(eq("Spring Boot"), eq(1L)))
                 .thenReturn(Optional.of(new RagResult("# Spring Boot 详解", List.of("https://spring.io"))));
