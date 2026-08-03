@@ -76,6 +76,34 @@ class ChatServiceTest {
         assertThat(chatService.isTechQuery("query")).isTrue();
     }
 
+    // === optimizeQuery ===
+
+    @Test
+    void optimizeQuery_success_returnsOptimizedQuery() {
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("如何在 Spring Boot 中配置多数据源"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        assertThat(chatService.optimizeQuery("怎么配多数据源")).isEqualTo("如何在 Spring Boot 中配置多数据源");
+    }
+
+    @Test
+    void optimizeQuery_llmThrows_returnsNull() {
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+
+        assertThat(chatService.optimizeQuery("query")).isNull();
+    }
+
+    @Test
+    void optimizeQuery_blankResponse_returnsNull() {
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("   \n  "))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        assertThat(chatService.optimizeQuery("query")).isNull();
+    }
+
     // === executeSearchAndCurate ===
 
     @Test
