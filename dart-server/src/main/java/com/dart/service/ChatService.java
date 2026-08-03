@@ -88,9 +88,13 @@ public class ChatService {
             return errorResult;
         }
 
+        // 2.5 提示词优化（静默，失败降级原文）；用户消息持久化仍存原文
+        String optimized = optimizeQuery(query);
+        String effectiveQuery = (optimized == null || optimized.isBlank()) ? query : optimized;
+
         // 3. RAG 检查
         SseUtils.sendStatus(emitter, "rag_check", "正在检查知识库...");
-        Optional<RagService.RagResult> ragResult = ragService.retrieve(query, userId);
+        Optional<RagService.RagResult> ragResult = ragService.retrieve(effectiveQuery, userId);
         if (ragResult.isPresent()) {
             SearchResult result = SearchResult.ragHit(ragResult.get());
             persistAssistantMessage(conversationId, result);
@@ -100,7 +104,7 @@ public class ChatService {
         // 4. Search Agent
         List<ScoredResource> searchResults;
         try {
-            searchResults = searchAgent.execute(query, 8, emitter);
+            searchResults = searchAgent.execute(effectiveQuery, 8, emitter);
         } catch (Exception e) {
             log.error("Search Agent 异常", e);
             SseUtils.sendError(emitter, ErrorCode.AGENT_EXECUTION_ERROR.getCode(),
@@ -115,8 +119,8 @@ public class ChatService {
             SseUtils.sendError(emitter, ErrorCode.NO_QUALITY_RESULTS.getCode(),
                     ErrorCode.NO_QUALITY_RESULTS.getMessage());
             SearchResult emptyResult = SearchResult.searchResult(
-                    new CuratedReport(query,
-                            "# " + query + "\n\n未找到高质量资源，请尝试更换关键词。",
+                    new CuratedReport(effectiveQuery,
+                            "# " + effectiveQuery + "\n\n未找到高质量资源，请尝试更换关键词。",
                             List.of(), Instant.now()),
                     List.of());
             persistAssistantMessage(conversationId, emptyResult);
@@ -126,14 +130,14 @@ public class ChatService {
         // 5. Curator Agent
         CuratedReport report;
         try {
-            report = curatorAgent.curate(query, searchResults, emitter);
+            report = curatorAgent.curate(effectiveQuery, searchResults, emitter);
         } catch (Exception e) {
             log.error("Curator Agent 异常", e);
-            report = buildFallbackReport(query, searchResults);
+            report = buildFallbackReport(effectiveQuery, searchResults);
         }
 
         // 6. 追问生成（异步，失败不影响主流程）
-        String followUp = generateFollowUp(query, report.markdown());
+        String followUp = generateFollowUp(effectiveQuery, report.markdown());
         if (followUp != null && !followUp.isBlank()) {
             report = appendFollowUp(report, followUp);
         }

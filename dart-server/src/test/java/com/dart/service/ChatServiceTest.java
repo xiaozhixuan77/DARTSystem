@@ -182,9 +182,10 @@ class ChatServiceTest {
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
 
-        // isTechQuery 第一次调用 → YES; generateFollowUp 第二次调用 → 追问
+        // isTechQuery 第一次调用 → YES; optimizeQuery 第二次调用 → 优化词; generateFollowUp 第三次调用 → 追问
         when(chatResponse.getResults())
                 .thenReturn(List.of(new Generation(new AssistantMessage("YES"))))
+                .thenReturn(List.of(new Generation(new AssistantMessage("JAVA"))))
                 .thenReturn(List.of(new Generation(new AssistantMessage(
                         "- 想深入了解Java集合框架吗？\n- 对Spring Boot开发感兴趣？\n- 想了解Java面试常见考点吗？"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);

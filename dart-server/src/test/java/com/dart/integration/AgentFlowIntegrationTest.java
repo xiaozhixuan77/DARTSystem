@@ -104,10 +104,12 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
         Mockito.reset(embeddingModel);
         mockEmbedding(0.02f);
 
-        // ChatModel: 第一次 isTechQuery→YES, 第二次 generateAnswer
+        // ChatModel: isTechQuery→YES, optimizeQuery→优化词, generateAnswer
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("YES")))))
+                .thenReturn(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage("Spring Boot 配置")))))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("基于知识库的 RAG 回答")))));
 
@@ -144,10 +146,12 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         "Advanced Spring tutorial covering dependency injection and AOP.",
                         600, 2, false, true, 2025));
 
-        // ChatModel 调用链: isTechQuery + 2xMatchScorer + CuratorGenerateReport
+        // ChatModel 调用链: isTechQuery + optimizeQuery + 2xMatchScorer + CuratorGenerateReport
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("YES")))))
+                .thenReturn(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage("Spring Boot 配置")))))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("5")))))
                 .thenReturn(new ChatResponse(
@@ -186,10 +190,12 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         "Advanced Spring Boot tutorial covering dependency injection and configuration in depth.",
                         800, 3, false, true, 2026));
 
-        // ChatModel 调用链: isTechQuery + 2×MatchScorer → report generation 抛异常
+        // ChatModel 调用链: isTechQuery + optimizeQuery + 2×MatchScorer → report generation 抛异常
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("YES")))))
+                .thenReturn(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage("Spring Boot 配置")))))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("5")))))
                 .thenReturn(new ChatResponse(
