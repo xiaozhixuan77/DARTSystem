@@ -235,6 +235,32 @@ public class ChatService {
     // ─── 领域判断 ────────────────────────────────────────────
 
     /**
+     * LLM 将用户输入优化为更适合检索与搜索的技术问题描述。
+     * 失败或空响应返回 null，由调用方降级为原始查询。
+     */
+    String optimizeQuery(String query) {
+        try {
+            String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
+            String prompt = """
+                    你是一个提示词优化助手。将以下用户输入优化为一个更适合知识库检索和网络搜索的技术问题描述：
+                    1. 保持原始意图，补充关键上下文（技术栈、版本、场景）
+                    2. 去除口语化表达，使用准确的技术术语
+                    3. 输入已清晰准确时只做小幅润色
+                    4. 只输出优化后的文本，不要任何解释、前缀或引号
+                    5. 控制在 100 字以内
+
+                    <user_query>%s</user_query>
+                    """.formatted(sanitized);
+            String response = chatModel.call(new Prompt(new UserMessage(prompt)))
+                    .getResults().getFirst().getOutput().getText().trim();
+            return response.isBlank() ? null : response;
+        } catch (Exception e) {
+            log.warn("提示词优化失败，使用原始查询", e);
+            return null;
+        }
+    }
+
+    /**
      * LLM 前置判断是否为技术领域问题。用户输入用 XML 标签包裹防止 prompt 注入。
      */
     public boolean isTechQuery(String query) {
