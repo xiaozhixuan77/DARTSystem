@@ -1,10 +1,13 @@
 package com.dart.agent.curator;
 
 import com.dart.agent.scoring.ScoredResource;
+import com.dart.util.SseEvents;
+import com.dart.util.SseUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -18,6 +21,10 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -203,6 +210,36 @@ class CuratorToolsTest {
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("参考文献");
         assertThat(report.markdown()).contains("https://docs.oracle.com");
+    }
+
+    @Test
+    void generateReport_streamsEachSectionViaSse() {
+        stubThreeSections();
+
+        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
+            curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("📖")), times(1));
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("🔬")), times(1));
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("⚠️")), times(1));
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), times(3));
+        }
+    }
+
+    @Test
+    void generateReport_allSectionsFail_streamsFallbackOnce() {
+        when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
+        ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "content ".repeat(200), 4.5);
+        ScoredResource r2 = makeResource("https://medium.com", "Medium Guide", "content ".repeat(200), 4.0);
+
+        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
+            CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2), new SseEmitter(0L));
+
+            assertThat(report.markdown()).contains("搜索结果");
+            // 全部失败时不推占位节，只推 fallback 报告
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), times(1));
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("AI 报告生成暂时不可用")), times(1));
+        }
     }
 
     @Test
