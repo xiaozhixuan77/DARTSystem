@@ -7,21 +7,31 @@ import com.dart.agent.search.SearchAgent;
 import com.dart.entity.Message;
 import com.dart.exception.ErrorCode;
 import com.dart.mapper.MessageMapper;
+import com.dart.util.RedisKeyConstants;
 import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -36,6 +46,7 @@ public class ChatService {
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
     private static final int FOLLOW_UP_MAX_REPORT_CHARS = 3000;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final ChatModel chatModel;
     private final SearchAgent searchAgent;
@@ -43,16 +54,21 @@ public class ChatService {
     private final RagService ragService;
     private final EmbeddingService embeddingService;
     private final MessageMapper messageMapper;
+    private final StringRedisTemplate redisTemplate;
+
+    @Value("${agent.cache.ttl-hours:24}")
+    private long cacheTtlHours;
 
     public ChatService(ChatModel chatModel, SearchAgent searchAgent, CuratorAgent curatorAgent,
                        RagService ragService, EmbeddingService embeddingService,
-                       MessageMapper messageMapper) {
+                       MessageMapper messageMapper, StringRedisTemplate redisTemplate) {
         this.chatModel = chatModel;
         this.searchAgent = searchAgent;
         this.curatorAgent = curatorAgent;
         this.ragService = ragService;
         this.embeddingService = embeddingService;
         this.messageMapper = messageMapper;
+        this.redisTemplate = redisTemplate;
     }
 
     public record SearchResult(RagService.RagResult ragAnswer,
@@ -81,6 +97,12 @@ public class ChatService {
         userMsg.setContent(query);
         userMsg.setCreatedAt(LocalDateTime.now());
         messageMapper.insert(userMsg);
+
+        // 1.5 查询缓存检查（原始查询规范化 key；命中直接返回，跳过全流程）
+        SearchResult cached = tryCache(query, conversationId, emitter);
+        if (cached != null) {
+            return cached;
+        }
 
         // 2. 领域过滤 + 提示词优化（合并为一次 LLM 调用）
         QueryPreProcess pre = preProcessQuery(query);
@@ -178,6 +200,7 @@ public class ChatService {
                     }
                 });
                 followUpTask.get();
+                writeCache(effectiveQuery, finalMessage.getContent(), report.sources());
             } catch (Exception e) {
                 log.warn("追问生成任务异常", e);
             }
@@ -274,6 +297,64 @@ public class ChatService {
         }
         sb.append("]");
         return sb.toString();
+    }
+
+    // ─── 报告查询缓存 ────────────────────────────────────────
+
+    /**
+     * 读取报告缓存：命中则 SSE 推送并持久化消息，返回结果；未命中返回 null。
+     * 缓存 key 为原始查询（trim + 小写）的 SHA-256 前 8 字节十六进制。
+     */
+    private SearchResult tryCache(String query, Long conversationId, SseEmitter emitter) {
+        try {
+            String json = redisTemplate.opsForValue().get(cacheKey(query));
+            if (json == null || json.isBlank()) {
+                return null;
+            }
+            JsonNode node = OBJECT_MAPPER.readTree(json);
+            String markdown = node.path("markdown").asText();
+            if (markdown.isBlank()) {
+                return null;
+            }
+            List<String> sources = new ArrayList<>();
+            node.path("sources").forEach(s -> sources.add(s.asText()));
+            CuratedReport report = new CuratedReport(query, markdown, sources, Instant.now());
+            SearchResult result = SearchResult.searchResult(report, List.of());
+            SseUtils.sendEvent(emitter, SseEvents.CONTENT, markdown);
+            persistAssistantMessage(conversationId, result);
+            log.info("报告缓存命中: query={}", query);
+            return result;
+        } catch (Exception e) {
+            log.warn("读取报告缓存失败，继续完整流程", e);
+            return null;
+        }
+    }
+
+    /**
+     * 写入报告缓存（仅搜索路径；RAG 回答与用户知识库相关，不缓存）。
+     */
+    private void writeCache(String query, String markdown, List<String> sources) {
+        try {
+            Map<String, Object> data = Map.of("markdown", markdown, "sources", sources);
+            redisTemplate.opsForValue().set(cacheKey(query),
+                    OBJECT_MAPPER.writeValueAsString(data), Duration.ofHours(cacheTtlHours));
+        } catch (Exception e) {
+            log.warn("写入报告缓存失败", e);
+        }
+    }
+
+    private String cacheKey(String query) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                    .digest(query.trim().toLowerCase().getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(RedisKeyConstants.REPORT_CACHE_PREFIX);
+            for (int i = 0; i < 8; i++) {
+                sb.append(String.format("%02x", hash[i]));
+            }
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 不可用", e);
+        }
     }
 
     // ─── 前置判断与提示词优化（合并为一次调用）────────────────────────

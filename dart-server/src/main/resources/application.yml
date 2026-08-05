@@ -96,6 +96,9 @@ agent:
   llm:
     # LLM 单次调用读超时熔断（原 300s，慢响应会阻塞整条编排）
     read-timeout-ms: 60000
+  cache:
+    # 报告查询缓存有效期（相同查询直接命中返回）
+    ttl-hours: 24
   search:
     max-results: 6
     fetch-timeout-ms: 6000
