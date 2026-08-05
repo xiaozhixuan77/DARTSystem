@@ -61,7 +61,8 @@ class ChatServiceTest {
         chatService = new ChatService(chatModel, searchAgent, curatorAgent, ragService,
                 embeddingService, messageMapper, redisTemplate);
         emitter = spy(new SseEmitter(60_000L));
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        // lenient：仅缓存相关用例使用，避免其他用例报 UnnecessaryStubbing
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
     }
 
     // === 查询缓存 ===
@@ -103,8 +104,8 @@ class ChatServiceTest {
         assertThat(result.isRagHit()).isFalse();
         verify(searchAgent).execute(anyString(), anyInt(), any());
         verify(valueOps).get(anyString());
-        // 报告与追问完成后写入缓存
-        verify(valueOps).set(anyString(), contains("# Report"));
+        // 报告与追问完成后写入缓存（带 TTL）
+        verify(valueOps).set(anyString(), contains("# Report"), any(java.time.Duration.class));
     }
 
     @Test
@@ -202,7 +203,7 @@ class ChatServiceTest {
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
         assertThat(result.isRagHit()).isFalse();
-        verify(chatModel, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
+        // 前置合并单次调用已由 preProcessQuery 专门用例覆盖（此处还有追问调用）
         verify(ragService).retrieve(eq("优化后的技术问题描述"), eq(1L));
         verify(searchAgent).execute(eq("优化后的技术问题描述"), anyInt(), any());
         verify(curatorAgent).curate(eq("优化后的技术问题描述"), anyList(), any());

@@ -118,13 +118,15 @@ public class ChatService {
         // 优化后的查询用于 RAG/搜索/整理；用户消息持久化仍存原文
         String effectiveQuery = pre.optimized();
 
-        // 3+4. RAG 检查与 Search Agent 并行启动；RAG 命中则短路，未命中等搜索完成
+        // 3+4. RAG 检查与 Search Agent 并行启动；RAG 命中则短路，未命中等搜索完成。
+        //     RAG 命中时不等慢搜索任务（shutdownNow 中断，虚拟线程后台收尾）
         SseUtils.sendStatus(emitter, "rag_check", "正在检索知识库...");
         List<ScoredResource> searchResults;
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<Optional<RagService.RagResult>> ragFuture = executor.submit(() ->
+        ExecutorService parallelExecutor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
+            Future<Optional<RagService.RagResult>> ragFuture = parallelExecutor.submit(() ->
                     ragService.retrieve(effectiveQuery, userId));
-            Future<List<ScoredResource>> searchFuture = executor.submit(() ->
+            Future<List<ScoredResource>> searchFuture = parallelExecutor.submit(() ->
                     searchAgent.execute(effectiveQuery, 8, emitter));
 
             Optional<RagService.RagResult> ragResult;
@@ -152,6 +154,8 @@ public class ChatService {
                 persistAssistantMessage(conversationId, errorResult);
                 return errorResult;
             }
+        } finally {
+            parallelExecutor.shutdownNow();
         }
 
         if (searchResults.isEmpty()) {
