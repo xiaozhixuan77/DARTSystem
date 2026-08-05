@@ -22,6 +22,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * 核心编排服务：LLM 领域过滤 → RAG 检查 → Search Agent → Curator Agent → 追问生成 → 持久化。
@@ -92,27 +95,39 @@ public class ChatService {
         // 优化后的查询用于 RAG/搜索/整理；用户消息持久化仍存原文
         String effectiveQuery = pre.optimized();
 
-        // 3. RAG 检查
-        SseUtils.sendStatus(emitter, "rag_check", "正在检查知识库...");
-        Optional<RagService.RagResult> ragResult = ragService.retrieve(effectiveQuery, userId);
-        if (ragResult.isPresent()) {
-            SearchResult result = SearchResult.ragHit(ragResult.get());
-            persistAssistantMessage(conversationId, result);
-            return result;
-        }
-
-        // 4. Search Agent
+        // 3+4. RAG 检查与 Search Agent 并行启动；RAG 命中则短路，未命中等搜索完成
+        SseUtils.sendStatus(emitter, "rag_check", "正在检索知识库...");
         List<ScoredResource> searchResults;
-        try {
-            searchResults = searchAgent.execute(effectiveQuery, 8, emitter);
-        } catch (Exception e) {
-            log.error("Search Agent 异常", e);
-            SseUtils.sendError(emitter, ErrorCode.AGENT_EXECUTION_ERROR.getCode(),
-                    "搜索服务暂时不可用，请稍后重试");
-            SearchResult errorResult = SearchResult.searchResult(
-                    errorReport("搜索服务暂时不可用，请稍后重试"), List.of());
-            persistAssistantMessage(conversationId, errorResult);
-            return errorResult;
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<Optional<RagService.RagResult>> ragFuture = executor.submit(() ->
+                    ragService.retrieve(effectiveQuery, userId));
+            Future<List<ScoredResource>> searchFuture = executor.submit(() ->
+                    searchAgent.execute(effectiveQuery, 8, emitter));
+
+            Optional<RagService.RagResult> ragResult;
+            try {
+                ragResult = ragFuture.get();
+            } catch (Exception e) {
+                log.warn("RAG 检索异常，继续搜索流程", e);
+                ragResult = Optional.empty();
+            }
+            if (ragResult.isPresent()) {
+                SearchResult result = SearchResult.ragHit(ragResult.get());
+                persistAssistantMessage(conversationId, result);
+                return result;
+            }
+
+            try {
+                searchResults = searchFuture.get();
+            } catch (Exception e) {
+                log.error("Search Agent 异常", e);
+                SseUtils.sendError(emitter, ErrorCode.AGENT_EXECUTION_ERROR.getCode(),
+                        "搜索服务暂时不可用，请稍后重试");
+                SearchResult errorResult = SearchResult.searchResult(
+                        errorReport("搜索服务暂时不可用，请稍后重试"), List.of());
+                persistAssistantMessage(conversationId, errorResult);
+                return errorResult;
+            }
         }
 
         if (searchResults.isEmpty()) {
