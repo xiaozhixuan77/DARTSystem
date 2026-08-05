@@ -173,7 +173,46 @@ class ChatServiceTest {
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
         assertThat(result.isRagHit()).isTrue();
         assertThat(result.ragAnswer().answer()).contains("Spring Boot");
-        verify(searchAgent, never()).execute(anyString(), anyInt(), any());
+        // RAG 命中短路：不进入 Curator（Search Agent 已并行启动，不做 never 断言）
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any());
+    }
+
+    @Test
+    void executeSearchAndCurate_ragHits_doesNotWaitForSlowSearch() {
+        // RAG 慢响应（500ms）但命中 → 不等 Search Agent 完成直接返回
+        when(ragService.retrieve(anyString(), anyLong())).thenAnswer(inv -> {
+            Thread.sleep(500);
+            return Optional.of(new RagResult("# 慢查询回答", List.of("https://a.com")));
+        });
+        when(searchAgent.execute(anyString(), anyInt(), any())).thenAnswer(inv -> {
+            Thread.sleep(5000); // 模拟慢搜索：若等待则测试耗时 5s+
+            return List.of();
+        });
+
+        long start = System.currentTimeMillis();
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertThat(result.isRagHit()).isTrue();
+        assertThat(elapsed).isLessThan(4000);
+    }
+
+    @Test
+    void executeSearchAndCurate_ragException_continuesWithSearch() {
+        when(ragService.retrieve(anyString(), anyLong()))
+                .thenThrow(new RuntimeException("RAG 检索失败"));
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        assertThat(result.isRagHit()).isFalse();
+        assertThat(result.curatedReport()).isNotNull();
+        verify(searchAgent).execute(anyString(), anyInt(), any());
+        verify(curatorAgent).curate(anyString(), anyList(), any());
     }
 
     @Test
