@@ -79,6 +79,10 @@ public abstract class BaseIntegrationTest {
         if (keys != null && !keys.isEmpty()) {
             redisTemplate.delete(keys);
         }
+        var cacheKeys = redisTemplate.keys("dart:report-cache:*");
+        if (cacheKeys != null && !cacheKeys.isEmpty()) {
+            redisTemplate.delete(cacheKeys);
+        }
     }
 
     protected Long createTestUser() {

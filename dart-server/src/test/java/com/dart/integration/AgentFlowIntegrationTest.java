@@ -242,6 +242,43 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisplayName("相同查询第二次命中缓存跳过完整流程")
+    void cacheHitSkipsFullFlowOnSecondQuery() {
+        Long userId = createTestUser();
+        Long convId = createTestConversation(userId);
+
+        mockEmbedding();
+
+        when(bingSearchClient.search(anyString(), anyInt()))
+                .thenReturn(List.of(
+                        new SearchResult("http://example.com/a", "Result A", "Snippet A")));
+        when(pageFetcher.fetch(anyString()))
+                .thenReturn(new PageContent("http://example.com/a", "Result A",
+                        "Spring Boot configuration guide with detailed examples and code snippets.",
+                        800, 3, true, false, 2026));
+
+        // 前置合并(JSON) + 报告节（后续调用复用最后一个值）
+        when(chatModel.call(any(Prompt.class)))
+                .thenReturn(new ChatResponse(List.of(new Generation(
+                        new AssistantMessage(
+                                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\"}")))))
+                .thenReturn(new ChatResponse(List.of(new Generation(
+                        new AssistantMessage("# 概念节内容\n\n详细说明。".repeat(200))))));
+
+        String query = "Spring Boot 缓存配置";
+        chatService.executeSearchAndCurate(query, userId, convId, new SseEmitter());
+
+        // 第二次相同查询 → 命中缓存，Agent 全部不参与
+        Mockito.reset(bingSearchClient, pageFetcher, chatModel);
+        ChatService.SearchResult second = chatService.executeSearchAndCurate(
+                query, userId, convId, new SseEmitter());
+
+        assertThat(second.isRagHit()).isFalse();
+        assertThat(second.curatedReport()).isNotNull();
+        assertThat(second.curatedReport().markdown()).contains("概念节内容");
+    }
+
+    @Test
     @DisplayName("搜索结果为空时返回 NO_QUALITY_RESULTS 错误")
     void emptySearchResultsReturnsError() {
         Long userId = createTestUser();

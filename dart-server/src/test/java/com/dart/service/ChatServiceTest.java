@@ -7,12 +7,15 @@ import com.dart.agent.search.SearchAgent;
 import com.dart.entity.Message;
 import com.dart.mapper.MessageMapper;
 import com.dart.service.RagService.RagResult;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -44,15 +47,85 @@ class ChatServiceTest {
     private EmbeddingService embeddingService;
     @Mock
     private MessageMapper messageMapper;
+    @Mock
+    private StringRedisTemplate redisTemplate;
+    @Mock
+    private ValueOperations<String, String> valueOps;
 
     private ChatService chatService;
     private SseEmitter emitter;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
         chatService = new ChatService(chatModel, searchAgent, curatorAgent, ragService,
-                embeddingService, messageMapper);
+                embeddingService, messageMapper, redisTemplate);
         emitter = spy(new SseEmitter(60_000L));
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+    }
+
+    // === 查询缓存 ===
+
+    @Test
+    void executeSearchAndCurate_cacheHit_skipsFullFlow() throws Exception {
+        String cachedJson = OBJECT_MAPPER.writeValueAsString(
+                java.util.Map.of(
+                        "markdown", "# 缓存报告\n\n完整内容 ".repeat(10),
+                        "sources", List.of("https://a.com")));
+        when(valueOps.get(anyString())).thenReturn(cachedJson);
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        assertThat(result.isRagHit()).isFalse();
+        assertThat(result.curatedReport().markdown()).contains("缓存报告");
+        assertThat(result.curatedReport().sources()).contains("https://a.com");
+        verify(ragService, never()).retrieve(anyString(), anyLong());
+        verify(searchAgent, never()).execute(anyString(), anyInt(), any());
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any());
+        verify(chatModel, never()).call(any(org.springframework.ai.chat.prompt.Prompt.class));
+        verify(messageMapper, times(2)).insert(any(Message.class));
+    }
+
+    @Test
+    void executeSearchAndCurate_cacheMiss_runsFullFlowAndWritesCache() throws Exception {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout")); // 前置与追问均失败降级
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        assertThat(result.isRagHit()).isFalse();
+        verify(searchAgent).execute(anyString(), anyInt(), any());
+        verify(valueOps).get(anyString());
+        // 报告与追问完成后写入缓存
+        verify(valueOps).set(anyString(), contains("# Report"));
+    }
+
+    @Test
+    void executeSearchAndCurate_cacheKey_normalizesQuery() throws Exception {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+
+        chatService.executeSearchAndCurate("  Spring Boot  ", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("spring boot", 1L, 100L, emitter);
+
+        // 规范化后（trim + 小写）两次查询使用同一缓存 key
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(valueOps, times(2)).get(keyCaptor.capture());
+        assertThat(keyCaptor.getAllValues().get(0)).isEqualTo(keyCaptor.getAllValues().get(1));
     }
 
     // === preProcessQuery（领域判断 + 提示词优化合并为一次调用）===
