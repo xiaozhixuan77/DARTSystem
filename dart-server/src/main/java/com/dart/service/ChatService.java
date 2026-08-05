@@ -4,8 +4,11 @@ import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.curator.CuratorAgent;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.dart.entity.KnowledgeItem;
 import com.dart.entity.Message;
 import com.dart.exception.ErrorCode;
+import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.MessageMapper;
 import com.dart.util.RedisKeyConstants;
 import com.dart.util.SseEvents;
@@ -57,13 +60,21 @@ public class ChatService {
     private final EmbeddingService embeddingService;
     private final MessageMapper messageMapper;
     private final StringRedisTemplate redisTemplate;
+    private final KnowledgeItemMapper knowledgeItemMapper;
 
     @Value("${agent.cache.ttl-hours:24}")
     private long cacheTtlHours;
 
+    @Value("${agent.sediment.enabled:true}")
+    private boolean sedimentEnabled;
+
+    @Value("${agent.sediment.max-items-per-user:50}")
+    private int sedimentMaxItemsPerUser;
+
     public ChatService(ChatModel chatModel, SearchAgent searchAgent, CuratorAgent curatorAgent,
                        RagService ragService, EmbeddingService embeddingService,
-                       MessageMapper messageMapper, StringRedisTemplate redisTemplate) {
+                       MessageMapper messageMapper, StringRedisTemplate redisTemplate,
+                       KnowledgeItemMapper knowledgeItemMapper) {
         this.chatModel = chatModel;
         this.searchAgent = searchAgent;
         this.curatorAgent = curatorAgent;
@@ -71,6 +82,7 @@ public class ChatService {
         this.embeddingService = embeddingService;
         this.messageMapper = messageMapper;
         this.redisTemplate = redisTemplate;
+        this.knowledgeItemMapper = knowledgeItemMapper;
     }
 
     public record SearchResult(RagService.RagResult ragAnswer,
@@ -188,7 +200,9 @@ public class ChatService {
         if (assistantMessage != null) {
             final Message msg = assistantMessage;
             final CuratedReport finalReport = report;
-            Runnable followUpAndCache = () -> generateFollowUpAndUpdate(msg, finalReport, query, emitter);
+            final Long finalUserId = userId;
+            Runnable followUpAndCache = () -> generateFollowUpAndUpdate(
+                    msg, finalReport, query, emitter, finalUserId);
             if (TransactionSynchronizationManager.isSynchronizationActive()) {
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
@@ -204,12 +218,14 @@ public class ChatService {
     }
 
     /**
-     * 生成追问 → SSE 追加 → 更新消息 → 写入报告缓存。整体失败仅告警，不影响报告主流程。
+     * 生成追问 → SSE 追加 → 更新消息；随后（无论追问成败）写入缓存并沉淀知识库。
+     * 整体失败仅告警，不影响报告主流程。
      */
     private void generateFollowUpAndUpdate(Message assistantMessage, CuratedReport report,
-                                           String query, SseEmitter emitter) {
+                                           String query, SseEmitter emitter, Long userId) {
+        String markdown = report.markdown();
         try {
-            String followUp = generateFollowUp(query, report.markdown());
+            String followUp = generateFollowUp(query, markdown);
             if (followUp != null && !followUp.isBlank()) {
                 SseUtils.sendStatus(emitter, "curating", "正在生成追问建议...");
                 SseUtils.sendEvent(emitter, SseEvents.CONTENT,
@@ -217,12 +233,48 @@ public class ChatService {
                 CuratedReport withFollowUp = appendFollowUp(report, followUp);
                 assistantMessage.setContent(withFollowUp.markdown());
                 messageMapper.updateById(assistantMessage);
-                writeCache(query, withFollowUp.markdown(), report.sources());
-            } else {
-                writeCache(query, report.markdown(), report.sources());
+                markdown = withFollowUp.markdown();
             }
         } catch (Exception e) {
-            log.warn("追问生成或缓存写入失败", e);
+            log.warn("追问生成失败", e);
+        } finally {
+            writeCache(query, markdown, report.sources());
+            sedimentReport(userId, query, markdown, report.sources());
+        }
+    }
+
+    /**
+     * 报告自动沉淀（预灌 RAG）：无占位节且未达数量上限时，将报告写入用户知识库，
+     * 后续相似查询直接 RAG 命中。Embedding 分块向量化较慢（约 10-30s），异步执行不阻塞主流程。
+     */
+    private void sedimentReport(Long userId, String query, String markdown, List<String> sources) {
+        if (!sedimentEnabled || markdown == null || markdown.isBlank()) {
+            return;
+        }
+        if (markdown.contains("本节内容生成失败")) {
+            log.debug("报告含占位节，跳过沉淀: query={}", query);
+            return;
+        }
+        try {
+            Long count = knowledgeItemMapper.selectCount(
+                    new LambdaQueryWrapper<KnowledgeItem>().eq(KnowledgeItem::getUserId, userId));
+            if (sedimentMaxItemsPerUser > 0 && count != null && count >= sedimentMaxItemsPerUser) {
+                log.debug("知识库已达上限 {} 条，跳过沉淀: userId={}", sedimentMaxItemsPerUser, userId);
+                return;
+            }
+            String sourceUrl = sources.isEmpty() ? "" : sources.getFirst();
+            ScoredResource defaultScores =
+                    new ScoredResource(sourceUrl, query, markdown, 4, 4, 4, 4, 4.0);
+            Thread.startVirtualThread(() -> {
+                try {
+                    embeddingService.embedAndPersist(userId, query, markdown, sourceUrl, defaultScores);
+                    log.info("报告已沉淀到知识库: userId={}, query={}", userId, query);
+                } catch (Exception e) {
+                    log.warn("报告沉淀到知识库失败: query={}", query, e);
+                }
+            });
+        } catch (Exception e) {
+            log.warn("报告沉淀前置检查失败: query={}", query, e);
         }
     }
 

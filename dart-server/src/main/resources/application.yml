@@ -99,6 +99,10 @@ agent:
   cache:
     # 报告查询缓存有效期（相同查询直接命中返回）
     ttl-hours: 24
+  sediment:
+    # 报告自动沉淀：生成成功的报告写入用户知识库（RAG 预灌），相似查询直接命中
+    enabled: true
+    max-items-per-user: 50
   search:
     max-results: 6
     fetch-timeout-ms: 6000
