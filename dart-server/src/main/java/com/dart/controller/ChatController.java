@@ -59,13 +59,7 @@ public class ChatController {
 
                 if (completed.get()) return;
 
-                if (result.isRagHit()) {
-                    SseUtils.sendEvent(emitter, SseEvents.CONTENT, result.ragAnswer().answer());
-                } else if (result.curatedReport() != null) {
-                    SseUtils.sendEvent(emitter, SseEvents.CONTENT,
-                            result.curatedReport().markdown());
-                }
-
+                // CONTENT 事件统一由 ChatService 内部发送（分节流式/整块），此处只发完成信号
                 if (!completed.get()) {
                     SseUtils.sendEvent(emitter, SseEvents.DONE,
                             Map.of("status", "complete", "conversationId", finalConversationId));

@@ -9,6 +9,7 @@ import com.dart.exception.ErrorCode;
 import com.dart.mapper.MessageMapper;
 import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -113,6 +114,7 @@ public class ChatService {
             }
             if (ragResult.isPresent()) {
                 SearchResult result = SearchResult.ragHit(ragResult.get());
+                SseUtils.sendEvent(emitter, SseEvents.CONTENT, result.ragAnswer().answer());
                 persistAssistantMessage(conversationId, result);
                 return result;
             }

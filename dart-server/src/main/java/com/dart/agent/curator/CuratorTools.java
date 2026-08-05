@@ -1,6 +1,7 @@
 package com.dart.agent.curator;
 
 import com.dart.agent.scoring.ScoredResource;
+import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -113,7 +114,12 @@ public class CuratorTools {
                 }));
             }
             for (Future<String> f : futures) {
-                sections.add(f.get());
+                String section = f.get();
+                sections.add(section);
+                // 分节流式推送：仅推送成功节（失败节以占位拼入最终报告，前端刷新后可见）
+                if (!section.equals(SECTION_FAILED)) {
+                    SseUtils.sendEvent(emitter, SseEvents.CONTENT, section);
+                }
             }
         } catch (Exception e) {
             log.warn("并行分节生成异常，追加占位节", e);
@@ -122,10 +128,12 @@ public class CuratorTools {
             }
         }
 
-        // 所有节全部失败 → 降级为纯搜索结果列表
+        // 所有节全部失败 → 降级为纯搜索结果列表，推送 fallback 报告
         if (sections.stream().allMatch(s -> s.equals(SECTION_FAILED))) {
             log.warn("所有报告节生成失败，降级使用 fallbackReport");
-            return fallbackReport(query, resources);
+            CuratedReport fallback = fallbackReport(query, resources);
+            SseUtils.sendEvent(emitter, SseEvents.CONTENT, fallback.markdown());
+            return fallback;
         }
 
         String markdown = truncateReport(String.join("\n\n---\n\n", sections));
