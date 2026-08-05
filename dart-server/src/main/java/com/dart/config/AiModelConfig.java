@@ -12,6 +12,8 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.ai.embedding.EmbeddingResponseMetadata;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -22,10 +24,18 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * 手动创建 ChatModel / EmbeddingModel Bean，替代被排除的 Spring AI 2.0.0 自动配置。
@@ -57,6 +67,11 @@ public class AiModelConfig {
 
     @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-small}")
     private String embeddingModel;
+
+    @Value("${agent.llm.read-timeout-ms:120000}")
+    private int llmReadTimeoutMs;
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Bean
     @ConditionalOnMissingBean(ChatModel.class)
@@ -93,6 +108,83 @@ public class AiModelConfig {
                 String text = (String) ((Map<String, Object>) choices.get(0).get("message")).get("content");
 
                 return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
+            }
+
+            @Override
+            public Flux<org.springframework.ai.chat.model.ChatResponse> stream(Prompt prompt) {
+                String content = prompt.getInstructions().stream()
+                        .map(m -> m.getText())
+                        .reduce("", (a, b) -> a + "\n" + b);
+                int maxTokens = 4096;
+                if (prompt.getOptions() != null && prompt.getOptions().getMaxTokens() != null) {
+                    maxTokens = prompt.getOptions().getMaxTokens();
+                }
+                Map<String, Object> body = Map.of(
+                        "model", deepseekModel,
+                        "messages", List.of(Map.of("role", "user", "content", content)),
+                        "temperature", 0.7,
+                        "max_tokens", maxTokens,
+                        "stream", true
+                );
+                HttpRequest request;
+                try {
+                    request = HttpRequest.newBuilder()
+                            .uri(URI.create(deepseekBaseUrl + "/v1/chat/completions"))
+                            .timeout(Duration.ofMillis(llmReadTimeoutMs))
+                            .header("Content-Type", "application/json")
+                            .header("Authorization", "Bearer " + deepseekApiKey)
+                            .POST(HttpRequest.BodyPublishers.ofString(
+                                    OBJECT_MAPPER.writeValueAsString(body)))
+                            .build();
+                } catch (Exception e) {
+                    return Flux.error(e);
+                }
+
+                return Flux.create(sink -> {
+                    try {
+                        HttpClient httpClient = HttpClient.newBuilder()
+                                .connectTimeout(Duration.ofSeconds(10))
+                                .build();
+                        HttpResponse<Stream<String>> resp =
+                                httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+                        if (resp.statusCode() != 200) {
+                            sink.error(new IllegalStateException(
+                                    "LLM 流式调用失败: HTTP " + resp.statusCode()));
+                            return;
+                        }
+                        resp.body().forEach(line -> consumeSseLine(line, sink));
+                        sink.complete();
+                    } catch (Exception e) {
+                        sink.error(e);
+                    }
+                }, FluxSink.OverflowStrategy.BUFFER);
+            }
+
+            /**
+             * 解析 OpenAI SSE 行：data: {choices:[{delta:{content:"..."}}]}，末尾 data: [DONE]。
+             */
+            private void consumeSseLine(String line, FluxSink<org.springframework.ai.chat.model.ChatResponse> sink) {
+                if (line == null || !line.startsWith("data:")) {
+                    return;
+                }
+                String data = line.substring(5).trim();
+                if (data.equals("[DONE]")) {
+                    return; // 流结束信号；由 forEach 结束统一 complete
+                }
+                try {
+                    JsonNode node = OBJECT_MAPPER.readTree(data);
+                    JsonNode content = node.path("choices").path(0).path("delta").path("content");
+                    if (content.isMissingNode() || content.isNull()) {
+                        return;
+                    }
+                    String text = content.asText();
+                    if (!text.isEmpty()) {
+                        sink.next(new org.springframework.ai.chat.model.ChatResponse(List.of(
+                                new Generation(new AssistantMessage(text)))));
+                    }
+                } catch (Exception e) {
+                    log.warn("SSE 流解析失败，跳过该行", e);
+                }
             }
 
             @Override

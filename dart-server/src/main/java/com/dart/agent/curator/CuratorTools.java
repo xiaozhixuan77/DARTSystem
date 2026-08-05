@@ -81,8 +81,8 @@ public class CuratorTools {
 
     /**
      * 分节生成结构化 Markdown 学习报告：
-     * ①核心概念 → ②原理+代码示例 → ③误区FAQ+进阶+参考文献。
-     * 三节独立 LLM 调用（单节失败仅占位，不影响其余节），虚拟线程并行生成后按序拼接。
+     * ①核心概念（token 级流式直推，感知最快）→ ②原理+代码示例 → ③误区FAQ+进阶+参考文献。
+     * 节 1 流式推送的同时，节 2/3 并行预生成缓冲，完成后按序整块推送。
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources, SseEmitter emitter) {
         if (resources == null || resources.isEmpty()) {
@@ -97,28 +97,35 @@ public class CuratorTools {
         String resourcesText = buildResourcesText(resources);
         List<String> sections = new ArrayList<>();
 
-        // 三节并行生成（互不依赖），壁钟耗时取决于最慢一节
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
-            List<Future<String>> futures = new ArrayList<>(3);
-            String[] names = {"concepts", "principles_code", "faq_advance"};
-            String[] prompts = {
-                    buildConceptPrompt(query),
-                    buildPrincipleCodePrompt(query),
-                    buildFaqAdvancePrompt(query)};
-            String[] statuses = {"正在讲解核心概念...", "正在解析原理与代码示例...", "正在整理误区与进阶方向..."};
-            for (int i = 0; i < 3; i++) {
-                final int idx = i;
-                futures.add(pool.submit(() -> {
-                    SseUtils.sendStatus(emitter, "curating", statuses[idx]);
-                    return generateSection(query, resourcesText, prompts[idx], names[idx]);
-                }));
+            SseUtils.sendStatus(emitter, "curating", "正在讲解核心概念...");
+            Future<String> section2Future = pool.submit(() -> {
+                SseUtils.sendStatus(emitter, "curating", "正在解析原理与代码示例...");
+                return generateSection(query, resourcesText,
+                        buildPrincipleCodePrompt(query), "principles_code");
+            });
+            Future<String> section3Future = pool.submit(() -> {
+                SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
+                return generateSection(query, resourcesText,
+                        buildFaqAdvancePrompt(query), "faq_advance");
+            });
+
+            // 节 1：token 级流式直推（打字机效果，首字 2-3s 可见）；失败时才补推占位
+            String section1 = streamSection(query, resourcesText,
+                    buildConceptPrompt(query), "concepts", emitter);
+            sections.add(section1);
+            if (section1.equals(SECTION_FAILED)) {
+                SseUtils.sendEvent(emitter, SseEvents.CONTENT, section1);
             }
-            for (Future<String> f : futures) {
-                String section = f.get();
-                sections.add(section);
-                // 分节流式推送：成功与失败（占位）均推送，用户能感知缺节
-                SseUtils.sendEvent(emitter, SseEvents.CONTENT, section);
-            }
+
+            // 节 2/3：并行已预生成，按序整块推送
+            String section2 = section2Future.get();
+            sections.add(section2);
+            SseUtils.sendEvent(emitter, SseEvents.CONTENT, section2);
+
+            String section3 = section3Future.get();
+            sections.add(section3);
+            SseUtils.sendEvent(emitter, SseEvents.CONTENT, section3);
         } catch (Exception e) {
             log.warn("并行分节生成异常，追加占位节", e);
             while (sections.size() < 3) {
@@ -155,6 +162,33 @@ public class CuratorTools {
             return cleanSection(response);
         } catch (Exception e) {
             log.warn("报告节[{}]生成失败，使用占位文本", sectionName, e);
+            return SECTION_FAILED;
+        }
+    }
+
+    /**
+     * LLM 流式生成单节内容：每个 delta 立即推送 SSE CONTENT 事件（打字机效果），
+     * 同时累积完整文本返回；失败返回占位文本。
+     */
+    private String streamSection(String query, String resourcesText, String sectionPrompt,
+                                 String sectionName, SseEmitter emitter) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
+            String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
+            chatModel.stream(new Prompt(new UserMessage(prompt), options))
+                    .doOnNext(resp -> {
+                        String delta = resp.getResults().getFirst().getOutput().getText();
+                        if (delta != null && !delta.isBlank()) {
+                            sb.append(delta);
+                            SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
+                        }
+                    })
+                    .blockLast();
+            String cleaned = cleanSection(sb.toString());
+            return cleaned.isBlank() ? SECTION_FAILED : cleaned;
+        } catch (Exception e) {
+            log.warn("报告节[{}]流式生成失败，使用占位文本", sectionName, e);
             return SECTION_FAILED;
         }
     }
