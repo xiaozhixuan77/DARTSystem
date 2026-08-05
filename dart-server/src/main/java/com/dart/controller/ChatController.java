@@ -28,7 +28,7 @@ public class ChatController {
     @PostMapping(value = "/send", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter send(@Valid @RequestBody ChatRequest request) {
         Long userId = SecurityUtils.getCurrentUserId();
-        SseEmitter emitter = SseUtils.createEmitter(600_000L);
+        SseEmitter emitter = SseUtils.createEmitter(180_000L);
         AtomicBoolean completed = new AtomicBoolean(false);
 
         // 处理 conversationId：为 null 时自动创建新会话

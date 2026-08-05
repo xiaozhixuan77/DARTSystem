@@ -8,8 +8,8 @@ spring:
     active: dev
   mvc:
     async:
-      # SSE 异步请求超时（分节生成 4 次 LLM 调用，总时长可达 8 分钟）
-      request-timeout: 600000
+      # SSE 异步请求超时（三节并行报告 + 追问，总时长约 90s）
+      request-timeout: 180000
   autoconfigure:
     exclude:
       # Spring AI 2.0.0 auto-config（RetryTemplate/RetryPolicy/RetryListener 类路径问题 + Jackson 3.x 不兼容）
