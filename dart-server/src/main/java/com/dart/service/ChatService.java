@@ -78,8 +78,9 @@ public class ChatService {
         userMsg.setCreatedAt(LocalDateTime.now());
         messageMapper.insert(userMsg);
 
-        // 2. 领域过滤
-        if (!isTechQuery(query)) {
+        // 2. 领域过滤 + 提示词优化（合并为一次 LLM 调用）
+        QueryPreProcess pre = preProcessQuery(query);
+        if (!pre.isTech()) {
             SseUtils.sendError(emitter, ErrorCode.NON_TECH_QUERY.getCode(),
                     ErrorCode.NON_TECH_QUERY.getMessage());
             SearchResult errorResult = SearchResult.searchResult(
@@ -88,9 +89,8 @@ public class ChatService {
             return errorResult;
         }
 
-        // 2.5 提示词优化（静默，失败降级原文）；用户消息持久化仍存原文
-        String optimized = optimizeQuery(query);
-        String effectiveQuery = (optimized == null || optimized.isBlank()) ? query : optimized;
+        // 优化后的查询用于 RAG/搜索/整理；用户消息持久化仍存原文
+        String effectiveQuery = pre.optimized();
 
         // 3. RAG 检查
         SseUtils.sendStatus(emitter, "rag_check", "正在检查知识库...");
@@ -236,52 +236,56 @@ public class ChatService {
         return sb.toString();
     }
 
-    // ─── 领域判断 ────────────────────────────────────────────
+    // ─── 前置判断与提示词优化（合并为一次调用）────────────────────────
+
+    public record QueryPreProcess(boolean isTech, String optimized) {}
 
     /**
-     * LLM 将用户输入优化为更适合检索与搜索的技术问题描述。
-     * 失败或空响应返回 null，由调用方降级为原始查询。
+     * 合并领域判断与提示词优化为一次 LLM 调用（JSON 输出 {isTech, optimized}）。
+     * 失败/解析失败降级：isTech=true（放行）、optimized=原查询。用户输入用 XML 标签包裹防注入。
      */
-    String optimizeQuery(String query) {
+    public QueryPreProcess preProcessQuery(String query) {
         try {
             String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
             String prompt = """
-                    你是一个提示词优化助手。将以下用户输入优化为一个更适合知识库检索和网络搜索的技术问题描述：
-                    1. 保持原始意图，补充关键上下文（技术栈、版本、场景）
-                    2. 去除口语化表达，使用准确的技术术语
-                    3. 输入已清晰准确时只做小幅润色
-                    4. 只输出优化后的文本，不要任何解释、前缀或引号
-                    5. 控制在 100 字以内
+                    你是一个技术领域判断与查询优化助手。对用户输入完成两件事：
+                    1. 判断是否属于技术/编程领域（isTech）
+                    2. 优化为更适合知识库检索和网络搜索的技术问题描述（optimized）：
+                       - 保持原始意图，补充关键上下文（技术栈、版本、场景）
+                       - 去除口语化表达，使用准确的技术术语
+                       - 输入已清晰准确时只做小幅润色
+                       - 控制在 100 字以内；非技术输入输出空字符串
+
+                    严格只输出 JSON，不要输出任何其他内容：
+                    {"isTech": true或false, "optimized": "优化后的描述"}
 
                     <user_query>%s</user_query>
                     """.formatted(sanitized);
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResults().getFirst().getOutput().getText().trim();
-            return response.isBlank() ? null : response;
+            boolean isTech = parseIsTech(response);
+            String optimized = parseOptimized(response);
+            return new QueryPreProcess(isTech,
+                    (optimized == null || optimized.isBlank()) ? query : optimized);
         } catch (Exception e) {
-            log.warn("提示词优化失败，使用原始查询", e);
-            return null;
+            log.warn("LLM 前置判断与提示词优化失败，降级为技术查询+原文", e);
+            return new QueryPreProcess(true, query);
         }
     }
 
-    /**
-     * LLM 前置判断是否为技术领域问题。用户输入用 XML 标签包裹防止 prompt 注入。
-     */
-    public boolean isTechQuery(String query) {
-        try {
-            String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
-            String prompt = """
-                    判断以下用户输入是否属于技术/编程领域。
-                    仅输出 YES 或 NO：
-                    <user_query>%s</user_query>
-                    """.formatted(sanitized);
-            String response = chatModel.call(new Prompt(new UserMessage(prompt)))
-                    .getResults().getFirst().getOutput().getText().trim();
-            return "YES".equalsIgnoreCase(response);
-        } catch (Exception e) {
-            log.warn("LLM 领域判断失败，默认为技术查询", e);
-            return true;
+    private static boolean parseIsTech(String json) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"isTech\"\\s*:\\s*(true|false)").matcher(json);
+        if (m.find()) {
+            return Boolean.parseBoolean(m.group(1));
         }
+        return true; // 解析失败默认放行
+    }
+
+    private static String parseOptimized(String json) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"optimized\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
+        return m.find() ? m.group(1) : null;
     }
 
     // ─── 工具方法 ────────────────────────────────────────────
