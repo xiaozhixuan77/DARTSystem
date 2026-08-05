@@ -10,9 +10,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
- * Bing 搜索客户端 — 直连 cn.bing.com，多页抓取，解析 HTML 搜索结果。
+ * Bing 搜索客户端 — 直连 cn.bing.com，3 页虚拟线程并行抓取，解析 HTML 搜索结果。
  */
 public class BingSearchClient {
 
@@ -22,29 +25,45 @@ public class BingSearchClient {
     private static final int PAGES = 3;
 
     public List<SearchResult> search(String query, int maxResults) {
-        Set<String> seen = new LinkedHashSet<>();
-        List<SearchResult> all = new ArrayList<>();
-
-        for (int page = 0; page < PAGES; page++) {
-            try {
-                List<SearchResult> pageResults = fetchPage(query, page);
-                for (SearchResult r : pageResults) {
-                    String normalized = normalizeUrl(r.url());
-                    if (seen.add(normalized)) {
-                        all.add(r);
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
+            List<Future<List<SearchResult>>> futures = new ArrayList<>(PAGES);
+            for (int page = 0; page < PAGES; page++) {
+                final int p = page;
+                futures.add(executor.submit(() -> {
+                    try {
+                        return fetchPage(query, p);
+                    } catch (Exception e) {
+                        log.warn("Bing 第{}页抓取失败: query={}", p + 1, query);
+                        return List.of();
                     }
-                }
-                if (all.size() >= maxResults) break;
-            } catch (Exception e) {
-                log.warn("Bing 第{}页抓取失败: query={}", page + 1, query);
+                }));
             }
-        }
 
-        log.info("Bing 搜索完成: query={}, 总抓取={}, 去重后={}", query, all.size(), Math.min(all.size(), maxResults));
-        return all.size() > maxResults ? all.subList(0, maxResults) : all;
+            Set<String> seen = new LinkedHashSet<>();
+            List<SearchResult> all = new ArrayList<>();
+            for (Future<List<SearchResult>> future : futures) {
+                try {
+                    List<SearchResult> pageResults = future.get();
+                    for (SearchResult r : pageResults) {
+                        String normalized = normalizeUrl(r.url());
+                        if (seen.add(normalized)) {
+                            all.add(r);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Bing 页面结果获取异常: query={}", query, e);
+                }
+            }
+
+            log.info("Bing 搜索完成: query={}, 总抓取={}, 去重后={}", query, all.size(), Math.min(all.size(), maxResults));
+            return all.size() > maxResults ? all.subList(0, maxResults) : all;
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
-    private List<SearchResult> fetchPage(String query, int page) throws Exception {
+    List<SearchResult> fetchPage(String query, int page) throws Exception {
         int first = page * 10 + 1;
         Document doc = Jsoup.connect(BING_URL)
                 .data("q", query)
