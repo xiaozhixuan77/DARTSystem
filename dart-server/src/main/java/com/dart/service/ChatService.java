@@ -153,14 +153,35 @@ public class ChatService {
             report = buildFallbackReport(effectiveQuery, searchResults);
         }
 
-        // 6. 追问生成（异步，失败不影响主流程）
-        String followUp = generateFollowUp(effectiveQuery, report.markdown());
-        if (followUp != null && !followUp.isBlank()) {
-            report = appendFollowUp(report, followUp);
-        }
-
+        // 6. 报告先落库；追问后台生成后 SSE 追加并更新消息（失败不影响主流程）。
+        //    主线程等待追问完成再返回，保证 done 发出时前端重拉的消息完整。
         SearchResult result = SearchResult.searchResult(report, searchResults);
-        persistAssistantMessage(conversationId, result);
+        Message assistantMessage = persistAssistantMessage(conversationId, result);
+        CuratedReport finalReport = report;
+        Message finalMessage = assistantMessage;
+        if (finalMessage != null) {
+            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                Future<?> followUpTask = executor.submit(() -> {
+                    String followUp = generateFollowUp(effectiveQuery, finalReport.markdown());
+                    if (followUp == null || followUp.isBlank()) {
+                        return;
+                    }
+                    SseUtils.sendStatus(emitter, "curating", "正在生成追问建议...");
+                    SseUtils.sendEvent(emitter, SseEvents.CONTENT,
+                            "\n\n---\n\n## 进一步探索\n\n" + followUp);
+                    CuratedReport withFollowUp = appendFollowUp(finalReport, followUp);
+                    try {
+                        finalMessage.setContent(withFollowUp.markdown());
+                        messageMapper.updateById(finalMessage);
+                    } catch (Exception e) {
+                        log.error("更新追问消息失败", e);
+                    }
+                });
+                followUpTask.get();
+            } catch (Exception e) {
+                log.warn("追问生成任务异常", e);
+            }
+        }
         return result;
     }
 
@@ -220,7 +241,7 @@ public class ChatService {
 
     // ─── 持久化 ──────────────────────────────────────────────
 
-    private void persistAssistantMessage(Long conversationId, SearchResult result) {
+    private Message persistAssistantMessage(Long conversationId, SearchResult result) {
         try {
             Message assistantMsg = new Message();
             assistantMsg.setConversationId(conversationId);
@@ -237,8 +258,10 @@ public class ChatService {
             }
             assistantMsg.setCreatedAt(LocalDateTime.now());
             messageMapper.insert(assistantMsg);
+            return assistantMsg;
         } catch (Exception e) {
             log.error("保存助手消息失败", e);
+            return null;
         }
     }
 
