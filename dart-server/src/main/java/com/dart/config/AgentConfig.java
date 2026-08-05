@@ -43,7 +43,7 @@ public class AgentConfig {
     @Value("${agent.search.score-threshold:3.0}")
     private double scoreThreshold;
 
-    @Value("${agent.llm.read-timeout-ms:90000}")
+    @Value("${agent.llm.read-timeout-ms:120000}")
     private int llmReadTimeoutMs;
 
     @Value("${agent.scoring.weights.timeliness:0.15}")
