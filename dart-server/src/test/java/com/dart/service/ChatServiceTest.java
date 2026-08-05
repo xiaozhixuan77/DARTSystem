@@ -4,7 +4,9 @@ import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.curator.CuratorAgent;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
+import com.dart.entity.KnowledgeItem;
 import com.dart.entity.Message;
+import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.MessageMapper;
 import com.dart.service.RagService.RagResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -51,6 +53,8 @@ class ChatServiceTest {
     private StringRedisTemplate redisTemplate;
     @Mock
     private ValueOperations<String, String> valueOps;
+    @Mock
+    private KnowledgeItemMapper knowledgeItemMapper;
 
     private ChatService chatService;
     private SseEmitter emitter;
@@ -59,10 +63,15 @@ class ChatServiceTest {
     @BeforeEach
     void setUp() {
         chatService = new ChatService(chatModel, searchAgent, curatorAgent, ragService,
-                embeddingService, messageMapper, redisTemplate);
+                embeddingService, messageMapper, redisTemplate, knowledgeItemMapper);
         emitter = spy(new SseEmitter(60_000L));
         // lenient：仅缓存相关用例使用，避免其他用例报 UnnecessaryStubbing
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        lenient().when(knowledgeItemMapper.selectCount(any())).thenReturn(0L);
+        // 单元测试不走 Spring 容器，手动注入 @Value 配置
+        org.springframework.test.util.ReflectionTestUtils.setField(chatService, "sedimentEnabled", true);
+        org.springframework.test.util.ReflectionTestUtils.setField(chatService, "sedimentMaxItemsPerUser", 50);
+        org.springframework.test.util.ReflectionTestUtils.setField(chatService, "cacheTtlHours", 24L);
     }
 
     // === 查询缓存 ===
@@ -127,6 +136,69 @@ class ChatServiceTest {
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
         verify(valueOps, times(2)).get(keyCaptor.capture());
         assertThat(keyCaptor.getAllValues().get(0)).isEqualTo(keyCaptor.getAllValues().get(1));
+    }
+
+    // === 报告自动沉淀（预灌 RAG 知识库）===
+
+    @Test
+    void executeSearchAndCurate_reportSedimentedToKnowledgeBase() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout")); // 前置与追问失败降级
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        assertThat(result.isRagHit()).isFalse();
+        // 报告无占位节 → 异步沉淀到知识库
+        verify(embeddingService, timeout(3000))
+                .embedAndPersist(eq(1L), eq("Spring Boot"), contains("# Report"),
+                        eq("https://a.com"), any());
+        // 中间断言：走到 persist 与 writeCache（finally）
+        verify(messageMapper, times(2)).insert(any(Message.class));
+        verify(valueOps).set(anyString(), contains("# Report"), any(java.time.Duration.class));
+    }
+
+    @Test
+    void executeSearchAndCurate_reportWithPlaceholder_notSedimented() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query",
+                "# Report\n\n> ⚠️ 本节内容生成失败，请稍后重试或访问参考文献了解详情。",
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        // 含占位节的残缺报告不沉淀
+        verify(embeddingService, after(1500).never()).embedAndPersist(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void executeSearchAndCurate_knowledgeBaseFull_notSedimented() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyString(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+        when(knowledgeItemMapper.selectCount(any())).thenReturn(50L); // 达到上限
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        verify(embeddingService, after(1500).never()).embedAndPersist(any(), any(), any(), any(), any());
     }
 
     // === preProcessQuery（领域判断 + 提示词优化合并为一次调用）===
