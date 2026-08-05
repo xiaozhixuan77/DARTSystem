@@ -54,7 +54,8 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("NO")))));
+                        List.of(new Generation(new AssistantMessage(
+                                "{\"isTech\":false,\"optimized\":\"\"}")))));
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
@@ -66,13 +67,14 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("LLM 调用异常时 isTechQuery 降级返回 true")
-    void isTechQueryFallsBackToTrueWhenLlmFails() {
+    @DisplayName("LLM 调用异常时前置处理降级为技术查询+原文")
+    void preProcessFallsBackToTechAndOriginalWhenLlmFails() {
         when(chatModel.call(any(Prompt.class)))
                 .thenThrow(new RuntimeException("LLM timeout"));
 
-        boolean isTech = chatService.isTechQuery("Spring Boot 配置问题");
-        assertThat(isTech).isTrue();
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Spring Boot 配置问题");
+        assertThat(pre.isTech()).isTrue();
+        assertThat(pre.optimized()).isEqualTo("Spring Boot 配置问题");
     }
 
     @Test
@@ -80,10 +82,12 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     void techQueryReturnsTrue() {
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("YES")))));
+                        List.of(new Generation(new AssistantMessage(
+                                "{\"isTech\":true,\"optimized\":\"Spring Boot configuration\"}")))));
 
-        boolean isTech = chatService.isTechQuery("Spring Boot configuration");
-        assertThat(isTech).isTrue();
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Spring Boot configuration");
+        assertThat(pre.isTech()).isTrue();
+        assertThat(pre.optimized()).isEqualTo("Spring Boot configuration");
     }
 
     @Test
@@ -104,12 +108,11 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
         Mockito.reset(embeddingModel);
         mockEmbedding(0.02f);
 
-        // ChatModel: isTechQuery→YES, optimizeQuery→优化词, generateAnswer
+        // ChatModel: 前置合并(JSON) → generateAnswer
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("YES")))))
-                .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("Spring Boot 配置")))))
+                        List.of(new Generation(new AssistantMessage(
+                                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\"}")))))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("基于知识库的 RAG 回答")))));
 
@@ -146,12 +149,11 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         "Advanced Spring tutorial covering dependency injection and AOP.",
                         600, 2, false, true, 2025));
 
-        // ChatModel 调用链: isTechQuery + optimizeQuery + 2xMatchScorer + CuratorGenerateReport
+        // ChatModel 调用链: 前置合并(JSON) + 4 节报告（后几节复用最后一个值）
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("YES")))))
-                .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("Spring Boot 配置")))))
+                        List.of(new Generation(new AssistantMessage(
+                                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\"}")))))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("5")))))
                 .thenReturn(new ChatResponse(
@@ -190,12 +192,11 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         "Advanced Spring Boot tutorial covering dependency injection and configuration in depth.",
                         800, 3, false, true, 2026));
 
-        // ChatModel 调用链: isTechQuery + optimizeQuery + 2×MatchScorer → report generation 抛异常
+        // ChatModel 调用链: 前置合并(JSON) → 报告节生成失败
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("YES")))))
-                .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("Spring Boot 配置")))))
+                        List.of(new Generation(new AssistantMessage(
+                                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\"}")))))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("5")))))
                 .thenReturn(new ChatResponse(
@@ -228,7 +229,8 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("YES")))));
+                        List.of(new Generation(new AssistantMessage(
+                                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\"}")))));
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
@@ -251,7 +253,8 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("YES")))));
+                        List.of(new Generation(new AssistantMessage(
+                                "{\"isTech\":true,\"optimized\":\"冷门技术问题\"}")))));
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(

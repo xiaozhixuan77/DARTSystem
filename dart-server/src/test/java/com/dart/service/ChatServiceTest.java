@@ -53,55 +53,60 @@ class ChatServiceTest {
         emitter = spy(new SseEmitter(60_000L));
     }
 
-    // === isTechQuery ===
+    // === preProcessQuery（领域判断 + 提示词优化合并为一次调用）===
 
     @Test
-    void isTechQuery_whenLLMReturnsYes_returnsTrue() {
-        when(chatResponse.getResults()).thenReturn(List.of(new Generation(new AssistantMessage("YES"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-        assertThat(chatService.isTechQuery("Spring Boot 如何配置?")).isTrue();
-    }
-
-    @Test
-    void isTechQuery_whenLLMReturnsNo_returnsFalse() {
-        when(chatResponse.getResults()).thenReturn(List.of(new Generation(new AssistantMessage("NO"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-        assertThat(chatService.isTechQuery("今天天气怎么样?")).isFalse();
-    }
-
-    @Test
-    void isTechQuery_whenLLMThrows_returnsTrue() {
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
-                .thenThrow(new RuntimeException("timeout"));
-        assertThat(chatService.isTechQuery("query")).isTrue();
-    }
-
-    // === optimizeQuery ===
-
-    @Test
-    void optimizeQuery_success_returnsOptimizedQuery() {
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("如何在 Spring Boot 中配置多数据源"))));
+    void preProcessQuery_whenLLMReturnsTechAndOptimized_returnsBoth() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"如何在 Spring Boot 中配置多数据源\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        assertThat(chatService.optimizeQuery("怎么配多数据源")).isEqualTo("如何在 Spring Boot 中配置多数据源");
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("怎么配多数据源");
+        assertThat(pre.isTech()).isTrue();
+        assertThat(pre.optimized()).isEqualTo("如何在 Spring Boot 中配置多数据源");
+        verify(chatModel, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
     }
 
     @Test
-    void optimizeQuery_llmThrows_returnsNull() {
+    void preProcessQuery_whenLLMReturnsNonTech_returnsIsTechFalse() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":false,\"optimized\":\"\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("今天天气怎么样?");
+        assertThat(pre.isTech()).isFalse();
+    }
+
+    @Test
+    void preProcessQuery_whenLLMThrows_fallsBackToTechAndOriginal() {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        assertThat(chatService.optimizeQuery("query")).isNull();
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        assertThat(pre.isTech()).isTrue();
+        assertThat(pre.optimized()).isEqualTo("query");
     }
 
     @Test
-    void optimizeQuery_blankResponse_returnsNull() {
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("   \n  "))));
+    void preProcessQuery_blankOptimized_fallsBackToOriginal() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        assertThat(chatService.optimizeQuery("query")).isNull();
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        assertThat(pre.isTech()).isTrue();
+        assertThat(pre.optimized()).isEqualTo("query");
+    }
+
+    @Test
+    void preProcessQuery_malformedJson_fallsBackToTechAndOriginal() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("不稳定的输出文本，无法解析"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        assertThat(pre.isTech()).isTrue();
+        assertThat(pre.optimized()).isEqualTo("query");
     }
 
     // === executeSearchAndCurate ===
@@ -115,14 +120,14 @@ class ChatServiceTest {
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
 
-        // isTechQuery 第一次调用 → YES; optimizeQuery 第二次调用 → 优化词
-        when(chatResponse.getResults())
-                .thenReturn(List.of(new Generation(new AssistantMessage("YES"))))
-                .thenReturn(List.of(new Generation(new AssistantMessage("优化后的技术问题描述"))));
+        // 前置合并单次调用 → JSON（isTech + 优化词）
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化后的技术问题描述\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
         assertThat(result.isRagHit()).isFalse();
+        verify(chatModel, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verify(ragService).retrieve(eq("优化后的技术问题描述"), eq(1L));
         verify(searchAgent).execute(eq("优化后的技术问题描述"), anyInt(), any());
         verify(curatorAgent).curate(eq("优化后的技术问题描述"), anyList(), any());
@@ -136,13 +141,28 @@ class ChatServiceTest {
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
-        // isTechQuery 与 optimizeQuery 均抛异常 → isTechQuery 降级 true，优化降级原文
+        // 前置合并调用抛异常 → 降级 isTech=true + 优化词为原文
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
         assertThat(result.isRagHit()).isFalse();
         verify(searchAgent).execute(eq("Spring Boot"), anyInt(), any());
+    }
+
+    @Test
+    void executeSearchAndCurate_nonTechQuery_returnsErrorReport() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":false,\"optimized\":\"\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("今天天气怎么样", 1L, 100L, emitter);
+        assertThat(result.isRagHit()).isFalse();
+        assertThat(result.curatedReport()).isNotNull();
+        assertThat(result.curatedReport().markdown()).contains("技术");
+        verify(ragService, never()).retrieve(anyString(), anyLong());
+        verify(searchAgent, never()).execute(anyString(), anyInt(), any());
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any());
     }
 
     @Test
@@ -182,10 +202,10 @@ class ChatServiceTest {
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
 
-        // isTechQuery 第一次调用 → YES; optimizeQuery 第二次调用 → 优化词; generateFollowUp 第三次调用 → 追问
+        // 前置合并第一次调用 → JSON（isTech + 优化词）; generateFollowUp 第二次调用 → 追问
         when(chatResponse.getResults())
-                .thenReturn(List.of(new Generation(new AssistantMessage("YES"))))
-                .thenReturn(List.of(new Generation(new AssistantMessage("JAVA"))))
+                .thenReturn(List.of(new Generation(
+                        new AssistantMessage("{\"isTech\":true,\"optimized\":\"JAVA\"}"))))
                 .thenReturn(List.of(new Generation(new AssistantMessage(
                         "- 想深入了解Java集合框架吗？\n- 对Spring Boot开发感兴趣？\n- 想了解Java面试常见考点吗？"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
