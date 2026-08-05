@@ -4,11 +4,13 @@ import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.curator.CuratorAgent;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
+import com.dart.entity.Message;
 import com.dart.mapper.MessageMapper;
 import com.dart.service.RagService.RagResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -251,8 +253,14 @@ class ChatServiceTest {
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("JAVA", 1L, 100L, emitter);
         assertThat(result.curatedReport()).isNotNull();
-        assertThat(result.curatedReport().markdown()).contains("## 进一步探索");
-        assertThat(result.curatedReport().markdown()).contains("Java集合框架");
+        // 追问不再拼入返回对象，而是更新已持久化的消息（消息含追问）
+        assertThat(result.curatedReport().markdown()).doesNotContain("## 进一步探索");
+
+        ArgumentCaptor<Message> captor = ArgumentCaptor.forClass(Message.class);
+        verify(messageMapper, atLeast(2)).insert(any(Message.class));
+        verify(messageMapper).updateById(captor.capture());
+        assertThat(captor.getValue().getContent()).contains("## 进一步探索");
+        assertThat(captor.getValue().getContent()).contains("Java集合框架");
     }
 
     @Test
@@ -263,7 +271,7 @@ class ChatServiceTest {
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any())).thenReturn(report);
-        // 追问 LLM 调用失败
+        // 前置合并与追问 LLM 调用均失败
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
@@ -271,6 +279,7 @@ class ChatServiceTest {
         // 即使追问失败，报告仍正常返回
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).doesNotContain("## 进一步探索");
+        verify(messageMapper, never()).updateById(any(Message.class));
     }
 
     @Test
