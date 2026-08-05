@@ -16,6 +16,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -94,6 +95,7 @@ class CuratorToolsTest {
     }
 
     /**
+     * 节 1（核心概念）走 stream 流式；节 2/3 走 call 并行。
      * 并行生成时调用顺序不定，按 Prompt 内容分发各节响应。
      */
     private void stubThreeSections() {
@@ -101,9 +103,7 @@ class CuratorToolsTest {
             Prompt p = inv.getArgument(0);
             String text = p.getInstructions().getFirst().getText();
             String section;
-            if (text.contains("核心概念")) {
-                section = SECTION_CONCEPT;
-            } else if (text.contains("关键原理")) {
+            if (text.contains("关键原理")) {
                 section = SECTION_PRINCIPLE_CODE;
             } else {
                 section = SECTION_FAQ_ADVANCE;
@@ -111,6 +111,15 @@ class CuratorToolsTest {
             ChatResponse resp = new ChatResponse(
                     List.of(new Generation(new AssistantMessage(section))));
             return resp;
+        });
+        when(chatModel.stream(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("核心概念")) {
+                return Flux.just(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage(SECTION_CONCEPT)))));
+            }
+            return Flux.empty();
         });
     }
 
@@ -164,11 +173,12 @@ class CuratorToolsTest {
     }
 
     @Test
-    void generateReport_callsLLMThreeTimes() {
+    void generateReport_callsCallTwiceAndStreamOnce() {
         stubThreeSections();
 
         curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
-        verify(chatModel, times(3)).call(any(Prompt.class));
+        verify(chatModel, times(2)).call(any(Prompt.class));
+        verify(chatModel, times(1)).stream(any(Prompt.class));
     }
 
     @Test
@@ -249,11 +259,15 @@ class CuratorToolsTest {
         curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
-        verify(chatModel, times(3)).call(captor.capture());
+        verify(chatModel, times(2)).call(captor.capture());
         for (Prompt p : captor.getAllValues()) {
             assertThat(p.getOptions()).isNotNull();
             assertThat(p.getOptions().getMaxTokens()).isEqualTo(2048);
         }
+        ArgumentCaptor<Prompt> streamCaptor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel).stream(streamCaptor.capture());
+        assertThat(streamCaptor.getValue().getOptions()).isNotNull();
+        assertThat(streamCaptor.getValue().getOptions().getMaxTokens()).isEqualTo(2048);
     }
 
     @Test
@@ -263,10 +277,42 @@ class CuratorToolsTest {
         curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
-        verify(chatModel, times(3)).call(captor.capture());
+        verify(chatModel, times(2)).call(captor.capture());
         for (Prompt p : captor.getAllValues()) {
             String promptText = p.getInstructions().getFirst().getText();
             assertThat(promptText).contains("1000-1200 字");
+        }
+        ArgumentCaptor<Prompt> streamCaptor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel).stream(streamCaptor.capture());
+        assertThat(streamCaptor.getValue().getInstructions().getFirst().getText())
+                .contains("1000-1200 字");
+    }
+
+    @Test
+    void generateReport_streamsConceptSectionTokenByToken() {
+        // 节 1 以多个 token 流式返回，应逐 token 推送 SSE；节 2/3 整块推送
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            String section = text.contains("关键原理")
+                    ? SECTION_PRINCIPLE_CODE : SECTION_FAQ_ADVANCE;
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
+        });
+        when(chatModel.stream(any(Prompt.class))).thenAnswer(inv -> Flux.just(
+                new ChatResponse(List.of(new Generation(new AssistantMessage("## ")))),
+                new ChatResponse(List.of(new Generation(new AssistantMessage("📖 核心"))))));
+
+        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
+            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+            // 节 1 逐 token 推送
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), eq("## ")), times(1));
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), eq("📖 核心")), times(1));
+            // 节 2/3 整块推送
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("🔬")), times(1));
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("⚠️")), times(1));
+            // 拼接报告包含流式节内容
+            assertThat(report.markdown()).contains("## 📖 核心");
         }
     }
 
@@ -280,7 +326,7 @@ class CuratorToolsTest {
         curatorTools.generateReport("test query", List.of(r1, r2), new SseEmitter(0L));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
-        verify(chatModel, times(3)).call(captor.capture());
+        verify(chatModel, times(2)).call(captor.capture());
         for (Prompt p : captor.getAllValues()) {
             String promptText = p.getInstructions().getFirst().getText();
             // 旧阈值 250 字符时仅保留前 25 个重复单元，新阈值 1500 应保留 100 个以上
@@ -290,21 +336,17 @@ class CuratorToolsTest {
 
     @Test
     void generateReport_oneSectionFails_keepsOthersWithPlaceholder() {
-        // 原理+代码节抛异常，其余节按 Prompt 内容正常返回
+        // 原理+代码节（call）抛异常；概念节（stream）与 FAQ 节正常
         when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
             Prompt p = inv.getArgument(0);
             String text = p.getInstructions().getFirst().getText();
             if (text.contains("关键原理")) {
                 throw new RuntimeException("timeout");
             }
-            String section;
-            if (text.contains("核心概念")) {
-                section = SECTION_CONCEPT;
-            } else {
-                section = SECTION_FAQ_ADVANCE;
-            }
-            return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
         });
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
+                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("📖");
@@ -317,6 +359,7 @@ class CuratorToolsTest {
     @Test
     void generateReport_allSectionsFail_returnsFallback() {
         when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
+        when(chatModel.stream(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "content ".repeat(200), 4.5);
         ScoredResource r2 = makeResource("https://medium.com", "Medium Guide", "content ".repeat(200), 4.0);
         CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2), new SseEmitter(0L));

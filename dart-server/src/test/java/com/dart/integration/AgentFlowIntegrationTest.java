@@ -18,6 +18,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -149,7 +150,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         "Advanced Spring tutorial covering dependency injection and AOP.",
                         600, 2, false, true, 2025));
 
-        // ChatModel 调用链: 前置合并(JSON) + 4 节报告（后几节复用最后一个值）
+        // ChatModel 调用链: 前置合并(JSON) + 节 1（stream）+ 节 2/3（call）
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage(
@@ -161,6 +162,10 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage(
                                 "# Spring Boot 配置指南\n\n整理后的报告内容。")))));
+        when(chatModel.stream(any(Prompt.class)))
+                .thenReturn(Flux.just(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage(
+                                "# Spring Boot 核心概念\n\n概念内容。"))))));
 
         SseEmitter emitter = new SseEmitter();
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
@@ -257,13 +262,16 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         "Spring Boot configuration guide with detailed examples and code snippets.",
                         800, 3, true, false, 2026));
 
-        // 前置合并(JSON) + 报告节（后续调用复用最后一个值）
+        // 前置合并(JSON) + 节 1（stream）+ 节 2/3（call，复用最后一个值）
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(List.of(new Generation(
                         new AssistantMessage(
                                 "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\"}")))))
                 .thenReturn(new ChatResponse(List.of(new Generation(
                         new AssistantMessage("# 概念节内容\n\n详细说明。".repeat(200))))));
+        when(chatModel.stream(any(Prompt.class)))
+                .thenReturn(Flux.just(new ChatResponse(List.of(new Generation(
+                        new AssistantMessage("# 概念节内容\n\n详细说明。".repeat(200)))))));
 
         String query = "Spring Boot 缓存配置";
         chatService.executeSearchAndCurate(query, userId, convId, new SseEmitter());
