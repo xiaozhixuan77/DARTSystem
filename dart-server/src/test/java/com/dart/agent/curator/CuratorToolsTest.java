@@ -32,30 +32,6 @@ class CuratorToolsTest {
 
     private CuratorTools curatorTools;
 
-    private static final String SECTION_MINDMAP = """
-            ## 🧭 知识全景
-
-            ```mermaid
-            mindmap
-              root((Java))
-                基础语法
-                  数据类型
-                  控制流
-                面向对象
-                  类与接口
-                  继承与多态
-                进阶特性
-                  泛型
-                  并发编程
-            ```
-
-            ## 🎯 学习目标
-
-            学完本节，你将掌握：
-            1. Java 基本语法与数据类型
-            2. 面向对象核心思想
-            """;
-
     private static final String SECTION_CONCEPT = """
             ## 📖 核心概念
 
@@ -113,7 +89,7 @@ class CuratorToolsTest {
     /**
      * 并行生成时调用顺序不定，按 Prompt 内容分发各节响应。
      */
-    private void stubFourSections() {
+    private void stubThreeSections() {
         when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
             Prompt p = inv.getArgument(0);
             String text = p.getInstructions().getFirst().getText();
@@ -122,10 +98,8 @@ class CuratorToolsTest {
                 section = SECTION_CONCEPT;
             } else if (text.contains("关键原理")) {
                 section = SECTION_PRINCIPLE_CODE;
-            } else if (text.contains("常见误区")) {
-                section = SECTION_FAQ_ADVANCE;
             } else {
-                section = SECTION_MINDMAP;
+                section = SECTION_FAQ_ADVANCE;
             }
             ChatResponse resp = new ChatResponse(
                     List.of(new Generation(new AssistantMessage(section))));
@@ -173,38 +147,35 @@ class CuratorToolsTest {
 
     @Test
     void generateReport_normalFlow_returnsJoinedReport() {
-        stubFourSections();
+        stubThreeSections();
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report).isNotNull();
         assertThat(report.markdown()).contains("Java");
-        assertThat(report.markdown()).contains("🧭");
         assertThat(report.markdown()).contains("📖");
         assertThat(report.markdown()).contains("📚");
     }
 
     @Test
-    void generateReport_callsLLMFourTimes() {
-        stubFourSections();
+    void generateReport_callsLLMThreeTimes() {
+        stubThreeSections();
 
         curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
-        verify(chatModel, times(4)).call(any(Prompt.class));
+        verify(chatModel, times(3)).call(any(Prompt.class));
     }
 
     @Test
     void generateReport_sectionsInOrder() {
-        stubFourSections();
+        stubThreeSections();
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         String md = report.markdown();
-        int idxMindmap = md.indexOf("🧭");
         int idxConcept = md.indexOf("📖");
         int idxPrinciple = md.indexOf("🔬");
         int idxCode = md.indexOf("💻");
         int idxFaq = md.indexOf("⚠️");
         int idxAdvance = md.indexOf("🚀");
         int idxRef = md.indexOf("📚");
-        assertThat(idxMindmap).isLessThan(idxConcept);
         assertThat(idxConcept).isLessThan(idxPrinciple);
         assertThat(idxPrinciple).isLessThan(idxCode);
         assertThat(idxCode).isLessThan(idxFaq);
@@ -213,18 +184,8 @@ class CuratorToolsTest {
     }
 
     @Test
-    void generateReport_includesMermaidMindmap() {
-        stubFourSections();
-
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
-        assertThat(report.markdown()).contains("```mermaid");
-        assertThat(report.markdown()).contains("mindmap");
-        assertThat(report.markdown()).contains("root((Java))");
-    }
-
-    @Test
     void generateReport_includesAllSixModules() {
-        stubFourSections();
+        stubThreeSections();
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("📖");
@@ -237,7 +198,7 @@ class CuratorToolsTest {
 
     @Test
     void generateReport_includesReferencesSection() {
-        stubFourSections();
+        stubThreeSections();
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("参考文献");
@@ -246,7 +207,7 @@ class CuratorToolsTest {
 
     @Test
     void generateReport_contentTruncatedAt1500() {
-        stubFourSections();
+        stubThreeSections();
 
         String longContent = "ABCDEFGHIJ".repeat(200); // 2000 chars, > 1500
         ScoredResource r1 = makeResource("https://a.com", "Title A", longContent, 4.5);
@@ -254,7 +215,7 @@ class CuratorToolsTest {
         curatorTools.generateReport("test query", List.of(r1, r2), new SseEmitter(0L));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
-        verify(chatModel, times(4)).call(captor.capture());
+        verify(chatModel, times(3)).call(captor.capture());
         for (Prompt p : captor.getAllValues()) {
             String promptText = p.getInstructions().getFirst().getText();
             // 旧阈值 250 字符时仅保留前 25 个重复单元，新阈值 1500 应保留 100 个以上
@@ -274,16 +235,13 @@ class CuratorToolsTest {
             String section;
             if (text.contains("核心概念")) {
                 section = SECTION_CONCEPT;
-            } else if (text.contains("常见误区")) {
-                section = SECTION_FAQ_ADVANCE;
             } else {
-                section = SECTION_MINDMAP;
+                section = SECTION_FAQ_ADVANCE;
             }
             return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
         });
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
-        assertThat(report.markdown()).contains("🧭");
         assertThat(report.markdown()).contains("📖");
         assertThat(report.markdown()).contains("生成失败");
         assertThat(report.markdown()).contains("📚");
