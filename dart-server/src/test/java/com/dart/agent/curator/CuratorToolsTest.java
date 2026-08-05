@@ -206,6 +206,34 @@ class CuratorToolsTest {
     }
 
     @Test
+    void generateReport_setsMaxTokensPerSection() {
+        stubThreeSections();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(3)).call(captor.capture());
+        for (Prompt p : captor.getAllValues()) {
+            assertThat(p.getOptions()).isNotNull();
+            assertThat(p.getOptions().getMaxTokens()).isEqualTo(2048);
+        }
+    }
+
+    @Test
+    void generateReport_promptsRequestBoundedSectionLength() {
+        stubThreeSections();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(3)).call(captor.capture());
+        for (Prompt p : captor.getAllValues()) {
+            String promptText = p.getInstructions().getFirst().getText();
+            assertThat(promptText).contains("1000-1200 字");
+        }
+    }
+
+    @Test
     void generateReport_contentTruncatedAt1500() {
         stubThreeSections();
 
