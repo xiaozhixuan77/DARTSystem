@@ -43,6 +43,9 @@ public class AgentConfig {
     @Value("${agent.search.score-threshold:3.0}")
     private double scoreThreshold;
 
+    @Value("${agent.llm.read-timeout-ms:60000}")
+    private int llmReadTimeoutMs;
+
     @Value("${agent.scoring.weights.timeliness:0.15}")
     private double wT;
 
@@ -83,7 +86,8 @@ public class AgentConfig {
     public RestTemplate restTemplate(RestTemplateBuilder builder) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(10));
-        factory.setReadTimeout(Duration.ofSeconds(300));
+        // LLM 调用熔断：单次超时 60s，防止慢响应阻塞整条编排
+        factory.setReadTimeout(Duration.ofMillis(llmReadTimeoutMs));
         return new RestTemplate(factory);
     }
 

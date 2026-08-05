@@ -68,7 +68,7 @@ public class SearchTools {
             List<PageContent> results = new ArrayList<>();
             for (CompletableFuture<PageContent> future : futures) {
                 try {
-                    PageContent page = future.get(15, TimeUnit.SECONDS);
+                    PageContent page = future.get(8, TimeUnit.SECONDS);
                     if (page != null) {
                         results.add(page);
                     }

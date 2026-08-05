@@ -93,9 +93,12 @@ jwt:
 
 # Agent 配置
 agent:
+  llm:
+    # LLM 单次调用读超时熔断（原 300s，慢响应会阻塞整条编排）
+    read-timeout-ms: 60000
   search:
     max-results: 6
-    fetch-timeout-ms: 10000
+    fetch-timeout-ms: 6000
     score-threshold: 1.5
   scoring:
     weights:
