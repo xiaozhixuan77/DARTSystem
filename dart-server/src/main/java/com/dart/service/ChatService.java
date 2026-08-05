@@ -204,7 +204,8 @@ public class ChatService {
                     }
                 });
                 followUpTask.get();
-                writeCache(effectiveQuery, finalMessage.getContent(), report.sources());
+                // 缓存 key 必须与读取端一致（原始查询规范化哈希）
+                writeCache(query, finalMessage.getContent(), report.sources());
             } catch (Exception e) {
                 log.warn("追问生成任务异常", e);
             }

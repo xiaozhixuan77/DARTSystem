@@ -94,8 +94,8 @@ jwt:
 # Agent 配置
 agent:
   llm:
-    # LLM 单次调用读超时熔断（原 300s，慢响应会阻塞整条编排）
-    read-timeout-ms: 60000
+    # LLM 单次调用读超时熔断（DeepSeek 实测单节 40-80s，90s 留余量防误杀）
+    read-timeout-ms: 90000
   cache:
     # 报告查询缓存有效期（相同查询直接命中返回）
     ttl-hours: 24
