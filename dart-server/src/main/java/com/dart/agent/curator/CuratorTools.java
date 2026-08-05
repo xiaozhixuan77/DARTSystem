@@ -80,8 +80,8 @@ public class CuratorTools {
 
     /**
      * 分节生成结构化 Markdown 学习报告：
-     * ①思维导图+学习目标 → ②核心概念 → ③原理+代码示例 → ④误区FAQ+进阶+参考文献。
-     * 每节独立 LLM 调用（单节失败仅占位，不影响其余节），拼接后返回。
+     * ①核心概念 → ②原理+代码示例 → ③误区FAQ+进阶+参考文献。
+     * 三节独立 LLM 调用（单节失败仅占位，不影响其余节），虚拟线程并行生成后按序拼接。
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources, SseEmitter emitter) {
         if (resources == null || resources.isEmpty()) {
@@ -96,13 +96,7 @@ public class CuratorTools {
         String resourcesText = buildResourcesText(resources);
         List<String> sections = new ArrayList<>();
 
-        // 节 1：思维导图 + 学习目标（后续节的上下文锚点），串行先行
-        SseUtils.sendStatus(emitter, "curating", "正在绘制知识全景...");
-        String mindmapSection = generateSection(query, resourcesText, "",
-                buildMindmapPrompt(query), "mindmap");
-        sections.add(mindmapSection);
-
-        // 节 2/3/4 并行生成（均依赖节 1 锚点，互不依赖），将总时长从 ~7 分钟降到 ~2 分钟
+        // 三节并行生成（互不依赖），壁钟耗时取决于最慢一节
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
             List<Future<String>> futures = new ArrayList<>(3);
             String[] names = {"concepts", "principles_code", "faq_advance"};
@@ -115,8 +109,7 @@ public class CuratorTools {
                 final int idx = i;
                 futures.add(pool.submit(() -> {
                     SseUtils.sendStatus(emitter, "curating", statuses[idx]);
-                    return generateSection(query, resourcesText, mindmapSection,
-                            prompts[idx], names[idx]);
+                    return generateSection(query, resourcesText, prompts[idx], names[idx]);
                 }));
             }
             for (Future<String> f : futures) {
@@ -124,7 +117,7 @@ public class CuratorTools {
             }
         } catch (Exception e) {
             log.warn("并行分节生成异常，追加占位节", e);
-            while (sections.size() < 4) {
+            while (sections.size() < 3) {
                 sections.add(SECTION_FAILED);
             }
         }
@@ -143,11 +136,11 @@ public class CuratorTools {
     /**
      * 调用 LLM 生成单节内容；失败返回占位文本，不影响主流程。
      */
-    private String generateSection(String query, String resourcesText, String mindmapAnchor,
+    private String generateSection(String query, String resourcesText,
                                    String sectionPrompt, String sectionName) {
         try {
             ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
-            String prompt = buildSectionPrompt(query, resourcesText, mindmapAnchor, sectionPrompt);
+            String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
             String response = chatModel.call(new Prompt(new UserMessage(prompt), options))
                     .getResults()
                     .getFirst()
@@ -160,39 +153,12 @@ public class CuratorTools {
         }
     }
 
-    private String buildSectionPrompt(String query, String resourcesText, String mindmapAnchor,
-                                      String sectionPrompt) {
+    private String buildSectionPrompt(String query, String resourcesText, String sectionPrompt) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一个技术教育专家，正在撰写关于「").append(query)
                 .append("」的深度学习报告。基于以下搜索结果素材撰写。\n\n");
-        if (mindmapAnchor != null && !mindmapAnchor.isBlank()) {
-            sb.append("之前已生成的知识全景（用于对齐结构，勿重复绘制或互相矛盾）：\n")
-                    .append(mindmapAnchor).append("\n\n");
-        }
         sb.append(sectionPrompt).append("\n\n---\n\n").append(resourcesText);
         return sb.toString();
-    }
-
-    private String buildMindmapPrompt(String query) {
-        return """
-                请输出以下两个部分：
-
-                ## 🧭 知识全景
-
-                用 ```mermaid
-                mindmap``` 语法绘制知识全景图：
-                - 根节点为「%s」
-                - 一级分支 3-5 个（主要知识方向）
-                - 每个一级分支下 2-4 个二级节点（具体知识点）
-                - 仅输出 mermaid 代码块
-
-                ## 🎯 学习目标
-
-                列出 3-5 条"学完本节你将掌握/能做"的目标，让读者明确学习任务。
-                每条一行，以"- "开头。
-
-                本节字数控制在 400-800 字（不含 mermaid 代码）。
-                """.formatted(query);
     }
 
     private String buildConceptPrompt(String query) {
