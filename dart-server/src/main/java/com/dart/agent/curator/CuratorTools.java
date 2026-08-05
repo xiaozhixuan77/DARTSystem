@@ -116,10 +116,8 @@ public class CuratorTools {
             for (Future<String> f : futures) {
                 String section = f.get();
                 sections.add(section);
-                // 分节流式推送：仅推送成功节（失败节以占位拼入最终报告，前端刷新后可见）
-                if (!section.equals(SECTION_FAILED)) {
-                    SseUtils.sendEvent(emitter, SseEvents.CONTENT, section);
-                }
+                // 分节流式推送：成功与失败（占位）均推送，用户能感知缺节
+                SseUtils.sendEvent(emitter, SseEvents.CONTENT, section);
             }
         } catch (Exception e) {
             log.warn("并行分节生成异常，追加占位节", e);

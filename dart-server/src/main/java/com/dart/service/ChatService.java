@@ -22,6 +22,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.nio.charset.StandardCharsets;
@@ -179,38 +181,49 @@ public class ChatService {
             report = buildFallbackReport(effectiveQuery, searchResults);
         }
 
-        // 6. 报告先落库；追问后台生成后 SSE 追加并更新消息（失败不影响主流程）。
-        //    主线程等待追问完成再返回，保证 done 发出时前端重拉的消息完整。
+        // 6. 报告先落库；追问在事务提交后生成（afterCommit 更新消息，避免与原事务
+        //    写锁冲突——Lock wait timeout），SSE 追加推送；done 自然延后到追问完成。
         SearchResult result = SearchResult.searchResult(report, searchResults);
         Message assistantMessage = persistAssistantMessage(conversationId, result);
-        CuratedReport finalReport = report;
-        Message finalMessage = assistantMessage;
-        if (finalMessage != null) {
-            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                Future<?> followUpTask = executor.submit(() -> {
-                    String followUp = generateFollowUp(effectiveQuery, finalReport.markdown());
-                    if (followUp == null || followUp.isBlank()) {
-                        return;
-                    }
-                    SseUtils.sendStatus(emitter, "curating", "正在生成追问建议...");
-                    SseUtils.sendEvent(emitter, SseEvents.CONTENT,
-                            "\n\n---\n\n## 进一步探索\n\n" + followUp);
-                    CuratedReport withFollowUp = appendFollowUp(finalReport, followUp);
-                    try {
-                        finalMessage.setContent(withFollowUp.markdown());
-                        messageMapper.updateById(finalMessage);
-                    } catch (Exception e) {
-                        log.error("更新追问消息失败", e);
+        if (assistantMessage != null) {
+            final Message msg = assistantMessage;
+            final CuratedReport finalReport = report;
+            Runnable followUpAndCache = () -> generateFollowUpAndUpdate(msg, finalReport, query, emitter);
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        followUpAndCache.run();
                     }
                 });
-                followUpTask.get();
-                // 缓存 key 必须与读取端一致（原始查询规范化哈希）
-                writeCache(query, finalMessage.getContent(), report.sources());
-            } catch (Exception e) {
-                log.warn("追问生成任务异常", e);
+            } else {
+                followUpAndCache.run();
             }
         }
         return result;
+    }
+
+    /**
+     * 生成追问 → SSE 追加 → 更新消息 → 写入报告缓存。整体失败仅告警，不影响报告主流程。
+     */
+    private void generateFollowUpAndUpdate(Message assistantMessage, CuratedReport report,
+                                           String query, SseEmitter emitter) {
+        try {
+            String followUp = generateFollowUp(query, report.markdown());
+            if (followUp != null && !followUp.isBlank()) {
+                SseUtils.sendStatus(emitter, "curating", "正在生成追问建议...");
+                SseUtils.sendEvent(emitter, SseEvents.CONTENT,
+                        "\n\n---\n\n## 进一步探索\n\n" + followUp);
+                CuratedReport withFollowUp = appendFollowUp(report, followUp);
+                assistantMessage.setContent(withFollowUp.markdown());
+                messageMapper.updateById(assistantMessage);
+                writeCache(query, withFollowUp.markdown(), report.sources());
+            } else {
+                writeCache(query, report.markdown(), report.sources());
+            }
+        } catch (Exception e) {
+            log.warn("追问生成或缓存写入失败", e);
+        }
     }
 
     private CuratedReport buildFallbackReport(String query, List<ScoredResource> resources) {

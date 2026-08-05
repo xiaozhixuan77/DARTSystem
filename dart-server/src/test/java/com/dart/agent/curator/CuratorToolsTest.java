@@ -236,8 +236,8 @@ class CuratorToolsTest {
             CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2), new SseEmitter(0L));
 
             assertThat(report.markdown()).contains("搜索结果");
-            // 全部失败时不推占位节，只推 fallback 报告
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), times(1));
+            // 3 个占位节推送 + 1 次 fallback 推送（占位让用户感知失败，fallback 兜底内容）
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), times(4));
             mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("AI 报告生成暂时不可用")), times(1));
         }
     }
