@@ -25,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -249,6 +250,43 @@ class CuratorToolsTest {
             // 3 个占位节推送 + 1 次 fallback 推送（占位让用户感知失败，fallback 兜底内容）
             mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), times(4));
             mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("AI 报告生成暂时不可用")), times(1));
+        }
+    }
+
+    @Test
+    void streamSection_preservesWhitespaceDeltas() {
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            String section = text.contains("关键原理")
+                    ? SECTION_PRINCIPLE_CODE : SECTION_FAQ_ADVANCE;
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
+        });
+        // 节 1 流式：空白 delta（空格/换行）与文字 delta 混合，模拟 DeepSeek 流式推送
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
+                new ChatResponse(List.of(new Generation(new AssistantMessage("## ")))),
+                new ChatResponse(List.of(new Generation(new AssistantMessage("📖 ")))),
+                new ChatResponse(List.of(new Generation(new AssistantMessage("核心概念\n\n")))),
+                new ChatResponse(List.of(new Generation(new AssistantMessage("### ")))),
+                new ChatResponse(List.of(new Generation(new AssistantMessage("1. ")))),
+                new ChatResponse(List.of(new Generation(new AssistantMessage("概念名\n")))),
+                new ChatResponse(List.of(new Generation(new AssistantMessage("- ")))),
+                new ChatResponse(List.of(new Generation(new AssistantMessage("**定义**"))))));
+
+        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
+            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+            // 空白 delta 进入拼接：标题带空格、换行保留（非法 "###1." 不再出现）
+            assertThat(report.markdown()).contains("## 📖 核心概念\n\n### 1. 概念名\n- **定义**");
+            assertThat(report.markdown()).doesNotContain("###1.");
+
+            // 空白 delta 不产生 SSE 推送（仅非空白内容推送，减少前端无意义渲染）
+            ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contentCaptor.capture()),
+                    atLeast(1));
+            for (String pushed : contentCaptor.getAllValues()) {
+                assertThat(pushed).isNotBlank();
+            }
         }
     }
 
