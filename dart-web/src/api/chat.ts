@@ -67,10 +67,14 @@ export function sendMessage(
             currentEvent = line.slice(6).trim()
           } else if (line.startsWith('data:')) {
             // Spring SseEmitter 输出 "data:" + 内容（无分隔空格），不能剥除前导空格，
-            // 否则流式推送的纯空格 delta（markdown 标题/列表的空格）会被吞掉；
-            // 空 data 行（内容换行）也必须保留，还原为换行
-            const data = line.slice(5)
-            dataBuffer += (dataBuffer ? '\n' : '') + data
+            // 否则流式推送的纯空格 delta（markdown 标题/列表的空格）会被吞掉。
+            // 空 data 行（"data:" 无内容）是内容换行的一部分：即使事件内只有空
+            // data 行（纯换行 delta），也必须还原为换行，否则前端缺换行
+            if (line === 'data:') {
+              dataBuffer += '\n'
+            } else {
+              dataBuffer += (dataBuffer ? '\n' : '') + line.slice(5)
+            }
           } else if (line.trim() === '') {
             // SSE spec: 空行表示事件结束
             flushEvent()

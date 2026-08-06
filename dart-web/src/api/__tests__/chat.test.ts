@@ -55,6 +55,30 @@ describe('sendMessage SSE 解析', () => {
     expect(contents[1]).toBe('### \n1. 概念名')
   })
 
+  it('纯换行 delta（空 data 行事件）也推送给前端', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      body: sseStream([
+        'event:content\ndata:### 1. 标题\n\n',
+        // 纯换行 delta：Spring 输出 "data:" 空行 + 事件结束空行
+        'event:content\ndata:\n\n',
+        'event:content\ndata:- 列表项\n\n',
+        'event:done\ndata:{"status":"complete"}\n\n'
+      ])
+    } as any)
+
+    const contents: string[] = []
+    await new Promise<void>((resolve) => {
+      sendMessage('test', null, {
+        onContent: (chunk) => contents.push(chunk),
+        onDone: () => resolve()
+      })
+    })
+
+    // 纯换行事件不被丢弃，列表项前的换行保留
+    expect(contents).toEqual(['### 1. 标题', '\n', '- 列表项'])
+  })
+
   it('多个 data 行（内容内换行）以换行连接', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
