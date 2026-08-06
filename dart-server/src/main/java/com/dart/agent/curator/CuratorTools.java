@@ -182,12 +182,10 @@ public class CuratorTools {
                         if (delta == null) {
                             return;
                         }
-                        // 空白 delta（空格/换行）必须进入拼接，否则 markdown 格式
-                        // （"### 1."、列表换行）会被吞掉；SSE 仅推送有内容 delta
+                        // 空白 delta（空格/换行）必须同时进入拼接与 SSE 推送，
+                        // 否则前端累积内容缺空格/换行，markdown 格式（"### 1."、列表换行）被破坏
                         sb.append(delta);
-                        if (!delta.isBlank()) {
-                            SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
-                        }
+                        SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
                     })
                     .blockLast();
             String cleaned = cleanSection(sb.toString());

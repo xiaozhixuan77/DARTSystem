@@ -262,11 +262,32 @@ class CuratorToolsTest {
                     ? SECTION_PRINCIPLE_CODE : SECTION_FAQ_ADVANCE;
             return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
         });
-        // 节 1 流式：空白 delta（空格/换行）与文字 delta 混合，模拟 DeepSeek 流式推送
+        // 节 1 流式：纯空白 delta（独立空格/换行）与文字 delta 混合，模拟 DeepSeek 流式推送
         when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
                 new ChatResponse(List.of(new Generation(new AssistantMessage("## ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("📖 ")))),
-                new ChatResponse(List.of(new Generation(new AssistantMessage("核心概念\n\n")))),
+                new ChatResponse(List.of(new Generation(new AssistantMessage("核心概念"))))));
+
+        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
+            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+            // 空白 delta 进入拼接：标题带空格（非法 "###1." 不再出现）
+            assertThat(report.markdown()).contains("## 📖 核心概念");
+            assertThat(report.markdown()).doesNotContain("###1.");
+        }
+    }
+
+    @Test
+    void streamSection_pushesWhitespaceDeltasToSse() {
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            String section = text.contains("关键原理")
+                    ? SECTION_PRINCIPLE_CODE : SECTION_FAQ_ADVANCE;
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
+        });
+        // 纯空白 delta（换行/空格）必须推送：前端依赖空格/换行识别 markdown 标题与列表
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
                 new ChatResponse(List.of(new Generation(new AssistantMessage("### ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("1. ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("概念名\n")))),
@@ -274,19 +295,14 @@ class CuratorToolsTest {
                 new ChatResponse(List.of(new Generation(new AssistantMessage("**定义**"))))));
 
         try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
-            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+            curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
-            // 空白 delta 进入拼接：标题带空格、换行保留（非法 "###1." 不再出现）
-            assertThat(report.markdown()).contains("## 📖 核心概念\n\n### 1. 概念名\n- **定义**");
-            assertThat(report.markdown()).doesNotContain("###1.");
-
-            // 空白 delta 不产生 SSE 推送（仅非空白内容推送，减少前端无意义渲染）
             ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
             mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contentCaptor.capture()),
-                    atLeast(1));
-            for (String pushed : contentCaptor.getAllValues()) {
-                assertThat(pushed).isNotBlank();
-            }
+                    times(7)); // 节 1 流式 5 个 delta + 节 2/3 整块 2 次
+            // 空白 delta（"\n"、" "）也在推送列表中
+            assertThat(contentCaptor.getAllValues())
+                    .contains("### ", "1. ", "概念名\n", "- ", "**定义**");
         }
     }
 
