@@ -66,9 +66,10 @@ export function sendMessage(
             flushEvent()
             currentEvent = line.slice(6).trim()
           } else if (line.startsWith('data:')) {
-            // SSE spec: data 以单个空格开头时去掉空格，否则保留
-            const raw = line.slice(5)
-            const data = raw.startsWith(' ') ? raw.slice(1) : raw
+            // Spring SseEmitter 输出 "data:" + 内容（无分隔空格），不能剥除前导空格，
+            // 否则流式推送的纯空格 delta（markdown 标题/列表的空格）会被吞掉；
+            // 空 data 行（内容换行）也必须保留，还原为换行
+            const data = line.slice(5)
             dataBuffer += (dataBuffer ? '\n' : '') + data
           } else if (line.trim() === '') {
             // SSE spec: 空行表示事件结束
