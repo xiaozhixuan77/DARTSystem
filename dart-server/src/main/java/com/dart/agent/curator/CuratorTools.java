@@ -179,8 +179,13 @@ public class CuratorTools {
             chatModel.stream(new Prompt(new UserMessage(prompt), options))
                     .doOnNext(resp -> {
                         String delta = resp.getResults().getFirst().getOutput().getText();
-                        if (delta != null && !delta.isBlank()) {
-                            sb.append(delta);
+                        if (delta == null) {
+                            return;
+                        }
+                        // 空白 delta（空格/换行）必须进入拼接，否则 markdown 格式
+                        // （"### 1."、列表换行）会被吞掉；SSE 仅推送有内容 delta
+                        sb.append(delta);
+                        if (!delta.isBlank()) {
                             SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
                         }
                     })
