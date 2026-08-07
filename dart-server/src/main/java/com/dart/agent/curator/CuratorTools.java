@@ -147,55 +147,65 @@ public class CuratorTools {
     }
 
     /**
-     * 调用 LLM 生成单节内容；失败返回占位文本，不影响主流程。
+     * 调用 LLM 生成单节内容；失败或空白响应重试一次（DeepSeek 官网长输入并发时
+     * 偶发 HTTP 200 + 空内容），仍失败返回占位文本，不影响主流程。
      */
     private String generateSection(String query, String resourcesText,
                                    String sectionPrompt, String sectionName) {
-        try {
-            ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
-            String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
-            String response = chatModel.call(new Prompt(new UserMessage(prompt), options))
-                    .getResults()
-                    .getFirst()
-                    .getOutput()
-                    .getText();
-            String cleaned = cleanSection(response);
-            // 空白响应视为失败（转占位），避免报告出现静默空节
-            return cleaned.isBlank() ? SECTION_FAILED : cleaned;
-        } catch (Exception e) {
-            log.warn("报告节[{}]生成失败，使用占位文本", sectionName, e);
-            return SECTION_FAILED;
+        ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
+        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                String response = chatModel.call(new Prompt(new UserMessage(prompt), options))
+                        .getResults()
+                        .getFirst()
+                        .getOutput()
+                        .getText();
+                String cleaned = cleanSection(response);
+                if (!cleaned.isBlank()) {
+                    return cleaned;
+                }
+                log.warn("报告节[{}]第 {} 次调用返回空白，重试", sectionName, attempt);
+            } catch (Exception e) {
+                log.warn("报告节[{}]第 {} 次调用失败", sectionName, attempt, e);
+            }
         }
+        return SECTION_FAILED;
     }
 
     /**
      * LLM 流式生成单节内容：每个 delta 立即推送 SSE CONTENT 事件（打字机效果），
-     * 同时累积完整文本返回；失败返回占位文本。
+     * 同时累积完整文本返回；空白响应重试一次（官网偶发空流），失败返回占位文本。
      */
     private String streamSection(String query, String resourcesText, String sectionPrompt,
                                  String sectionName, SseEmitter emitter) {
-        StringBuilder sb = new StringBuilder();
-        try {
-            ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
-            String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
-            chatModel.stream(new Prompt(new UserMessage(prompt), options))
-                    .doOnNext(resp -> {
-                        String delta = resp.getResults().getFirst().getOutput().getText();
-                        if (delta == null) {
-                            return;
-                        }
-                        // 空白 delta（空格/换行）必须同时进入拼接与 SSE 推送，
-                        // 否则前端累积内容缺空格/换行，markdown 格式（"### 1."、列表换行）被破坏
-                        sb.append(delta);
-                        SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
-                    })
-                    .blockLast();
-            String cleaned = cleanSection(sb.toString());
-            return cleaned.isBlank() ? SECTION_FAILED : cleaned;
-        } catch (Exception e) {
-            log.warn("报告节[{}]流式生成失败，使用占位文本", sectionName, e);
-            return SECTION_FAILED;
+        ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
+        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            StringBuilder sb = new StringBuilder();
+            try {
+                chatModel.stream(new Prompt(new UserMessage(prompt), options))
+                        .doOnNext(resp -> {
+                            String delta = resp.getResults().getFirst().getOutput().getText();
+                            if (delta == null) {
+                                return;
+                            }
+                            // 空白 delta（空格/换行）必须同时进入拼接与 SSE 推送，
+                            // 否则前端累积内容缺空格/换行，markdown 格式（"### 1."、列表换行）被破坏
+                            sb.append(delta);
+                            SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
+                        })
+                        .blockLast();
+                String cleaned = cleanSection(sb.toString());
+                if (!cleaned.isBlank()) {
+                    return cleaned;
+                }
+                log.warn("报告节[{}]第 {} 次流式返回空白，重试", sectionName, attempt);
+            } catch (Exception e) {
+                log.warn("报告节[{}]第 {} 次流式生成失败", sectionName, attempt, e);
+            }
         }
+        return SECTION_FAILED;
     }
 
     private String buildSectionPrompt(String query, String resourcesText, String sectionPrompt) {

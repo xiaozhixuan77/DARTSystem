@@ -40,6 +40,7 @@ class CuratorToolsTest {
     private ChatResponse chatResponse;
 
     private CuratorTools curatorTools;
+    private boolean streamBlankFirst;
 
     private static final String SECTION_CONCEPT = """
             ## 📖 核心概念
@@ -93,6 +94,7 @@ class CuratorToolsTest {
     @BeforeEach
     void setUp() {
         curatorTools = new CuratorTools(chatModel, 0.85);
+        streamBlankFirst = false;
     }
 
     /**
@@ -386,6 +388,44 @@ class CuratorToolsTest {
             // 旧阈值 250 字符时仅保留前 25 个重复单元，新阈值 1500 应保留 100 个以上
             assertThat(promptText).contains("ABCDEFGHIJ".repeat(100));
         }
+    }
+
+    @Test
+    void generateReport_blankResponse_retriesOnce() {
+        // 官网偶发空响应（HTTP 200 + 空内容）：第一次空白，重试后成功
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("关键原理")) {
+                return new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_PRINCIPLE_CODE))));
+            }
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
+        });
+        when(chatModel.stream(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("核心概念")) {
+                // 第一次空白流，第二次正常
+                if (!streamBlankFirst) {
+                    streamBlankFirst = true;
+                    return Flux.empty();
+                }
+                return Flux.just(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage(SECTION_CONCEPT)))));
+            }
+            return Flux.empty();
+        });
+
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        // 重试后三节齐全，无占位
+        assertThat(report.markdown()).contains("📖");
+        assertThat(report.markdown()).contains("🔬");
+        assertThat(report.markdown()).contains("📚");
+        assertThat(report.markdown()).doesNotContain("本节内容生成失败");
+        // 节 1（stream）空白后重试：stream 共 2 次；节 2/3（call）各 1 次
+        verify(chatModel, times(2)).call(any(Prompt.class));
+        verify(chatModel, times(2)).stream(any(Prompt.class));
     }
 
     @Test
