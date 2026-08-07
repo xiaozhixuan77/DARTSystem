@@ -98,19 +98,15 @@ public class CuratorTools {
         List<String> sections = new ArrayList<>();
 
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            // 阶段 A：节 1（token 流式直推）+ 节 2 并行（峰值 2 并发——
+            // 官网对并发长输入偶发空响应，2 并发实测 0 空，3 并发 ~1/3 空）
             SseUtils.sendStatus(emitter, "curating", "正在讲解核心概念...");
             Future<String> section2Future = pool.submit(() -> {
                 SseUtils.sendStatus(emitter, "curating", "正在解析原理与代码示例...");
                 return generateSection(query, resourcesText,
                         buildPrincipleCodePrompt(query), "principles_code");
             });
-            Future<String> section3Future = pool.submit(() -> {
-                SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
-                return generateSection(query, resourcesText,
-                        buildFaqAdvancePrompt(query), "faq_advance");
-            });
 
-            // 节 1：token 级流式直推（打字机效果，首字 2-3s 可见）；失败时才补推占位
             String section1 = streamSection(query, resourcesText,
                     buildConceptPrompt(query), "concepts", emitter);
             sections.add(section1);
@@ -118,12 +114,14 @@ public class CuratorTools {
                 SseUtils.sendEvent(emitter, SseEvents.CONTENT, section1);
             }
 
-            // 节 2/3：并行已预生成，按序整块推送
             String section2 = section2Future.get();
             sections.add(section2);
             SseUtils.sendEvent(emitter, SseEvents.CONTENT, section2);
 
-            String section3 = section3Future.get();
+            // 阶段 B：节 3 单独生成（避免与节 2 并发造成 3 并发峰值）
+            SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
+            String section3 = generateSection(query, resourcesText,
+                    buildFaqAdvancePrompt(query), "faq_advance");
             sections.add(section3);
             SseUtils.sendEvent(emitter, SseEvents.CONTENT, section3);
         } catch (Exception e) {
