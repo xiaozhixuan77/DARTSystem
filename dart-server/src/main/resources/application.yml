@@ -40,14 +40,16 @@ spring:
     model:
       chat: deepseek
     deepseek:
-      api-key: ${SILICONFLOW_API_KEY:sk-placeholder}
-      base-url: https://api.siliconflow.cn
+      # chat 走 DeepSeek 官网直营（V4-Flash 首 token 1.8s，硅基流动平台排队 19-107s）
+      api-key: ${DEEPSEEK_API_KEY:sk-placeholder}
+      base-url: https://api.deepseek.com
       chat:
         options:
-          model: deepseek-ai/DeepSeek-V4-Flash
+          model: deepseek-v4-flash
           temperature: 0.7
           max-tokens: 4096
     openai:
+      # embedding 继续走硅基流动（bge-m3 官网无此模型）
       api-key: ${SILICONFLOW_API_KEY:sk-placeholder}
       base-url: https://api.siliconflow.cn
       embedding:

@@ -389,6 +389,28 @@ class CuratorToolsTest {
     }
 
     @Test
+    void generateReport_blankSectionResponse_usesPlaceholder() {
+        // 节 2（原理+代码）返回空白响应 → 应转占位而非空节
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("关键原理")) {
+                return new ChatResponse(List.of(new Generation(new AssistantMessage("   \n  "))));
+            }
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
+        });
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
+                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
+
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        // 空白节转为占位文本（而非静默空节）
+        assertThat(report.markdown()).contains("本节内容生成失败");
+        assertThat(report.markdown()).contains("📖");
+        assertThat(report.markdown()).contains("📚");
+    }
+
+    @Test
     void generateReport_oneSectionFails_keepsOthersWithPlaceholder() {
         // 原理+代码节（call）抛异常；概念节（stream）与 FAQ 节正常
         when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {

@@ -159,7 +159,9 @@ public class CuratorTools {
                     .getFirst()
                     .getOutput()
                     .getText();
-            return cleanSection(response);
+            String cleaned = cleanSection(response);
+            // 空白响应视为失败（转占位），避免报告出现静默空节
+            return cleaned.isBlank() ? SECTION_FAILED : cleaned;
         } catch (Exception e) {
             log.warn("报告节[{}]生成失败，使用占位文本", sectionName, e);
             return SECTION_FAILED;
