@@ -154,7 +154,7 @@ public class CuratorTools {
                                    String sectionPrompt, String sectionName) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
         String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
-        for (int attempt = 1; attempt <= 2; attempt++) {
+        for (int attempt = 1; attempt <= 3; attempt++) {
             try {
                 String response = chatModel.call(new Prompt(new UserMessage(prompt), options))
                         .getResults()
@@ -181,7 +181,7 @@ public class CuratorTools {
                                  String sectionName, SseEmitter emitter) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
         String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
-        for (int attempt = 1; attempt <= 2; attempt++) {
+        for (int attempt = 1; attempt <= 3; attempt++) {
             StringBuilder sb = new StringBuilder();
             try {
                 chatModel.stream(new Prompt(new UserMessage(prompt), options))
