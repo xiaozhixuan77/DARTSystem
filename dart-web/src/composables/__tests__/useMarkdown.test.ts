@@ -32,6 +32,15 @@ describe('useMarkdown', () => {
     expect(html).toContain('<code>')
   })
 
+  it('渲染 js 代码块输出 hljs 高亮 span（配色依赖 github.css 主题）', () => {
+    const html = render('```js\nconst x = 1;\n```')
+    // const 是 JS 关键字，hljs 会包成 hljs-keyword span；无高亮意味着纯黑文字。
+    // 注：不断言 <pre> 包裹——happy-dom 下 DOMPurify 3.x 会移除 pre 标签，
+    // 真实浏览器完整保留（已用 Chromium 验证），pre 样式由 github.css 提供
+    expect(html).toContain('class="hljs-keyword"')
+    expect(html).toContain('<code>')
+  })
+
   it('渲染链接', () => {
     const html = render('[Google](https://google.com)')
     expect(html).toContain('href="https://google.com"')
