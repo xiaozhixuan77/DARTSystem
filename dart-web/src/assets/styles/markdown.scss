@@ -1,32 +1,80 @@
-.markdown-body {
-  font-size: 14px;
+// 报告 markdown 渲染样式 — GitHub 浅色风格 + Typora 标准阅读密度
+// 挂在 .markdown 类上（ChatMessage.vue / AgentMessage.vue 的报告容器）
+// 代码块高亮配色来自 highlight.js 的 github.css 主题（main.ts 引入）
+.markdown {
+  font-size: 15px;
   line-height: 1.8;
-  color: var(--el-text-color-primary);
+  color: #24292f;
+  word-wrap: break-word;
 
-  h1 { font-size: 1.5em; margin: 1em 0 0.5em; border-bottom: 1px solid var(--el-border-color); }
-  h2 { font-size: 1.3em; margin: 0.8em 0 0.4em; }
-  h3 { font-size: 1.15em; margin: 0.6em 0 0.3em; }
+  // ─── 标题层级（GitHub 风格，h1/h2 带分隔线） ───────────
+  h1, h2, h3, h4, h5, h6 {
+    margin-top: 1.2em;
+    margin-bottom: 0.5em;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  h1 {
+    font-size: 1.7em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid #d0d7de;
+    margin-top: 0.8em;
+  }
+  h2 {
+    font-size: 1.5em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid #d0d7de;
+  }
+  h3 { font-size: 1.25em; margin-top: 1em; }
+  h4 { font-size: 1.1em; margin-top: 0.9em; }
+  h5 { font-size: 1em; }
+  h6 { font-size: 0.9em; color: #57606a; }
 
-  p { margin: 0.5em 0; }
+  // ─── 段落与间距（Typora 标准密度） ─────────────────────
+  p {
+    margin: 0.75em 0;
+  }
 
+  // ─── 列表（reset.scss 全局清除了 list-style，此处恢复） ──
+  ul, ol {
+    padding-left: 2em;
+    margin: 0.5em 0;
+  }
+  ul { list-style: disc; }
+  ul ul { list-style: circle; }
+  ol { list-style: decimal; }
+  li {
+    margin: 0.3em 0;
+    line-height: 1.7;
+    &::marker { color: #57606a; }
+  }
+  li > ul, li > ol {
+    margin: 0.2em 0;
+  }
+
+  // ─── 代码 ─────────────────────────────────────────────
   code {
-    background: #f0f0f0;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    background: rgba(175, 184, 193, 0.2);
+    padding: 0.2em 0.4em;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
     font-size: 0.9em;
   }
 
   pre {
     background: #f6f8fa;
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 16px;
     overflow-x: auto;
+    margin: 0.75em 0;
     position: relative;
 
     code {
       background: none;
       padding: 0;
+      border-radius: 0;
+      font-size: 0.9em;
+      line-height: 1.6;
     }
 
     .copy-btn {
@@ -42,21 +90,27 @@
     }
   }
 
+  // ─── 引用 ─────────────────────────────────────────────
   blockquote {
-    border-left: 4px solid var(--el-color-primary);
-    padding: 4px 16px;
-    color: var(--el-text-color-secondary);
-    background: #f5f5ff;
-    margin: 0.5em 0;
+    border-left: 4px solid #d0d7de;
+    padding: 0 1em;
+    margin: 0.75em 0;
+    color: #57606a;
+
+    > :first-child { margin-top: 0; }
+    > :last-child { margin-bottom: 0; }
   }
 
+  // ─── 表格 ─────────────────────────────────────────────
   table {
     border-collapse: collapse;
     width: 100%;
-    margin: 0.5em 0;
+    margin: 0.75em 0;
+    display: block;
+    overflow-x: auto;
 
     th, td {
-      border: 1px solid var(--el-border-color);
+      border: 1px solid #d0d7de;
       padding: 8px 12px;
       text-align: left;
     }
@@ -65,28 +119,42 @@
       background: #f6f8fa;
       font-weight: 600;
     }
-  }
 
-  ul, ol {
-    padding-left: 1.5em;
-    list-style: disc;
-
-    li {
-      margin: 0.25em 0;
+    tr:nth-child(2n) td {
+      background: #f6f8fa;
     }
   }
 
-  ol {
-    list-style: decimal;
-  }
-
+  // ─── 链接 / 图片 / 分隔线 ──────────────────────────────
   a {
-    color: var(--el-color-primary);
-    text-decoration: underline;
+    color: #0969da;
+    text-decoration: none;
+    &:hover { text-decoration: underline; }
   }
 
   img {
     max-width: 100%;
     border-radius: 4px;
   }
+
+  hr {
+    border: none;
+    border-top: 1px solid #d0d7de;
+    margin: 1.5em 0;
+  }
+
+  // ─── mermaid 图表 ──────────────────────────────────────
+  .mermaid {
+    display: flex;
+    justify-content: center;
+    padding: 16px 0;
+    margin: 12px 0;
+    background: #fff;
+    border-radius: 6px;
+
+    svg { max-width: 100%; }
+  }
+
+  // ─── 行内元素 ──────────────────────────────────────────
+  strong { font-weight: 600; }
 }

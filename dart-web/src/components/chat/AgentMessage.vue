@@ -72,17 +72,9 @@ const hasSources = computed(() => props.report.sources.length > 0)
   font-weight: 700;
   margin: 0 0 12px;
 }
+// markdown 元素样式（标题/列表/代码块/表格等）统一由全局 styles/markdown.scss 管理
 .agent-content {
-  font-size: 14px;
-  line-height: 1.7;
   margin-bottom: 16px;
-  :deep(h2) { font-size: 16px; margin: 16px 0 8px; }
-  :deep(ul) { padding-left: 20px; }
-  :deep(code) { font-family: $font-mono; font-size: 13px; }
-  :deep(pre) {
-    background: $color-bg; border-radius: $radius; padding: 12px;
-    overflow-x: auto; font-size: 13px;
-  }
 }
 .agent-scores {
   display: flex; gap: 8px; margin-bottom: 12px;

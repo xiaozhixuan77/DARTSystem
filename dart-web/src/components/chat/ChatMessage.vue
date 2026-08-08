@@ -73,24 +73,8 @@ watch(() => chatStore.isStreaming, async (now, prev) => {
   font-size: 12px; font-weight: 600; color: $color-muted;
   margin-bottom: 6px;
 }
+// markdown 元素样式（标题/列表/代码块/表格等）统一由全局 styles/markdown.scss 管理
 .message-content {
-  font-size: 14px; line-height: 1.6;
-  &.markdown :deep(p) { margin: 0 0 8px; }
-  &.markdown :deep(pre) {
-    background: $color-bg; border-radius: $radius; padding: 12px;
-    overflow-x: auto; font-size: 13px;
-  }
-  &.markdown :deep(code) { font-family: $font-mono; font-size: 13px; }
-  &.markdown :deep(ul), &.markdown :deep(ol) { padding-left: 20px; }
-  &.markdown :deep(blockquote) {
-    border-left: 3px solid $color-accent;
-    margin: 8px 0; padding-left: 12px; color: $color-muted;
-  }
-  &.markdown :deep(.mermaid) {
-    display: flex; justify-content: center;
-    padding: 16px 0; margin: 12px 0;
-    background: white; border-radius: $radius;
-    svg { max-width: 100%; }
-  }
+  font-size: 15px; line-height: 1.8;
 }
 </style>
