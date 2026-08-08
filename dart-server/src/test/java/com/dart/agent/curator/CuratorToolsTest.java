@@ -249,8 +249,8 @@ class CuratorToolsTest {
             CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2), new SseEmitter(0L));
 
             assertThat(report.markdown()).contains("搜索结果");
-            // 3 个占位节推送 + 1 次 fallback 推送（占位让用户感知失败，fallback 兜底内容）
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), times(4));
+            // 3 节全失败：不推占位/摘要（避免与 fallback 重复），仅推送 fallback 一次
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), times(1));
             mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("AI 报告生成暂时不可用")), times(1));
         }
     }
@@ -444,10 +444,37 @@ class CuratorToolsTest {
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
-        // 空白节转为占位文本（而非静默空节）
-        assertThat(report.markdown()).contains("本节内容生成失败");
+        // 空白节不产生空节；重试后仍失败 → 用资源摘要节兜底（含资源标题）
+        assertThat(report.markdown()).doesNotContain("本节内容生成失败");
         assertThat(report.markdown()).contains("📖");
+        assertThat(report.markdown()).contains("Resource A");
         assertThat(report.markdown()).contains("📚");
+    }
+
+    @Test
+    void generateReport_failedSection_replacedByResourceDigest() {
+        // 节 1（stream 核心概念）3 次尝试全部失败 → 资源摘要节兜底，报告不缺节
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            String section = text.contains("关键原理")
+                    ? SECTION_PRINCIPLE_CODE : SECTION_FAQ_ADVANCE;
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
+        });
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.empty());
+
+        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
+            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+            // 报告不缺节：节 1 位置是资源摘要（含来源 URL 与摘要）
+            assertThat(report.markdown()).contains("Resource A");
+            assertThat(report.markdown()).contains("https://a.com");
+            assertThat(report.markdown()).contains("🔬");
+            assertThat(report.markdown()).contains("📚");
+            assertThat(report.markdown()).doesNotContain("本节内容生成失败");
+            // 摘要节被推送（不推占位）
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("Resource A")), atLeast(1));
+        }
     }
 
     @Test
@@ -466,9 +493,10 @@ class CuratorToolsTest {
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("📖");
-        assertThat(report.markdown()).contains("生成失败");
+        assertThat(report.markdown()).contains("Resource A");
         assertThat(report.markdown()).contains("📚");
-        // 失败的节内容不出现
+        // 失败节由资源摘要兜底（无占位文本、无失败节内容）
+        assertThat(report.markdown()).doesNotContain("本节内容生成失败");
         assertThat(report.markdown()).doesNotContain("JVM 内存模型");
     }
 

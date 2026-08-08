@@ -110,20 +110,21 @@ public class CuratorTools {
             String section1 = streamSection(query, resourcesText,
                     buildConceptPrompt(query), "concepts", emitter);
             sections.add(section1);
-            if (section1.equals(SECTION_FAILED)) {
-                SseUtils.sendEvent(emitter, SseEvents.CONTENT, section1);
-            }
 
             String section2 = section2Future.get();
             sections.add(section2);
-            SseUtils.sendEvent(emitter, SseEvents.CONTENT, section2);
+            if (!section2.equals(SECTION_FAILED)) {
+                SseUtils.sendEvent(emitter, SseEvents.CONTENT, section2);
+            }
 
             // 阶段 B：节 3 单独生成（避免与节 2 并发造成 3 并发峰值）
             SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
             String section3 = generateSection(query, resourcesText,
                     buildFaqAdvancePrompt(query), "faq_advance");
             sections.add(section3);
-            SseUtils.sendEvent(emitter, SseEvents.CONTENT, section3);
+            if (!section3.equals(SECTION_FAILED)) {
+                SseUtils.sendEvent(emitter, SseEvents.CONTENT, section3);
+            }
         } catch (Exception e) {
             log.warn("并行分节生成异常，追加占位节", e);
             while (sections.size() < 3) {
@@ -137,6 +138,16 @@ public class CuratorTools {
             CuratedReport fallback = fallbackReport(query, resources);
             SseUtils.sendEvent(emitter, SseEvents.CONTENT, fallback.markdown());
             return fallback;
+        }
+
+        // 失败节用资源摘要节兜底（按语义标题），保证报告不缺节
+        String[] fallbackTitles = {"📖 核心概念", "🔬 关键原理", "⚠️ 常见误区与 FAQ"};
+        for (int i = 0; i < sections.size(); i++) {
+            if (sections.get(i).equals(SECTION_FAILED)) {
+                String digest = buildFallbackSection(query, resources, fallbackTitles[i]);
+                sections.set(i, digest);
+                SseUtils.sendEvent(emitter, SseEvents.CONTENT, digest);
+            }
         }
 
         String markdown = truncateReport(String.join("\n\n---\n\n", sections));
@@ -314,6 +325,26 @@ public class CuratorTools {
         // 至少包含一个 # 标题
         if (!report.markdown().contains("#")) return false;
         return true;
+    }
+
+    /**
+     * 节生成失败的降级兜底：用搜索结果摘要拼接简易节（无 LLM 调用），保证报告不缺节。
+     */
+    private String buildFallbackSection(String query, List<ScoredResource> resources, String title) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## ").append(title).append("（AI 生成暂不可用，以下为相关资源摘要）\n\n");
+        int idx = 1;
+        for (ScoredResource r : resources) {
+            sb.append("### ").append(idx).append(". ").append(r.getTitle()).append("\n");
+            sb.append("- **来源**: ").append(r.getUrl()).append("\n");
+            String snippet = truncateContent(r.getContent(), 300);
+            if (!snippet.isBlank()) {
+                sb.append("- **摘要**: ").append(snippet).append("\n");
+            }
+            sb.append("\n");
+            idx++;
+        }
+        return sb.toString();
     }
 
     /**
