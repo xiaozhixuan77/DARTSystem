@@ -56,7 +56,9 @@ public class DataConsistencyTask {
                 List<Object> pipeResults = redisTemplate.executePipelined(
                         (org.springframework.data.redis.connection.RedisConnection connection) -> {
                             for (KnowledgeChunk chunk : records) {
-                                String key = REDIS_KEY_PREFIX + chunk.getEmbeddingId();
+                                // embeddingId 本身已含 "chunk:" 前缀（如 chunk:26:2），
+                                // 写入格式为 dart:chunk:26:2，不能再叠加 CHUNK_PREFIX
+                                String key = RedisKeyConstants.DART_PREFIX + chunk.getEmbeddingId();
                                 connection.keyCommands().exists(key.getBytes(StandardCharsets.UTF_8));
                             }
                             return null;
