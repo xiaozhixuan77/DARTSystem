@@ -1,7 +1,27 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import KnowledgeEditDialog from '../KnowledgeEditDialog.vue'
+
+vi.mock('echarts', () => ({
+  init: vi.fn(() => ({ setOption: vi.fn(), dispose: vi.fn() }))
+}))
+
+vi.mock('@/api/knowledge', () => ({
+  listKnowledge: vi.fn(),
+  getKnowledgeDetail: vi.fn(),
+  deleteKnowledge: vi.fn(),
+  getKnowledgeGraph: vi.fn(() => Promise.resolve({
+    code: 200, message: 'ok', suggestion: null,
+    data: {
+      nodes: [
+        { id: 'item:1', label: 'Go 并发模式', category: 'knowledge' },
+        { id: 'ext:Goroutine', label: 'Goroutine', category: 'external' }
+      ],
+      edges: [{ source: 'item:1', target: 'ext:Goroutine', label: 'depends_on' }]
+    }
+  }))
+}))
 
 describe('KnowledgeEditDialog.vue', () => {
   beforeEach(() => {
@@ -77,5 +97,31 @@ describe('KnowledgeEditDialog.vue', () => {
     })
     const saveBtn = wrapper.find('.save-btn')
     expect(saveBtn.attributes('disabled')).toBeDefined()
+  })
+
+  it('显示详情/关系图两个 tab', () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+    expect(wrapper.find('.tab-detail').exists()).toBe(true)
+    expect(wrapper.find('.tab-graph').exists()).toBe(true)
+  })
+
+  it('切换到关系图 tab 渲染图容器', async () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+    await wrapper.find('.tab-graph').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.graph-tab').exists()).toBe(true)
+  })
+
+  it('默认显示详情内容', () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+    expect(wrapper.find('.detail-tab').exists()).toBe(true)
+    expect(wrapper.find('.graph-tab').exists()).toBe(false)
   })
 })

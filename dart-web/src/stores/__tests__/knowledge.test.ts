@@ -5,10 +5,11 @@ import { useKnowledgeStore } from '../knowledge'
 vi.mock('@/api/knowledge', () => ({
   listKnowledge: vi.fn(),
   getKnowledgeDetail: vi.fn(),
-  deleteKnowledge: vi.fn()
+  deleteKnowledge: vi.fn(),
+  getKnowledgeGraph: vi.fn()
 }))
 
-import { listKnowledge, getKnowledgeDetail, deleteKnowledge } from '@/api/knowledge'
+import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph } from '@/api/knowledge'
 
 function mockKnowledgeItem(overrides: Record<string, unknown> = {}) {
   return {
@@ -141,5 +142,36 @@ describe('useKnowledgeStore', () => {
 
     store.togglePanel()
     expect(store.panelOpen).toBe(false)
+  })
+
+  it('加载图谱填充 graphData', async () => {
+    vi.mocked(getKnowledgeGraph).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: {
+        nodes: [
+          { id: 'item:1', label: 'Go 并发模式', category: 'knowledge' },
+          { id: 'ext:Goroutine', label: 'Goroutine', category: 'external' }
+        ],
+        edges: [{ source: 'item:1', target: 'ext:Goroutine', label: 'depends_on' }]
+      }
+    })
+
+    const store = useKnowledgeStore()
+    await store.loadGraph(1)
+
+    expect(store.graphData).not.toBeNull()
+    expect(store.graphData!.nodes).toHaveLength(2)
+    expect(store.graphData!.edges[0].label).toBe('depends_on')
+    expect(store.graphLoading).toBe(false)
+  })
+
+  it('加载图谱失败时清空 graphData', async () => {
+    vi.mocked(getKnowledgeGraph).mockRejectedValue(new Error('Network error'))
+
+    const store = useKnowledgeStore()
+    await store.loadGraph(1)
+
+    expect(store.graphData).toBeNull()
+    expect(store.graphLoading).toBe(false)
   })
 })
