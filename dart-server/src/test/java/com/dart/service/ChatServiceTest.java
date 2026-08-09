@@ -6,8 +6,10 @@ import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
 import com.dart.entity.KnowledgeItem;
 import com.dart.entity.Message;
+import com.dart.entity.SearchTrace;
 import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.MessageMapper;
+import com.dart.mapper.SearchTraceMapper;
 import com.dart.service.RagService.RagResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +57,8 @@ class ChatServiceTest {
     private ValueOperations<String, String> valueOps;
     @Mock
     private KnowledgeItemMapper knowledgeItemMapper;
+    @Mock
+    private SearchTraceMapper searchTraceMapper;
 
     private ChatService chatService;
     private SseEmitter emitter;
@@ -63,7 +67,7 @@ class ChatServiceTest {
     @BeforeEach
     void setUp() {
         chatService = new ChatService(chatModel, searchAgent, curatorAgent, ragService,
-                embeddingService, messageMapper, redisTemplate, knowledgeItemMapper);
+                embeddingService, messageMapper, redisTemplate, knowledgeItemMapper, searchTraceMapper);
         emitter = spy(new SseEmitter(60_000L));
         // lenient：仅缓存相关用例使用，避免其他用例报 UnnecessaryStubbing
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -359,7 +363,7 @@ class ChatServiceTest {
         // 前置合并单次调用已由 preProcessQuery 专门用例覆盖（此处还有追问调用）
         verify(ragService).retrieve(eq("优化后的技术问题描述"), eq(1L));
         verify(searchAgent).execute(eq(List.of("优化后的技术问题描述")), anyInt(), any());
-        verify(curatorAgent).curate(eq("优化后的技术问题描述"), anyList(), any());
+        verify(curatorAgent).curate(eq("优化后的技术问题描述"), anyList(), any(), any());
     }
 
     @Test
@@ -447,6 +451,132 @@ class ChatServiceTest {
 
         verify(searchAgent).execute(anyList(), eq(8), any());
         verify(curatorAgent).curate(anyString(), anyList(), any(), eq("how_to"));
+    }
+
+    // === SearchTrace 链路追踪 ===
+
+    @Test
+    void executeSearchAndCurate_ragHit_recordsTraceWithScore() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong()))
+                .thenReturn(Optional.of(new RagResult("# Spring Boot 详解", List.of("https://spring.io"), 0.93)));
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"Spring Boot 详解\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        ArgumentCaptor<SearchTrace> captor = ArgumentCaptor.forClass(SearchTrace.class);
+        verify(searchTraceMapper).insert(captor.capture());
+        SearchTrace trace = captor.getValue();
+        assertThat(trace.getCurationType()).isEqualTo("rag");
+        assertThat(trace.getRagHit()).isEqualTo(1);
+        assertThat(trace.getRagScore()).isEqualTo(0.93);
+        assertThat(trace.getSearchKeywords()).isEqualTo("Spring Boot 详解");
+        assertThat(trace.getIntent()).isEqualTo("deep_dive");
+    }
+
+    @Test
+    void executeSearchAndCurate_nonTech_recordsErrorTrace() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":false,\"optimized\":\"\","
+                        + "\"variants\":[],\"intent\":\"non_tech\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.executeSearchAndCurate("今天天气怎么样?", 1L, 100L, emitter);
+
+        ArgumentCaptor<SearchTrace> captor = ArgumentCaptor.forClass(SearchTrace.class);
+        verify(searchTraceMapper).insert(captor.capture());
+        SearchTrace trace = captor.getValue();
+        assertThat(trace.getCurationType()).isEqualTo("error");
+        assertThat(trace.getFallbackReason()).isEqualTo("non_tech_query");
+    }
+
+    @Test
+    void executeSearchAndCurate_normalFlow_recordsSearchTrace() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化词\","
+                        + "\"variants\":[],\"intent\":\"how_to\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        ArgumentCaptor<SearchTrace> captor = ArgumentCaptor.forClass(SearchTrace.class);
+        verify(searchTraceMapper).insert(captor.capture());
+        SearchTrace trace = captor.getValue();
+        assertThat(trace.getCurationType()).isEqualTo("search");
+        assertThat(trace.getTotalResults()).isEqualTo(1);
+        assertThat(trace.getIntent()).isEqualTo("how_to");
+        assertThat(trace.getProcessingTimeMs()).isNotNull();
+        assertThat(trace.getUserId()).isEqualTo(1L);
+        assertThat(trace.getConversationId()).isEqualTo(100L);
+    }
+
+    @Test
+    void executeSearchAndCurate_sectionFailed_marksFallbackReason() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query",
+                "# Report\n\n> ⚠️ 本节内容生成失败，请稍后重试或访问参考文献了解详情。",
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化词\","
+                        + "\"variants\":[],\"intent\":\"how_to\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        ArgumentCaptor<SearchTrace> captor = ArgumentCaptor.forClass(SearchTrace.class);
+        verify(searchTraceMapper).insert(captor.capture());
+        SearchTrace trace = captor.getValue();
+        assertThat(trace.getCurationType()).isEqualTo("search");
+        assertThat(trace.getFallbackReason()).isEqualTo("section_failed");
+    }
+
+    @Test
+    void executeSearchAndCurate_cacheHit_doesNotRecordTrace() throws Exception {
+        String cachedJson = OBJECT_MAPPER.writeValueAsString(
+                java.util.Map.of(
+                        "markdown", "# 缓存报告\n\n完整内容 ".repeat(10),
+                        "sources", List.of("https://a.com")));
+        when(valueOps.get(anyString())).thenReturn(cachedJson);
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        verify(searchTraceMapper, never()).insert(any(SearchTrace.class));
+    }
+
+    @Test
+    void executeSearchAndCurate_traceInsertFailure_doesNotBreakMainFlow() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
+        when(searchTraceMapper.insert(any(SearchTrace.class))).thenThrow(new RuntimeException("db error"));
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化词\","
+                        + "\"variants\":[],\"intent\":\"how_to\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        // 追踪记录失败仅告警，不影响主流程
+        assertThat(result.isRagHit()).isFalse();
+        assertThat(result.curatedReport().markdown()).contains("Report");
     }
 
     @Test
