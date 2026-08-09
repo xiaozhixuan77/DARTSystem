@@ -41,7 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 public abstract class BaseIntegrationTest {
 
     private static final List<String> TABLES = List.of(
-            "knowledge_chunk", "knowledge_item", "message",
+            "knowledge_relation", "knowledge_chunk", "knowledge_item", "search_trace", "message",
             "refresh_token", "conversation", "`user`"
     );
 
