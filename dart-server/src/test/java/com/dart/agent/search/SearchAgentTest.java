@@ -53,7 +53,7 @@ class SearchAgentTest {
                     .toList();
         });
 
-        List<ScoredResource> result = searchAgent.execute("Spring Boot", 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("Spring Boot"), 5, emitter);
         assertThat(result).isNotEmpty();
         assertThat(result.size()).isLessThanOrEqualTo(5);
         verify(searchTools).searchWeb(eq("Spring Boot"), anyInt());
@@ -66,7 +66,7 @@ class SearchAgentTest {
     void execute_searchReturnsEmpty_returnsEmpty() {
         when(searchTools.searchWeb(anyString(), anyInt())).thenReturn(List.of());
 
-        List<ScoredResource> result = searchAgent.execute("obscure query", 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("obscure query"), 5, emitter);
         assertThat(result).isEmpty();
         verify(searchTools, never()).fetchPages(anyList());
     }
@@ -77,7 +77,7 @@ class SearchAgentTest {
                 .thenReturn(List.of(new SearchResult("https://fail.com", "Fail", "snippet")));
         when(searchTools.fetchPages(anyList())).thenReturn(List.of());
 
-        List<ScoredResource> result = searchAgent.execute("query", 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, emitter);
         assertThat(result).isEmpty();
     }
 
@@ -85,7 +85,7 @@ class SearchAgentTest {
     void execute_searchToolsException_returnsEmpty() {
         when(searchTools.searchWeb(anyString(), anyInt())).thenThrow(new RuntimeException("network error"));
 
-        List<ScoredResource> result = searchAgent.execute("query", 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, emitter);
         assertThat(result).isEmpty();
     }
 
@@ -108,7 +108,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        List<ScoredResource> result = searchAgent.execute("query", 8, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 8, emitter);
         // 5 unique URLs after dedup
         assertThat(result.size()).isLessThanOrEqualTo(5);
         verify(searchTools).fetchPages(argThat(urls -> urls.size() <= 5));
@@ -131,8 +131,43 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.15)).toList();
         });
 
-        List<ScoredResource> result = searchAgent.execute("query", 3, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 3, emitter);
         assertThat(result.size()).isLessThanOrEqualTo(3);
+    }
+
+    @Test
+    void execute_multipleQueries_mergesAndDeduplicatesUrls() {
+        // 两组词各返回部分结果，其中 b.com 重复
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            if (q.equals("Spring Boot 配置")) {
+                return List.of(new SearchResult("https://a.com", "A", "s"),
+                        new SearchResult("https://b.com", "B", "s"));
+            }
+            if (q.equals("Spring Boot datasource 教程")) {
+                return List.of(new SearchResult("https://b.com", "B", "s"),
+                        new SearchResult("https://c.com", "C", "s"));
+            }
+            return List.of();
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        searchAgent.execute(List.of("Spring Boot 配置", "Spring Boot datasource 教程"), 5, emitter);
+
+        // 两组词都被搜索，合并结果后 URL 去重：a、b、c 各抓一次
+        verify(searchTools, times(2)).searchWeb(anyString(), anyInt());
+        verify(searchTools).searchWeb(eq("Spring Boot 配置"), anyInt());
+        verify(searchTools).searchWeb(eq("Spring Boot datasource 教程"), anyInt());
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://a.com", "https://b.com", "https://c.com"))));
     }
 
     @Test
@@ -150,7 +185,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 3, 4, 4.0)).toList();
         });
 
-        searchAgent.execute("query", 5, emitter);
+        searchAgent.execute(List.of("query"), 5, emitter);
         verify(emitter, atLeast(3)).send(any(SseEmitter.SseEventBuilder.class));
     }
 
@@ -166,7 +201,7 @@ class SearchAgentTest {
         // scoreResources already filters below threshold → empty
         when(searchTools.scoreResources(anyString(), anyList())).thenReturn(List.of());
 
-        List<ScoredResource> result = searchAgent.execute("query", 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, emitter);
         assertThat(result).isEmpty();
     }
 
@@ -195,7 +230,7 @@ class SearchAgentTest {
             return scored;
         });
 
-        List<ScoredResource> result = searchAgent.execute("query", 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, emitter);
         if (result.size() >= 2) {
             assertThat(result.get(0).getWeightedScore()).isGreaterThanOrEqualTo(result.get(1).getWeightedScore());
         }
