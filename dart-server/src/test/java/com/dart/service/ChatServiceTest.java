@@ -59,6 +59,8 @@ class ChatServiceTest {
     private KnowledgeItemMapper knowledgeItemMapper;
     @Mock
     private SearchTraceMapper searchTraceMapper;
+    @Mock
+    private RelationExtractionService relationExtractionService;
 
     private ChatService chatService;
     private SseEmitter emitter;
@@ -67,7 +69,8 @@ class ChatServiceTest {
     @BeforeEach
     void setUp() {
         chatService = new ChatService(chatModel, searchAgent, curatorAgent, ragService,
-                embeddingService, messageMapper, redisTemplate, knowledgeItemMapper, searchTraceMapper);
+                embeddingService, messageMapper, redisTemplate, knowledgeItemMapper,
+                searchTraceMapper, relationExtractionService);
         emitter = spy(new SseEmitter(60_000L));
         // lenient：仅缓存相关用例使用，避免其他用例报 UnnecessaryStubbing
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -166,6 +169,27 @@ class ChatServiceTest {
         // 中间断言：走到 persist 与 writeCache（finally）
         verify(messageMapper, times(2)).insert(any(Message.class));
         verify(valueOps).set(anyString(), contains("# Report"), any(java.time.Duration.class));
+    }
+
+    @Test
+    void executeSearchAndCurate_reportSedimented_triggersRelationExtraction() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout")); // 前置与追问失败降级
+        when(embeddingService.embedAndPersist(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(99L));
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        // 沉淀成功后触发关系抽取（同一虚拟线程，itemId 取自 embedAndPersist 返回）
+        verify(relationExtractionService, timeout(3000))
+                .extractAndPersist(eq(1L), eq(99L), contains("# Report"));
     }
 
     @Test

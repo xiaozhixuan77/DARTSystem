@@ -1,6 +1,7 @@
 package com.dart.controller;
 
 import com.dart.dto.response.KnowledgeDetailVO;
+import com.dart.dto.response.KnowledgeGraphDTO;
 import com.dart.dto.response.KnowledgeItemVO;
 import com.dart.dto.response.PageResult;
 import com.dart.entity.User;
@@ -100,5 +101,21 @@ class KnowledgeControllerTest {
         mockMvc.perform(delete("/api/knowledge/1")
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void getGraph_returnsGraphData() throws Exception {
+        KnowledgeGraphDTO dto = new KnowledgeGraphDTO(
+                List.of(new KnowledgeGraphDTO.GraphNode("item:1", "Spring Boot", "knowledge"),
+                        new KnowledgeGraphDTO.GraphNode("ext:JVM", "JVM", "external")),
+                List.of(new KnowledgeGraphDTO.GraphEdge("item:1", "ext:JVM", "depends_on")));
+        when(knowledgeService.getGraphData(1L, 1L)).thenReturn(dto);
+
+        mockMvc.perform(get("/api/knowledge/1/graph")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.nodes[0].id").value("item:1"))
+                .andExpect(jsonPath("$.data.nodes[1].category").value("external"))
+                .andExpect(jsonPath("$.data.edges[0].label").value("depends_on"));
     }
 }

@@ -2,11 +2,14 @@ package com.dart.service;
 
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
+import com.dart.entity.KnowledgeRelation;
 import com.dart.mapper.KnowledgeChunkMapper;
 import com.dart.mapper.KnowledgeItemMapper;
+import com.dart.mapper.KnowledgeRelationMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -35,13 +38,15 @@ class RagServiceTest {
     private KnowledgeItemMapper knowledgeItemMapper;
     @Mock
     private KnowledgeChunkMapper knowledgeChunkMapper;
+    @Mock
+    private KnowledgeRelationMapper relationMapper;
 
     private RagService ragService;
 
     @BeforeEach
     void setUp() {
         ragService = new RagService(embeddingService, chatModel, knowledgeItemMapper,
-                knowledgeChunkMapper, 0.80, 5);
+                knowledgeChunkMapper, relationMapper, 0.80, 5);
     }
 
     @Test
@@ -134,5 +139,113 @@ class RagServiceTest {
                 new RagService.RagChunk("c2", "t2", "https://b.com", 0.85));
         String answer = ragService.generateAnswer("query", chunks);
         assertThat(answer).contains("综合回答");
+    }
+
+    // === 1-hop 知识图谱增强 ===
+
+    @Test
+    void retrieve_withRelations_appendsRelatedContextToPrompt() {
+        float[] emb = new float[1024];
+        java.util.Arrays.fill(emb, 1.0f);
+        when(embeddingService.embed(anyString())).thenReturn(emb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("Spring Boot Guide");
+        item.setSourceUrl("https://spring.io");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+
+        KnowledgeItem related = new KnowledgeItem();
+        related.setId(2L);
+        related.setUserId(1L);
+        related.setTitle("Spring Framework 原理");
+        related.setContent("Spring Framework 是 Spring Boot 的基础，提供 IoC 容器与 AOP 能力。");
+        related.setIsDeleted(0);
+        when(knowledgeItemMapper.selectById(2L)).thenReturn(related);
+
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("Spring Boot 教程内容");
+        chunk.setChunkIndex(0);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                EmbeddingService.floatArrayToBytes(emb)));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        KnowledgeRelation relation = new KnowledgeRelation();
+        relation.setSubjectId(1L);
+        relation.setPredicate("extends");
+        relation.setObjectId(2L);
+        when(relationMapper.selectList(any())).thenReturn(List.of(relation));
+
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("Spring Boot 是一个框架"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
+        assertThat(result).isPresent();
+
+        // 1-hop 关联内容以 <related> 块拼进生成 prompt
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        String prompt = captor.getValue().getInstructions().getFirst().getText();
+        assertThat(prompt).contains("<related>");
+        assertThat(prompt).contains("Spring Framework 原理");
+    }
+
+    @Test
+    void retrieve_withoutRelations_noRelatedBlockInPrompt() {
+        float[] emb = new float[1024];
+        java.util.Arrays.fill(emb, 1.0f);
+        when(embeddingService.embed(anyString())).thenReturn(emb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("Spring Boot Guide");
+        item.setSourceUrl("https://spring.io");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("Spring Boot 教程内容");
+        chunk.setChunkIndex(0);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                EmbeddingService.floatArrayToBytes(emb)));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        // 无关系 → 不拼接 related 块
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("Spring Boot 是一个框架"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ragService.retrieve("Spring Boot", 1L);
+
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        assertThat(captor.getValue().getInstructions().getFirst().getText()).doesNotContain("<related>");
+    }
+
+    @Test
+    void generateAnswer_withRelatedContext_appendsRelatedBlock() {
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("综合回答"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        RagService.RagChunk chunk = new RagService.RagChunk("c1", "t1", "https://a.com", 0.95);
+        String answer = ragService.generateAnswer("query", List.of(chunk),
+                List.of("Spring Framework 原理 | Spring Framework 是 Spring Boot 的基础..."));
+
+        assertThat(answer).contains("综合回答");
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        assertThat(captor.getValue().getInstructions().getFirst().getText()).contains("<related>");
     }
 }
