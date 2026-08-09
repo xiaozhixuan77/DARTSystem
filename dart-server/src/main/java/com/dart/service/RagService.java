@@ -41,7 +41,11 @@ public class RagService {
         this.topK = topK;
     }
 
-    public record RagResult(String answer, List<String> sourceUrls) {}
+    public record RagResult(String answer, List<String> sourceUrls, double maxSimilarity) {
+        public RagResult(String answer, List<String> sourceUrls) {
+            this(answer, sourceUrls, -1.0);
+        }
+    }
     public record RagChunk(String content, String title, String sourceUrl, double similarity) {}
 
     /**
@@ -108,7 +112,7 @@ public class RagService {
 
             String answer = generateAnswer(query, matched);
             List<String> sources = matched.stream().map(RagChunk::sourceUrl).distinct().toList();
-            return Optional.of(new RagResult(answer, sources));
+            return Optional.of(new RagResult(answer, sources, matched.getFirst().similarity()));
 
         } catch (Exception e) {
             log.warn("RAG 检索失败: {}", query, e);

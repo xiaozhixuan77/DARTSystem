@@ -7,9 +7,11 @@ import com.dart.agent.search.SearchAgent;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dart.entity.KnowledgeItem;
 import com.dart.entity.Message;
+import com.dart.entity.SearchTrace;
 import com.dart.exception.ErrorCode;
 import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.MessageMapper;
+import com.dart.mapper.SearchTraceMapper;
 import com.dart.util.RedisKeyConstants;
 import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
@@ -61,6 +63,7 @@ public class ChatService {
     private final MessageMapper messageMapper;
     private final StringRedisTemplate redisTemplate;
     private final KnowledgeItemMapper knowledgeItemMapper;
+    private final SearchTraceMapper searchTraceMapper;
 
     @Value("${agent.cache.ttl-hours:24}")
     private long cacheTtlHours;
@@ -74,7 +77,7 @@ public class ChatService {
     public ChatService(ChatModel chatModel, SearchAgent searchAgent, CuratorAgent curatorAgent,
                        RagService ragService, EmbeddingService embeddingService,
                        MessageMapper messageMapper, StringRedisTemplate redisTemplate,
-                       KnowledgeItemMapper knowledgeItemMapper) {
+                       KnowledgeItemMapper knowledgeItemMapper, SearchTraceMapper searchTraceMapper) {
         this.chatModel = chatModel;
         this.searchAgent = searchAgent;
         this.curatorAgent = curatorAgent;
@@ -83,6 +86,7 @@ public class ChatService {
         this.messageMapper = messageMapper;
         this.redisTemplate = redisTemplate;
         this.knowledgeItemMapper = knowledgeItemMapper;
+        this.searchTraceMapper = searchTraceMapper;
     }
 
     public record SearchResult(RagService.RagResult ragAnswer,
@@ -104,6 +108,7 @@ public class ChatService {
     @Transactional
     public SearchResult executeSearchAndCurate(String query, Long userId,
                                                 Long conversationId, SseEmitter emitter) {
+        long startNanos = System.nanoTime();
         // 1. 持久化用户消息
         Message userMsg = new Message();
         userMsg.setConversationId(conversationId);
@@ -112,7 +117,7 @@ public class ChatService {
         userMsg.setCreatedAt(LocalDateTime.now());
         messageMapper.insert(userMsg);
 
-        // 1.5 查询缓存检查（原始查询规范化 key；命中直接返回，跳过全流程）
+        // 1.5 查询缓存检查（原始查询规范化 key；命中直接返回，跳过全流程，不记链路）
         SearchResult cached = tryCache(query, conversationId, emitter);
         if (cached != null) {
             return cached;
@@ -126,6 +131,8 @@ public class ChatService {
             SearchResult errorResult = SearchResult.searchResult(
                     errorReport(ErrorCode.NON_TECH_QUERY.getMessage()), List.of());
             persistAssistantMessage(conversationId, errorResult);
+            recordTrace(userId, conversationId, userMsg.getId(), query, pre.intent(),
+                    false, null, null, List.of(), "error", "non_tech_query", startNanos);
             return errorResult;
         }
 
@@ -158,6 +165,9 @@ public class ChatService {
                 SearchResult result = SearchResult.ragHit(ragResult.get());
                 SseUtils.sendEvent(emitter, SseEvents.CONTENT, result.ragAnswer().answer());
                 persistAssistantMessage(conversationId, result);
+                recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
+                        true, ragResult.get().maxSimilarity(), effectiveQuery,
+                        List.of(), "rag", null, startNanos);
                 return result;
             }
 
@@ -170,6 +180,8 @@ public class ChatService {
                 SearchResult errorResult = SearchResult.searchResult(
                         errorReport("搜索服务暂时不可用，请稍后重试"), List.of());
                 persistAssistantMessage(conversationId, errorResult);
+                recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
+                        false, null, effectiveQuery, List.of(), "error", "search_exception", startNanos);
                 return errorResult;
             }
         } finally {
@@ -185,6 +197,8 @@ public class ChatService {
                             List.of(), Instant.now()),
                     List.of());
             persistAssistantMessage(conversationId, emptyResult);
+            recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
+                    false, null, effectiveQuery, List.of(), "error", "search_empty", startNanos);
             return emptyResult;
         }
 
@@ -200,6 +214,9 @@ public class ChatService {
         // 6. 报告先落库；追问在事务提交后生成（afterCommit 更新消息，避免与原事务
         //    写锁冲突——Lock wait timeout），SSE 追加推送；done 自然延后到追问完成。
         SearchResult result = SearchResult.searchResult(report, searchResults);
+        recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
+                false, null, effectiveQuery, searchResults, "search",
+                resolveFallbackReason(report.markdown()), startNanos);
         Message assistantMessage = persistAssistantMessage(conversationId, result);
         if (assistantMessage != null) {
             final Message msg = assistantMessage;
@@ -279,6 +296,54 @@ public class ChatService {
             });
         } catch (Exception e) {
             log.warn("报告沉淀前置检查失败: query={}", query, e);
+        }
+    }
+
+    /**
+     * 从报告 markdown 判定降级原因（复用沉淀条件的占位文本模式，零侵入）。
+     */
+    private static String resolveFallbackReason(String markdown) {
+        if (markdown == null) {
+            return null;
+        }
+        if (markdown.contains("本节内容生成失败")) {
+            return "section_failed";
+        }
+        if (markdown.contains("AI 报告生成暂时不可用")) {
+            return "report_fallback";
+        }
+        return null;
+    }
+
+    /**
+     * 记录搜索链路追踪（与消息同事务写入；失败仅告警，不影响主流程）。
+     * total_results/filtered_results 均记评分后数量（SearchAgent 已按评分截断；
+     * 去重计数需 CuratorAgent 暴露，暂不区分）。
+     */
+    private void recordTrace(Long userId, Long conversationId, Long messageId, String query,
+                             String intent, boolean ragHit, Double ragScore, String searchKeywords,
+                             List<ScoredResource> results, String curationType,
+                             String fallbackReason, long startNanos) {
+        try {
+            SearchTrace trace = new SearchTrace();
+            trace.setUserId(userId);
+            trace.setConversationId(conversationId);
+            trace.setMessageId(messageId);
+            trace.setQuery(query);
+            trace.setIntent(intent);
+            trace.setRagHit(ragHit ? 1 : 0);
+            trace.setRagScore(ragScore);
+            trace.setSearchKeywords(searchKeywords);
+            int n = results == null ? 0 : results.size();
+            trace.setTotalResults(n);
+            trace.setFilteredResults(n);
+            trace.setCurationType(curationType);
+            trace.setFallbackReason(fallbackReason);
+            trace.setProcessingTimeMs((int) ((System.nanoTime() - startNanos) / 1_000_000));
+            trace.setCreatedAt(LocalDateTime.now());
+            searchTraceMapper.insert(trace);
+        } catch (Exception e) {
+            log.warn("搜索链路追踪记录失败: query={}", query, e);
         }
     }
 

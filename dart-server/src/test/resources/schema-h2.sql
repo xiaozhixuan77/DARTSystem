@@ -105,3 +105,26 @@ CREATE TABLE IF NOT EXISTS `audit_log` (
     KEY `idx_user_action_time` (`user_id`, `action`, `created_at`),
     CONSTRAINT `fk_al_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS `search_trace` (
+    `id`                 BIGINT       NOT NULL AUTO_INCREMENT,
+    `user_id`            BIGINT       NOT NULL,
+    `conversation_id`    BIGINT       NOT NULL,
+    `message_id`         BIGINT       NOT NULL,
+    `query`              VARCHAR(2000) NOT NULL,
+    `intent`             VARCHAR(50)  DEFAULT NULL,
+    `rag_hit`            TINYINT      NOT NULL DEFAULT 0,
+    `rag_score`          DOUBLE       DEFAULT NULL,
+    `search_keywords`    VARCHAR(1000) DEFAULT NULL,
+    `total_results`      INT          NOT NULL DEFAULT 0,
+    `filtered_results`   INT          NOT NULL DEFAULT 0,
+    `top_scores_json`    CLOB         DEFAULT NULL,
+    `curation_type`      VARCHAR(20)  NOT NULL,
+    `fallback_reason`    VARCHAR(500) DEFAULT NULL,
+    `processing_time_ms` INT          DEFAULT NULL,
+    `created_at`         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_user_created` (`user_id`, `created_at`),
+    KEY `idx_conv` (`conversation_id`),
+    CONSTRAINT `fk_st_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE CASCADE
+);

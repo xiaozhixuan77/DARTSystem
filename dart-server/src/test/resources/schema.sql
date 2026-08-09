@@ -104,3 +104,26 @@ CREATE TABLE IF NOT EXISTS `audit_log` (
     CONSTRAINT `fk_al_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
         ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `search_trace` (
+    `id`                 BIGINT       NOT NULL AUTO_INCREMENT,
+    `user_id`            BIGINT       NOT NULL COMMENT '用户ID',
+    `conversation_id`    BIGINT       NOT NULL COMMENT '会话ID',
+    `message_id`         BIGINT       NOT NULL COMMENT '关联的 Message.id（user 消息）',
+    `query`              VARCHAR(2000) NOT NULL COMMENT '原始查询',
+    `intent`             VARCHAR(50)  DEFAULT NULL COMMENT '查询意图分类结果',
+    `rag_hit`            TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'RAG是否命中',
+    `rag_score`          DOUBLE       DEFAULT NULL COMMENT 'RAG最大相似度得分',
+    `search_keywords`    VARCHAR(1000) DEFAULT NULL COMMENT '实际使用的搜索关键词',
+    `total_results`      INT          NOT NULL DEFAULT 0 COMMENT '搜索结果总数（评分后）',
+    `filtered_results`   INT          NOT NULL DEFAULT 0 COMMENT '评分筛选后保留数',
+    `top_scores_json`    TEXT         DEFAULT NULL COMMENT 'Top-5 结果评分明细JSON',
+    `curation_type`      VARCHAR(20)  NOT NULL COMMENT '报告类型: rag/search/error',
+    `fallback_reason`    VARCHAR(500) DEFAULT NULL COMMENT '触发降级的原因',
+    `processing_time_ms` INT          DEFAULT NULL COMMENT '总耗时（ms）',
+    `created_at`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_user_created` (`user_id`, `created_at` DESC),
+    KEY `idx_conv` (`conversation_id`),
+    CONSTRAINT `fk_st_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
