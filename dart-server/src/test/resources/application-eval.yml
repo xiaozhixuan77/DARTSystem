@@ -1,0 +1,19 @@
+# 评估运行配置（RUN_EVALUATION=true mvn test -Dtest=EvaluationRunnerTest）
+# 连接 dart_test 库（与集成测试隔离，sql.init 每次重建）+ 真实 LLM（继承主配置环境变量 Key）
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/dart_test?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    username: root
+    password: dart2024
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+agent:
+  # 评估不沉淀知识库（隔离评估数据 + 节省 embedding 耗时）
+  sediment:
+    enabled: false
+  # 评估不注入报告风格差异（intent 仍分类，但保持三模式可比）
