@@ -22,6 +22,9 @@ public class SearchAgent {
 
     private static final Logger log = LoggerFactory.getLogger(SearchAgent.class);
 
+    // 合并后抓取上限：多组检索词各返回 maxResults 条，防止 URL 数随组数线性膨胀
+    private static final int MAX_FETCH_URLS = 12;
+
     private final SearchTools searchTools;
 
     public SearchAgent(SearchTools searchTools) {
@@ -39,11 +42,13 @@ public class SearchAgent {
                 return List.of();
             }
 
-            // Step 2: URL 去重（保持首次出现顺序）
+            // Step 2: URL 去重（保持首次出现顺序）+ 抓取上限截断；
+            // 超限 URL 未抓取但仍走摘要兜底参与评分（rawResults 全量）
             List<String> urls = rawResults.stream()
                     .map(SearchResult::url)
                     .filter(u -> u != null && !u.isBlank())
                     .distinct()
+                    .limit(MAX_FETCH_URLS)
                     .toList();
 
             // Step 3: 并行抓取（失败时用搜索摘要兜底）
@@ -97,7 +102,7 @@ public class SearchAgent {
         if (queries == null || queries.isEmpty()) {
             return List.of();
         }
-        var executor = Executors.newVirtualThreadPerTaskExecutor();
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         try {
             List<Future<List<SearchResult>>> futures = queries.stream()
                     .map(q -> executor.submit(() -> searchTools.searchWeb(q, maxResults)))

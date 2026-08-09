@@ -123,7 +123,8 @@ class SearchAgentTest {
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
             List<String> urls = inv.getArgument(0);
-            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
+            // 可变 List：SearchAgent 会对未抓取 URL 追加摘要兜底（生产实现返回 ArrayList）
+            return new ArrayList<>(urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList());
         });
         when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
@@ -183,7 +184,8 @@ class SearchAgentTest {
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
             List<String> urls = inv.getArgument(0);
-            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
+            // 可变 List：SearchAgent 会对未抓取 URL 追加摘要兜底（生产实现返回 ArrayList）
+            return new ArrayList<>(urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList());
         });
         when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
