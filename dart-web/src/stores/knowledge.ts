@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { listKnowledge, getKnowledgeDetail, deleteKnowledge } from '@/api/knowledge'
-import type { KnowledgeItemVO, KnowledgeItemDetail } from '@/types/knowledge'
+import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph } from '@/api/knowledge'
+import type { KnowledgeItemVO, KnowledgeItemDetail, GraphData } from '@/types/knowledge'
 
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const items = ref<KnowledgeItemVO[]>([])
@@ -13,6 +13,8 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   const keyword = ref('')
   const loading = ref(false)
   const panelOpen = ref(false)
+  const graphData = ref<GraphData | null>(null)
+  const graphLoading = ref(false)
 
   async function loadItems() {
     loading.value = true
@@ -47,9 +49,23 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     panelOpen.value = !panelOpen.value
   }
 
+  async function loadGraph(id: number) {
+    graphLoading.value = true
+    try {
+      const res = await getKnowledgeGraph(id)
+      if (res.code === 200) graphData.value = res.data
+    } catch {
+      graphData.value = null
+    }
+    finally {
+      graphLoading.value = false
+    }
+  }
+
   return {
     items, total, page, size, selectedItem, filter, keyword,
-    loading, panelOpen, loadItems, loadDetail, removeItem,
+    loading, panelOpen, graphData, graphLoading,
+    loadItems, loadDetail, removeItem, loadGraph,
     setFilter, togglePanel
   }
 })

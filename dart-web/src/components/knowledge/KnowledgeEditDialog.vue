@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
-import type { KnowledgeItemDetail } from '@/types/knowledge'
+import { ref, watch, computed, nextTick } from 'vue'
+import * as echarts from 'echarts'
+import { useKnowledgeStore } from '@/stores/knowledge'
+import type { KnowledgeItemDetail, GraphData } from '@/types/knowledge'
 
 const props = defineProps<{ visible: boolean; item: KnowledgeItemDetail | null }>()
 const emit = defineEmits<{
@@ -8,17 +10,31 @@ const emit = defineEmits<{
   close: []
 }>()
 
+const store = useKnowledgeStore()
+
 const title = ref('')
 const notes = ref('')
 const tagInput = ref('')
+const activeTab = ref<'detail' | 'graph'>('detail')
+const graphEl = ref<HTMLDivElement | null>(null)
+let chart: echarts.ECharts | null = null
 
 watch(() => props.item, (val) => {
   if (val) {
     title.value = val.title
     notes.value = val.notes || ''
     tagInput.value = (val.tags || []).join(', ')
+    activeTab.value = 'detail'
+    disposeChart()
   }
 }, { immediate: true })
+
+watch(() => props.visible, (val) => {
+  if (!val) {
+    activeTab.value = 'detail'
+    disposeChart()
+  }
+})
 
 const canSave = computed(() => !!props.item && title.value.trim().length > 0)
 
@@ -36,6 +52,55 @@ function handleOverlayClick(e: MouseEvent) {
     emit('close')
   }
 }
+
+async function switchTab(tab: 'detail' | 'graph') {
+  activeTab.value = tab
+  if (tab === 'graph' && props.item) {
+    disposeChart()
+    await store.loadGraph(props.item.id)
+    await nextTick()
+    renderGraph()
+  }
+}
+
+function renderGraph() {
+  if (!graphEl.value || !store.graphData) return
+  const data: GraphData = store.graphData
+  chart = echarts.init(graphEl.value)
+  chart.setOption({
+    tooltip: {},
+    legend: { show: false },
+    series: [{
+      type: 'graph',
+      layout: 'force',
+      roam: true,
+      draggable: true,
+      label: { show: true, position: 'right', fontSize: 12 },
+      force: { repulsion: 120, edgeLength: 100 },
+      data: data.nodes.map((n) => ({
+        id: n.id,
+        name: n.label,
+        category: n.category,
+        itemStyle: n.category === 'external'
+          ? { color: '#ffa94d' }
+          : { color: '#5B5FEB' }
+      })),
+      links: data.edges.map((e) => ({
+        source: e.source,
+        target: e.target,
+        label: { show: true, formatter: e.label, fontSize: 10 }
+      })),
+      categories: [{ name: 'knowledge' }, { name: 'external' }]
+    }]
+  })
+}
+
+function disposeChart() {
+  if (chart) {
+    chart.dispose()
+    chart = null
+  }
+}
 </script>
 
 <template>
@@ -43,19 +108,36 @@ function handleOverlayClick(e: MouseEvent) {
     <div class="dialog-box">
       <h3 class="dialog-title">编辑知识条目</h3>
 
-      <div class="dialog-field">
-        <label for="edit-title">标题</label>
-        <input id="edit-title" v-model="title" type="text" />
+      <div class="dialog-tabs">
+        <button class="dialog-tab tab-detail" :class="{ active: activeTab === 'detail' }"
+                @click="activeTab = 'detail'">详情</button>
+        <button class="dialog-tab tab-graph" :class="{ active: activeTab === 'graph' }"
+                @click="switchTab('graph')">关系图</button>
       </div>
 
-      <div class="dialog-field">
-        <label for="edit-tags">标签（逗号分隔）</label>
-        <input id="edit-tags" v-model="tagInput" type="text" placeholder="Go, 并发, 后端" />
+      <div v-if="activeTab === 'detail'" class="detail-tab">
+        <div class="dialog-field">
+          <label for="edit-title">标题</label>
+          <input id="edit-title" v-model="title" type="text" />
+        </div>
+
+        <div class="dialog-field">
+          <label for="edit-tags">标签（逗号分隔）</label>
+          <input id="edit-tags" v-model="tagInput" type="text" placeholder="Go, 并发, 后端" />
+        </div>
+
+        <div class="dialog-field">
+          <label for="edit-notes">备注</label>
+          <textarea id="edit-notes" v-model="notes" rows="4" placeholder="添加备注..." />
+        </div>
       </div>
 
-      <div class="dialog-field">
-        <label for="edit-notes">备注</label>
-        <textarea id="edit-notes" v-model="notes" rows="4" placeholder="添加备注..." />
+      <div v-else class="graph-tab">
+        <div v-if="store.graphLoading" class="graph-hint">图谱加载中...</div>
+        <div v-else-if="!store.graphData || store.graphData.nodes.length === 0" class="graph-hint">
+          暂无关联关系，沉淀新报告后将自动生成。
+        </div>
+        <div v-else ref="graphEl" class="graph-container"></div>
       </div>
 
       <div class="dialog-actions">
@@ -83,7 +165,38 @@ function handleOverlayClick(e: MouseEvent) {
 .dialog-title {
   font-family: $font-display;
   font-size: 18px; font-weight: 700;
-  margin: 0 0 20px;
+  margin: 0 0 16px;
+}
+.dialog-tabs {
+  display: flex; gap: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid $color-border;
+}
+.dialog-tab {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  font-size: 14px; color: $color-muted;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  &.active {
+    color: $color-accent;
+    border-bottom-color: $color-accent;
+    font-weight: 600;
+  }
+}
+.graph-container {
+  width: 100%; height: 320px;
+  border: 1px solid $color-border;
+  border-radius: $radius;
+}
+.graph-hint {
+  height: 320px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px dashed $color-border;
+  border-radius: $radius;
+  color: $color-muted; font-size: 13px;
 }
 .dialog-field {
   margin-bottom: 16px;

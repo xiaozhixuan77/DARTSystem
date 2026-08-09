@@ -40,3 +40,20 @@ export interface TagsResponse {
   system: TagGroups
   custom: string[]
 }
+
+export interface GraphNode {
+  id: string
+  label: string
+  category: string
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+  label: string
+}
+
+export interface GraphData {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
