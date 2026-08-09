@@ -3,9 +3,13 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import KnowledgeEditDialog from '../KnowledgeEditDialog.vue'
 
-vi.mock('echarts', () => ({
-  init: vi.fn(() => ({ setOption: vi.fn(), dispose: vi.fn() }))
+vi.mock('echarts/core', () => ({
+  init: vi.fn(() => ({ setOption: vi.fn(), dispose: vi.fn() })),
+  use: vi.fn()
 }))
+vi.mock('echarts/charts', () => ({ GraphChart: {} }))
+vi.mock('echarts/components', () => ({ TooltipComponent: {} }))
+vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
 
 vi.mock('@/api/knowledge', () => ({
   listKnowledge: vi.fn(),
