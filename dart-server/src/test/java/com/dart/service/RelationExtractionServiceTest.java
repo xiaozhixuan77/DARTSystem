@@ -88,7 +88,7 @@ class RelationExtractionServiceTest {
 
         service.extractAndPersist(1L, 5L, "内容");
 
-        verify(relationMapper, never()).insert(any());
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
     }
 
     @Test
@@ -100,7 +100,7 @@ class RelationExtractionServiceTest {
         service.extractAndPersist(1L, 5L, "内容");
 
         verify(knowledgeItemMapper, never()).selectList(any());
-        verify(relationMapper, never()).insert(any());
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
     }
 
     @Test
@@ -110,7 +110,7 @@ class RelationExtractionServiceTest {
 
         service.extractAndPersist(1L, 5L, "内容");
 
-        verify(relationMapper, never()).insert(any());
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
     }
 
     @Test
@@ -123,7 +123,7 @@ class RelationExtractionServiceTest {
 
         service.extractAndPersist(1L, 5L, "内容");
 
-        verify(relationMapper, never()).insert(any());
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
     }
 
     @Test
@@ -131,6 +131,6 @@ class RelationExtractionServiceTest {
         service.extractAndPersist(1L, 5L, "  ");
 
         verify(chatModel, never()).call(any(org.springframework.ai.chat.prompt.Prompt.class));
-        verify(relationMapper, never()).insert(any());
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
     }
 }

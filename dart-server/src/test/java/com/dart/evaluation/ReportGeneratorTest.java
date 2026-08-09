@@ -1,5 +1,6 @@
 package com.dart.evaluation;
 
+import com.dart.evaluation.model.EvalSummary;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;

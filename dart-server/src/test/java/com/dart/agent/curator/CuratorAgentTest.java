@@ -45,13 +45,13 @@ class CuratorAgentTest {
         CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(expectedReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any())).thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
         CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter);
         assertThat(report).isNotNull();
         verify(curatorTools).deduplicate(anyList());
-        verify(curatorTools).generateReport(anyString(), anyList(), any());
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), any());
         verify(emitter, atLeastOnce()).send(any(SseEmitter.SseEventBuilder.class));
     }
 
@@ -92,7 +92,7 @@ class CuratorAgentTest {
         CuratedReport fallback = new CuratedReport("query", "# Fallback\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(invalidReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any())).thenReturn(invalidReport);
         when(curatorTools.validateReport(invalidReport)).thenReturn(false);
         when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(fallback);
 
@@ -106,7 +106,7 @@ class CuratorAgentTest {
         CuratedReport invalidReport = new CuratedReport("query", "too short", List.of(), Instant.now());
         String rewritten = "# 重写报告\n\n核心内容 ".repeat(20);
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(invalidReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any())).thenReturn(invalidReport);
         when(curatorTools.validateReport(invalidReport)).thenReturn(false);
         when(curatorTools.regenerateReport(anyString(), anyList())).thenReturn(rewritten);
         // 语义匹配而非实例 equals：CuratorAgent 内部重写报告的 generatedAt 由 report 携带，
@@ -128,7 +128,7 @@ class CuratorAgentTest {
         CuratedReport fallback = new CuratedReport("query", "# Fallback\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(invalidReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any())).thenReturn(invalidReport);
         when(curatorTools.validateReport(invalidReport)).thenReturn(false);
         when(curatorTools.regenerateReport(anyString(), anyList())).thenReturn(null);
         when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(fallback);
@@ -144,7 +144,7 @@ class CuratorAgentTest {
         CuratedReport fallback = new CuratedReport("query", "# Fallback\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(invalidReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any())).thenReturn(invalidReport);
         when(curatorTools.validateReport(any())).thenReturn(false);
         when(curatorTools.regenerateReport(anyString(), anyList()))
                 .thenReturn("# 仍然过短");
@@ -164,7 +164,7 @@ class CuratorAgentTest {
 
         CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter);
         assertThat(report).isNotNull();
-        verify(curatorTools, never()).generateReport(anyString(), anyList(), any());
+        verify(curatorTools, never()).generateReport(anyString(), anyList(), any(), any());
     }
 
     @Test
@@ -173,7 +173,7 @@ class CuratorAgentTest {
         CuratedReport expected = new CuratedReport("query", "# Ok ".repeat(20),
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(expected);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any())).thenReturn(expected);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
         curatorAgent.curate("query", List.of(r1), emitter);
