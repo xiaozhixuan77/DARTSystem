@@ -57,6 +57,7 @@ public class RelationExtractionService {
             KnowledgeItem subject = knowledgeItemMapper.selectById(itemId);
             String title = subject == null || subject.getTitle() == null ? "" : subject.getTitle();
             String sanitized = markdown.length() > 6000 ? markdown.substring(0, 6000) : markdown;
+            // 标题/报告可含用户输入，转义尖括号防 prompt 注入（与 preProcessQuery/regenerateReport 一致）
             String prompt = """
                     从以下学习报告中抽取 3-6 条核心概念关系。subject 固定为报告主题「%s」。
                     只输出 JSON 数组，不要输出其他内容：
@@ -71,7 +72,8 @@ public class RelationExtractionService {
                     <report>
                     %s
                     </report>
-                    """.formatted(title, sanitized);
+                    """.formatted(title.replace("<", "&lt;").replace(">", "&gt;"),
+                    sanitized.replace("<", "&lt;").replace(">", "&gt;"));
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResults().getFirst().getOutput().getText();
             relations = parseRelations(response);
