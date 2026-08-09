@@ -69,6 +69,61 @@ class CuratorAgentTest {
     }
 
     @Test
+    void curate_validationFails_regenerateSucceeds_returnsRegenerated() throws IOException {
+        ScoredResource r1 = makeResource("https://a.com", "Title A", 4.5);
+        CuratedReport invalidReport = new CuratedReport("query", "too short", List.of(), Instant.now());
+        String rewritten = "# 重写报告\n\n核心内容 ".repeat(20);
+        CuratedReport rewrittenReport = new CuratedReport("query", rewritten,
+                List.of("https://a.com"), Instant.now());
+        when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
+        when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(invalidReport);
+        when(curatorTools.validateReport(invalidReport)).thenReturn(false);
+        when(curatorTools.regenerateReport(anyString(), anyList())).thenReturn(rewritten);
+        when(curatorTools.validateReport(rewrittenReport)).thenReturn(true);
+
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter);
+
+        // 重写报告替换无效报告，不再降级纯列表
+        assertThat(report.markdown()).contains("重写报告");
+        verify(curatorTools).regenerateReport("query", List.of(r1));
+        verify(curatorTools, never()).fallbackReport(anyString(), anyList());
+    }
+
+    @Test
+    void curate_validationFails_regenerateReturnsNull_fallsBackToFallback() throws IOException {
+        ScoredResource r1 = makeResource("https://a.com", "Title A", 4.5);
+        CuratedReport invalidReport = new CuratedReport("query", "too short", List.of(), Instant.now());
+        CuratedReport fallback = new CuratedReport("query", "# Fallback\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
+        when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(invalidReport);
+        when(curatorTools.validateReport(invalidReport)).thenReturn(false);
+        when(curatorTools.regenerateReport(anyString(), anyList())).thenReturn(null);
+        when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(fallback);
+
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter);
+        assertThat(report.markdown()).contains("Fallback");
+    }
+
+    @Test
+    void curate_validationFails_regeneratedStillInvalid_fallsBackToFallback() throws IOException {
+        ScoredResource r1 = makeResource("https://a.com", "Title A", 4.5);
+        CuratedReport invalidReport = new CuratedReport("query", "too short", List.of(), Instant.now());
+        CuratedReport fallback = new CuratedReport("query", "# Fallback\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
+        when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(invalidReport);
+        when(curatorTools.validateReport(any())).thenReturn(false);
+        when(curatorTools.regenerateReport(anyString(), anyList()))
+                .thenReturn("# 仍然过短");
+        when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(fallback);
+
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter);
+        // 重写内容仍校验失败 → 最终降级 fallback
+        assertThat(report.markdown()).contains("Fallback");
+    }
+
+    @Test
     void curate_dedupReturnsEmpty_returnsEmptyReport() throws IOException {
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of());
         ScoredResource r1 = makeResource("https://a.com", "A", 3.5);

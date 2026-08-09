@@ -373,6 +373,75 @@ class CuratorToolsTest {
     }
 
     @Test
+    void generateReport_deepRead_keepsFullContentForTop4Only() {
+        // 6 个资源按加权分降序：前 4 个精读（完整内容），第 5/6 个仅短摘要
+        stubThreeSections();
+        List<ScoredResource> resources = List.of(
+                makeResource("https://a.com", "Resource A", "content a ".repeat(200), 4.6),
+                makeResource("https://b.com", "Resource B", "content b ".repeat(200), 4.4),
+                makeResource("https://c.com", "Resource C", "content c ".repeat(200), 4.2),
+                makeResource("https://d.com", "Resource D", "content d ".repeat(200), 4.0),
+                makeResource("https://e.com", "Resource E", "content e ".repeat(200), 3.6),
+                makeResource("https://f.com", "Resource F", "content f ".repeat(200), 3.2));
+
+        curatorTools.generateReport("Java", resources, new SseEmitter(0L));
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(2)).call(captor.capture());
+        for (Prompt p : captor.getAllValues()) {
+            String promptText = p.getInstructions().getFirst().getText();
+            // Top 4 完整内容（1500 字符保留，含 100+ 重复单元）
+            assertThat(promptText).contains("content d ".repeat(100));
+            // 第 5/6 个不再携带完整内容，仅 URL + 短摘要
+            assertThat(promptText).contains("https://e.com");
+            assertThat(promptText).contains("https://f.com");
+            assertThat(promptText).doesNotContain("content e ".repeat(50));
+            assertThat(promptText).doesNotContain("content f ".repeat(50));
+        }
+    }
+
+    @Test
+    void generateReport_deepRead_allResourcesWhenUnderLimit() {
+        // 4 个以内全部精读
+        stubThreeSections();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(2)).call(captor.capture());
+        for (Prompt p : captor.getAllValues()) {
+            String promptText = p.getInstructions().getFirst().getText();
+            assertThat(promptText).contains("content a ".repeat(100));
+            assertThat(promptText).contains("content d ".repeat(100));
+        }
+    }
+
+    @Test
+    void regenerateReport_returnsMarkdown() {
+        String rewritten = "# 重写报告\n\n## 核心概念\n\n要点内容 ".repeat(20);
+        when(chatModel.call(any(Prompt.class))).thenReturn(new ChatResponse(
+                List.of(new Generation(new AssistantMessage(rewritten)))));
+
+        String result = curatorTools.regenerateReport("Java", fourResources());
+        assertThat(result).isEqualTo(rewritten.trim());
+    }
+
+    @Test
+    void regenerateReport_blankResponse_returnsNull() {
+        when(chatModel.call(any(Prompt.class))).thenReturn(new ChatResponse(
+                List.of(new Generation(new AssistantMessage("  \n  ")))));
+
+        assertThat(curatorTools.regenerateReport("Java", fourResources())).isNull();
+    }
+
+    @Test
+    void regenerateReport_throws_returnsNull() {
+        when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("LLM outage"));
+
+        assertThat(curatorTools.regenerateReport("Java", fourResources())).isNull();
+    }
+
+    @Test
     void generateReport_contentTruncatedAt1500() {
         stubThreeSections();
 
