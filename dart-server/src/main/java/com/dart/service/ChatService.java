@@ -145,7 +145,7 @@ public class ChatService {
             searchQueries.add(effectiveQuery);
             searchQueries.addAll(pre.variants());
             Future<List<ScoredResource>> searchFuture = parallelExecutor.submit(() ->
-                    searchAgent.execute(searchQueries, 8, emitter));
+                    searchAgent.execute(searchQueries, targetResultsFor(pre.intent()), emitter));
 
             Optional<RagService.RagResult> ragResult;
             try {
@@ -188,10 +188,10 @@ public class ChatService {
             return emptyResult;
         }
 
-        // 5. Curator Agent
+        // 5. Curator Agent（意图透传为报告风格要求）
         CuratedReport report;
         try {
-            report = curatorAgent.curate(effectiveQuery, searchResults, emitter);
+            report = curatorAgent.curate(effectiveQuery, searchResults, emitter, pre.intent());
         } catch (Exception e) {
             log.error("Curator Agent 异常", e);
             report = buildFallbackReport(effectiveQuery, searchResults);
@@ -433,18 +433,18 @@ public class ChatService {
 
     // ─── 前置判断与提示词优化（合并为一次调用）────────────────────────
 
-    public record QueryPreProcess(boolean isTech, String optimized, List<String> variants) {}
+    public record QueryPreProcess(boolean isTech, String optimized, List<String> variants, String intent) {}
 
     /**
-     * 合并领域判断与提示词优化为一次 LLM 调用（JSON 输出 {isTech, optimized, variants}）。
-     * 失败/解析失败降级：isTech=true（放行）、optimized=原查询、variants=空列表。
+     * 合并领域判断、意图分类与提示词优化为一次 LLM 调用（JSON 输出 {isTech, optimized, variants, intent}）。
+     * 失败/解析失败降级：isTech=true（放行）、optimized=原查询、variants=空列表、intent=how_to。
      * 用户输入用 XML 标签包裹防注入。
      */
     public QueryPreProcess preProcessQuery(String query) {
         try {
             String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
             String prompt = """
-                    你是一个技术领域判断与查询优化助手。对用户输入完成两件事：
+                    你是一个技术领域判断、意图分类与查询优化助手。对用户输入完成三件事：
                     1. 判断是否属于技术/编程领域（isTech）
                     2. 优化为更适合知识库检索和网络搜索的技术问题描述（optimized）：
                        - 保持原始意图，补充关键上下文（技术栈、版本、场景）
@@ -454,9 +454,16 @@ public class ChatService {
                     3. 生成 2 个检索变体词（variants）用于并行网络搜索扩大召回：
                        - 与 optimized 不同的表达角度/补充上下文（如英文术语、更短的关键词组合、场景化描述）
                        - 每个不超过 50 字；非技术输入输出空数组 []
+                    4. 判断查询意图类型（intent）：
+                       - quick_fact: 快速事实/定义类问题
+                       - how_to: 操作步骤/配置方法
+                       - deep_dive: 需要深入解释的概念/原理
+                       - comparison: 对比两个及以上技术/工具
+                       - troubleshooting: 错误诊断/排错
+                       - non_tech: 非技术领域问题（与 isTech=false 对应）
 
                     严格只输出 JSON，不要输出任何其他内容：
-                    {"isTech": true或false, "optimized": "优化后的描述", "variants": ["变体1", "变体2"]}
+                    {"isTech": true或false, "optimized": "优化后的描述", "variants": ["变体1", "变体2"], "intent": "how_to"}
 
                     <user_query>%s</user_query>
                     """.formatted(sanitized);
@@ -465,12 +472,14 @@ public class ChatService {
             boolean isTech = parseIsTech(response);
             String optimized = parseOptimized(response);
             List<String> variants = parseVariants(response);
+            // 非技术查询意图强制归一化为 non_tech（以 isTech 判断为准）
+            String intent = isTech ? parseIntent(response) : "non_tech";
             return new QueryPreProcess(isTech,
                     (optimized == null || optimized.isBlank()) ? query : optimized,
-                    variants);
+                    variants, intent);
         } catch (Exception e) {
             log.warn("LLM 前置判断与提示词优化失败，降级为技术查询+原文", e);
-            return new QueryPreProcess(true, query, List.of());
+            return new QueryPreProcess(true, query, List.of(), "how_to");
         }
     }
 
@@ -487,6 +496,29 @@ public class ChatService {
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\"optimized\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
         return m.find() ? m.group(1) : null;
+    }
+
+    /**
+     * 解析 intent 字段；字段缺失或畸形一律降级为 how_to（兼容旧格式 JSON），不抛异常。
+     */
+    private static String parseIntent(String json) {
+        if (json == null || json.isBlank()) {
+            return "how_to";
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"intent\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
+        return m.find() ? m.group(1) : "how_to";
+    }
+
+    /**
+     * 意图 → 搜索结果量：quick_fact 收窄（简洁回答）、deep_dive/comparison 扩大（召回更全）、其余默认。
+     */
+    private static int targetResultsFor(String intent) {
+        return switch (intent == null ? "" : intent) {
+            case "quick_fact" -> 5;
+            case "deep_dive", "comparison" -> 12;
+            default -> 8;
+        };
     }
 
     /**

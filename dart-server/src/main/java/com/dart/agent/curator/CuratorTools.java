@@ -33,6 +33,14 @@ public class CuratorTools {
     private static final String SECTION_FAILED =
             "> ⚠️ 本节内容生成失败，请稍后重试或访问参考文献了解详情。";
 
+    // 查询意图 → 报告风格要求（注入每节 prompt 首部；未知意图不加）
+    private static final Map<String, String> INTENT_STYLE = Map.of(
+            "quick_fact", "报告风格：简洁定义式回答，直击要点，避免冗长铺垫",
+            "how_to", "报告风格：操作步骤式教程，步骤清晰可执行",
+            "deep_dive", "报告风格：深入原理与源码级分析，讲清底层机制",
+            "comparison", "报告风格：对比分析，用表格呈现差异与适用场景",
+            "troubleshooting", "报告风格：诊断排错式，从现象到原因再到解决方案");
+
     private final ChatModel chatModel;
     private final double jaccardThreshold;
     private final int deepReadCount;
@@ -91,6 +99,14 @@ public class CuratorTools {
      * 节 1 流式推送的同时，节 2/3 并行预生成缓冲，完成后按序整块推送。
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources, SseEmitter emitter) {
+        return generateReport(query, resources, emitter, null);
+    }
+
+    /**
+     * @param styleHint 查询意图（风格要求）；null/未知意图不注入风格句
+     */
+    public CuratedReport generateReport(String query, List<ScoredResource> resources,
+                                        SseEmitter emitter, String styleHint) {
         if (resources == null || resources.isEmpty()) {
             return emptyReport(query);
         }
@@ -110,11 +126,11 @@ public class CuratorTools {
             Future<String> section2Future = pool.submit(() -> {
                 SseUtils.sendStatus(emitter, "curating", "正在解析原理与代码示例...");
                 return generateSection(query, resourcesText,
-                        buildPrincipleCodePrompt(query), "principles_code");
+                        buildPrincipleCodePrompt(query), "principles_code", styleHint);
             });
 
             String section1 = streamSection(query, resourcesText,
-                    buildConceptPrompt(query), "concepts", emitter);
+                    buildConceptPrompt(query), "concepts", emitter, styleHint);
             sections.add(section1);
 
             String section2 = section2Future.get();
@@ -126,7 +142,7 @@ public class CuratorTools {
             // 阶段 B：节 3 单独生成（避免与节 2 并发造成 3 并发峰值）
             SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
             String section3 = generateSection(query, resourcesText,
-                    buildFaqAdvancePrompt(query), "faq_advance");
+                    buildFaqAdvancePrompt(query), "faq_advance", styleHint);
             sections.add(section3);
             if (!section3.equals(SECTION_FAILED)) {
                 SseUtils.sendEvent(emitter, SseEvents.CONTENT, section3);
@@ -166,9 +182,9 @@ public class CuratorTools {
      * 偶发 HTTP 200 + 空内容），仍失败返回占位文本，不影响主流程。
      */
     private String generateSection(String query, String resourcesText,
-                                   String sectionPrompt, String sectionName) {
+                                   String sectionPrompt, String sectionName, String styleHint) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
-        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
+        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint);
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
                 String response = chatModel.call(new Prompt(new UserMessage(prompt), options))
@@ -193,9 +209,9 @@ public class CuratorTools {
      * 同时累积完整文本返回；空白响应重试一次（官网偶发空流），失败返回占位文本。
      */
     private String streamSection(String query, String resourcesText, String sectionPrompt,
-                                 String sectionName, SseEmitter emitter) {
+                                 String sectionName, SseEmitter emitter, String styleHint) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
-        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt);
+        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint);
         for (int attempt = 1; attempt <= 3; attempt++) {
             StringBuilder sb = new StringBuilder();
             try {
@@ -265,10 +281,15 @@ public class CuratorTools {
         }
     }
 
-    private String buildSectionPrompt(String query, String resourcesText, String sectionPrompt) {
+    private String buildSectionPrompt(String query, String resourcesText,
+                                      String sectionPrompt, String styleHint) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一个技术教育专家，正在撰写关于「").append(query)
                 .append("」的深度学习报告。基于以下搜索结果素材撰写。\n\n");
+        String style = styleHint == null ? null : INTENT_STYLE.get(styleHint);
+        if (style != null) {
+            sb.append(style).append("\n\n");
+        }
         sb.append(sectionPrompt).append("\n\n---\n\n").append(resourcesText);
         return sb.toString();
     }

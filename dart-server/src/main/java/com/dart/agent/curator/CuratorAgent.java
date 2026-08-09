@@ -24,6 +24,15 @@ public class CuratorAgent {
     }
 
     public CuratedReport curate(String query, List<ScoredResource> searchResults, SseEmitter emitter) {
+        return curate(query, searchResults, emitter, null);
+    }
+
+    /**
+     * @param intent 查询意图（quick_fact/how_to/deep_dive/comparison/troubleshooting/non_tech），
+     *               透传给报告生成作为风格要求；null 表示无风格要求
+     */
+    public CuratedReport curate(String query, List<ScoredResource> searchResults,
+                                SseEmitter emitter, String intent) {
         try {
             SseUtils.sendStatus(emitter, "curating", "正在整理归纳...");
 
@@ -32,7 +41,7 @@ public class CuratorAgent {
                 return curatorTools.fallbackReport(query, searchResults);
             }
 
-            CuratedReport report = curatorTools.generateReport(query, deduped, emitter);
+            CuratedReport report = curatorTools.generateReport(query, deduped, emitter, intent);
 
             if (!curatorTools.validateReport(report)) {
                 // 单次 LLM 精简重写抢救；重写成功且通过校验则替换，否则降级 fallback（无循环）
