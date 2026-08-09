@@ -119,6 +119,9 @@ agent:
     size: 500
     overlap: 50
     min-length: 20
+  curator:
+    # 报告生成精读资源数：Top N 携带完整内容，其余仅摘要（控制 LLM 输入长度）
+    deep-read-count: 4
   rag:
     similarity-threshold: 0.80
     top-k: 5

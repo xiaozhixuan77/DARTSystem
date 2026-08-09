@@ -61,6 +61,9 @@ public class AgentConfig {
     @Value("${agent.curator.jaccard-threshold:0.85}")
     private double jaccardThreshold;
 
+    @Value("${agent.curator.deep-read-count:4}")
+    private int deepReadCount;
+
     // ────────── Splitter ──────────
 
     @Bean
@@ -116,7 +119,7 @@ public class AgentConfig {
 
     @Bean
     public CuratorTools curatorTools(ChatModel chatModel) {
-        return new CuratorTools(chatModel, jaccardThreshold);
+        return new CuratorTools(chatModel, jaccardThreshold, deepReadCount);
     }
 
     @Bean

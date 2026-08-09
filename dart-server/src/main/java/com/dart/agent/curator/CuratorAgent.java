@@ -35,8 +35,19 @@ public class CuratorAgent {
             CuratedReport report = curatorTools.generateReport(query, deduped, emitter);
 
             if (!curatorTools.validateReport(report)) {
-                log.warn("报告校验失败，降级使用 fallbackReport");
-                report = curatorTools.fallbackReport(query, deduped);
+                // 单次 LLM 精简重写抢救；重写成功且通过校验则替换，否则降级 fallback（无循环）
+                String rewritten = curatorTools.regenerateReport(query, deduped);
+                CuratedReport rewrittenReport = rewritten == null ? null
+                        : new CuratedReport(query, rewritten,
+                                deduped.stream().map(ScoredResource::getUrl).toList(),
+                                report.generatedAt());
+                if (rewrittenReport != null && curatorTools.validateReport(rewrittenReport)) {
+                    log.info("报告校验失败后单次重写成功");
+                    report = rewrittenReport;
+                } else {
+                    log.warn("报告校验失败且重写不可用，降级使用 fallbackReport");
+                    report = curatorTools.fallbackReport(query, deduped);
+                }
             }
 
             SseUtils.sendEvent(emitter, SseEvents.CURATED_REPORT, report);

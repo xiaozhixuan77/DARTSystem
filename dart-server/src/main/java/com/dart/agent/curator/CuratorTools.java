@@ -35,10 +35,16 @@ public class CuratorTools {
 
     private final ChatModel chatModel;
     private final double jaccardThreshold;
+    private final int deepReadCount;
 
     public CuratorTools(ChatModel chatModel, double jaccardThreshold) {
+        this(chatModel, jaccardThreshold, 4);
+    }
+
+    public CuratorTools(ChatModel chatModel, double jaccardThreshold, int deepReadCount) {
         this.chatModel = chatModel;
         this.jaccardThreshold = jaccardThreshold;
+        this.deepReadCount = deepReadCount;
     }
 
     /**
@@ -217,6 +223,44 @@ public class CuratorTools {
         return SECTION_FAILED;
     }
 
+    /**
+     * 输出校验失败后的单次 LLM 精简重写：基于素材生成 800-1200 字精炼报告
+     * （标题 + 核心概念要点 + 关键资源 + 小结）。空白响应/异常返回 null，
+     * 调用方据此决定是否降级 fallback——不引入重试循环。
+     */
+    public String regenerateReport(String query, List<ScoredResource> resources) {
+        String resourcesText = buildResourcesText(resources);
+        String prompt = """
+                你是一个技术教育专家。以下搜索结果素材质量不足，无法生成完整分节报告。
+                请基于这些素材，输出一份 800-1200 字的精炼学习报告，严格按 markdown 格式：
+
+                # %s 精炼报告
+
+                ## 核心概念
+                3-5 个关键概念要点（每点 1-2 句）
+
+                ## 关键资源
+                列出 2-4 个最有价值资源的标题与 URL
+
+                ## 小结
+                3-4 句话总结核心结论
+
+                只输出报告正文，不要输出其他内容。
+
+                素材：
+                %s
+                """.formatted(query, resourcesText);
+        try {
+            String response = chatModel.call(new Prompt(new UserMessage(prompt)))
+                    .getResults().getFirst().getOutput().getText();
+            String cleaned = response == null ? "" : response.trim();
+            return cleaned.isBlank() ? null : cleaned;
+        } catch (Exception e) {
+            log.warn("报告单次重写失败，降级 fallback: query={}", query, e);
+            return null;
+        }
+    }
+
     private String buildSectionPrompt(String query, String resourcesText, String sectionPrompt) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一个技术教育专家，正在撰写关于「").append(query)
@@ -294,7 +338,8 @@ public class CuratorTools {
     }
 
     /**
-     * 拼接资源摘要文本（每资源 ≤ 1500 字符）。
+     * 拼接资源文本：评分 Top deepReadCount 个资源携带完整内容（≤1500 字符），
+     * 其余仅标题/URL/评分/一句话摘要（≤150 字符）——缩小 LLM 输入、加快首 token。
      */
     private String buildResourcesText(List<ScoredResource> resources) {
         StringBuilder sb = new StringBuilder();
@@ -307,7 +352,11 @@ public class CuratorTools {
                     .append("/D").append(r.getScoreD())
                     .append("/M").append(r.getScoreM())
                     .append(" (总分 ").append(String.format("%.2f", r.getWeightedScore())).append(")\n");
-            sb.append("- 内容摘要: ").append(truncateContent(r.getContent(), MAX_CONTENT_PER_RESOURCE)).append("\n\n");
+            if (idx <= deepReadCount) {
+                sb.append("- 内容摘要: ").append(truncateContent(r.getContent(), MAX_CONTENT_PER_RESOURCE)).append("\n\n");
+            } else {
+                sb.append("- 内容摘要: ").append(truncateContent(r.getContent(), 150)).append("\n\n");
+            }
             idx++;
         }
         return sb.toString();
