@@ -140,8 +140,12 @@ public class ChatService {
         try {
             Future<Optional<RagService.RagResult>> ragFuture = parallelExecutor.submit(() ->
                     ragService.retrieve(effectiveQuery, userId));
+            // 主词 + 变体词并行网络搜索扩大召回（RAG 仅用主词，保持检索专注）
+            List<String> searchQueries = new ArrayList<>();
+            searchQueries.add(effectiveQuery);
+            searchQueries.addAll(pre.variants());
             Future<List<ScoredResource>> searchFuture = parallelExecutor.submit(() ->
-                    searchAgent.execute(effectiveQuery, 8, emitter));
+                    searchAgent.execute(searchQueries, 8, emitter));
 
             Optional<RagService.RagResult> ragResult;
             try {
@@ -429,11 +433,12 @@ public class ChatService {
 
     // ─── 前置判断与提示词优化（合并为一次调用）────────────────────────
 
-    public record QueryPreProcess(boolean isTech, String optimized) {}
+    public record QueryPreProcess(boolean isTech, String optimized, List<String> variants) {}
 
     /**
-     * 合并领域判断与提示词优化为一次 LLM 调用（JSON 输出 {isTech, optimized}）。
-     * 失败/解析失败降级：isTech=true（放行）、optimized=原查询。用户输入用 XML 标签包裹防注入。
+     * 合并领域判断与提示词优化为一次 LLM 调用（JSON 输出 {isTech, optimized, variants}）。
+     * 失败/解析失败降级：isTech=true（放行）、optimized=原查询、variants=空列表。
+     * 用户输入用 XML 标签包裹防注入。
      */
     public QueryPreProcess preProcessQuery(String query) {
         try {
@@ -446,9 +451,12 @@ public class ChatService {
                        - 去除口语化表达，使用准确的技术术语
                        - 输入已清晰准确时只做小幅润色
                        - 控制在 100 字以内；非技术输入输出空字符串
+                    3. 生成 2 个检索变体词（variants）用于并行网络搜索扩大召回：
+                       - 与 optimized 不同的表达角度/补充上下文（如英文术语、更短的关键词组合、场景化描述）
+                       - 每个不超过 50 字；非技术输入输出空数组 []
 
                     严格只输出 JSON，不要输出任何其他内容：
-                    {"isTech": true或false, "optimized": "优化后的描述"}
+                    {"isTech": true或false, "optimized": "优化后的描述", "variants": ["变体1", "变体2"]}
 
                     <user_query>%s</user_query>
                     """.formatted(sanitized);
@@ -456,11 +464,13 @@ public class ChatService {
                     .getResults().getFirst().getOutput().getText().trim();
             boolean isTech = parseIsTech(response);
             String optimized = parseOptimized(response);
+            List<String> variants = parseVariants(response);
             return new QueryPreProcess(isTech,
-                    (optimized == null || optimized.isBlank()) ? query : optimized);
+                    (optimized == null || optimized.isBlank()) ? query : optimized,
+                    variants);
         } catch (Exception e) {
             log.warn("LLM 前置判断与提示词优化失败，降级为技术查询+原文", e);
-            return new QueryPreProcess(true, query);
+            return new QueryPreProcess(true, query, List.of());
         }
     }
 
@@ -477,6 +487,30 @@ public class ChatService {
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\"optimized\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
         return m.find() ? m.group(1) : null;
+    }
+
+    /**
+     * 解析 variants 数组；字段缺失或畸形一律降级为空列表（只用主词搜索），不抛异常。
+     */
+    private static List<String> parseVariants(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"variants\"\\s*:\\s*\\[([^\\]]*)\\]").matcher(json);
+        if (!m.find()) {
+            return List.of();
+        }
+        List<String> variants = new ArrayList<>();
+        java.util.regex.Matcher item = java.util.regex.Pattern
+                .compile("\"([^\"]*)\"").matcher(m.group(1));
+        while (item.find()) {
+            String v = item.group(1).trim();
+            if (!v.isBlank()) {
+                variants.add(v);
+            }
+        }
+        return variants;
     }
 
     // ─── 工具方法 ────────────────────────────────────────────
