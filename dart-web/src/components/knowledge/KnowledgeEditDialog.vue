@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { GraphChart } from 'echarts/charts'
+import { TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import type { EChartsType } from 'echarts/core'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import type { KnowledgeItemDetail, GraphData } from '@/types/knowledge'
+
+echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
 const props = defineProps<{ visible: boolean; item: KnowledgeItemDetail | null }>()
 const emit = defineEmits<{
@@ -17,7 +23,7 @@ const notes = ref('')
 const tagInput = ref('')
 const activeTab = ref<'detail' | 'graph'>('detail')
 const graphEl = ref<HTMLDivElement | null>(null)
-let chart: echarts.ECharts | null = null
+let chart: EChartsType | null = null
 
 watch(() => props.item, (val) => {
   if (val) {
