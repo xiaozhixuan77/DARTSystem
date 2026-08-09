@@ -128,3 +128,19 @@ CREATE TABLE IF NOT EXISTS `search_trace` (
     KEY `idx_conv` (`conversation_id`),
     CONSTRAINT `fk_st_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS `knowledge_relation` (
+    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
+    `subject_id`    BIGINT       NOT NULL,
+    `predicate`     VARCHAR(50)  NOT NULL,
+    `object_id`     BIGINT       DEFAULT NULL,
+    `object_label`  VARCHAR(500) DEFAULT NULL,
+    `confidence`    DOUBLE       DEFAULT 1.0,
+    `source`        VARCHAR(500) DEFAULT NULL,
+    `created_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_subject` (`subject_id`),
+    KEY `idx_object` (`object_id`),
+    KEY `idx_predicate` (`predicate`),
+    CONSTRAINT `fk_kr_subject` FOREIGN KEY (`subject_id`) REFERENCES `knowledge_item` (`id`) ON DELETE CASCADE
+);

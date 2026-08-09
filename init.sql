@@ -173,3 +173,23 @@ CREATE TABLE IF NOT EXISTS `search_trace` (
     CONSTRAINT `fk_st_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
         ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- ============================================================
+-- 9. knowledge_relation — 知识关系图谱表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `knowledge_relation` (
+    `id`            BIGINT          NOT NULL AUTO_INCREMENT,
+    `subject_id`    BIGINT          NOT NULL COMMENT '主体知识条目ID（knowledge_item.id）',
+    `predicate`     VARCHAR(50)     NOT NULL COMMENT '关系类型: related_to/prerequisite_of/extends/part_of/alternative_to/depends_on',
+    `object_id`     BIGINT          DEFAULT NULL COMMENT '客体知识条目ID（知识库内匹配）',
+    `object_label`  VARCHAR(500)    DEFAULT NULL COMMENT '客体标签（知识库外的外部概念）',
+    `confidence`    DOUBLE          DEFAULT 1.0 COMMENT '置信度 [0,1]',
+    `source`        VARCHAR(500)    DEFAULT NULL COMMENT '关系来源（URL 或 LLM抽取）',
+    `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_subject` (`subject_id`),
+    KEY `idx_object` (`object_id`),
+    KEY `idx_predicate` (`predicate`),
+    CONSTRAINT `fk_kr_subject` FOREIGN KEY (`subject_id`) REFERENCES `knowledge_item` (`id`)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;

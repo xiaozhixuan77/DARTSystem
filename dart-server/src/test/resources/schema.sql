@@ -127,3 +127,19 @@ CREATE TABLE IF NOT EXISTS `search_trace` (
     KEY `idx_conv` (`conversation_id`),
     CONSTRAINT `fk_st_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `knowledge_relation` (
+    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
+    `subject_id`    BIGINT       NOT NULL COMMENT '主体知识条目ID（knowledge_item.id）',
+    `predicate`     VARCHAR(50)  NOT NULL COMMENT '关系类型: related_to/prerequisite_of/extends/part_of/alternative_to/depends_on',
+    `object_id`     BIGINT       DEFAULT NULL COMMENT '客体知识条目ID（知识库内匹配）',
+    `object_label`  VARCHAR(500) DEFAULT NULL COMMENT '客体标签（知识库外的外部概念）',
+    `confidence`    DOUBLE       DEFAULT 1.0 COMMENT '置信度 [0,1]',
+    `source`        VARCHAR(500) DEFAULT NULL COMMENT '关系来源（URL 或 LLM抽取）',
+    `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_subject` (`subject_id`),
+    KEY `idx_object` (`object_id`),
+    KEY `idx_predicate` (`predicate`),
+    CONSTRAINT `fk_kr_subject` FOREIGN KEY (`subject_id`) REFERENCES `knowledge_item` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

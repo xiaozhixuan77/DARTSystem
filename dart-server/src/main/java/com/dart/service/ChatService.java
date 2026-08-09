@@ -64,6 +64,7 @@ public class ChatService {
     private final StringRedisTemplate redisTemplate;
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final SearchTraceMapper searchTraceMapper;
+    private final RelationExtractionService relationExtractionService;
 
     @Value("${agent.cache.ttl-hours:24}")
     private long cacheTtlHours;
@@ -77,7 +78,8 @@ public class ChatService {
     public ChatService(ChatModel chatModel, SearchAgent searchAgent, CuratorAgent curatorAgent,
                        RagService ragService, EmbeddingService embeddingService,
                        MessageMapper messageMapper, StringRedisTemplate redisTemplate,
-                       KnowledgeItemMapper knowledgeItemMapper, SearchTraceMapper searchTraceMapper) {
+                       KnowledgeItemMapper knowledgeItemMapper, SearchTraceMapper searchTraceMapper,
+                       RelationExtractionService relationExtractionService) {
         this.chatModel = chatModel;
         this.searchAgent = searchAgent;
         this.curatorAgent = curatorAgent;
@@ -87,6 +89,7 @@ public class ChatService {
         this.redisTemplate = redisTemplate;
         this.knowledgeItemMapper = knowledgeItemMapper;
         this.searchTraceMapper = searchTraceMapper;
+        this.relationExtractionService = relationExtractionService;
     }
 
     public record SearchResult(RagService.RagResult ragAnswer,
@@ -288,7 +291,12 @@ public class ChatService {
                     new ScoredResource(sourceUrl, query, markdown, 4, 4, 4, 4, 4.0);
             Thread.startVirtualThread(() -> {
                 try {
-                    embeddingService.embedAndPersist(userId, query, markdown, sourceUrl, defaultScores);
+                    List<Long> itemIds =
+                            embeddingService.embedAndPersist(userId, query, markdown, sourceUrl, defaultScores);
+                    // 沉淀成功 → 异步抽取知识关系（单次 LLM 调用，失败仅告警）
+                    if (itemIds != null && !itemIds.isEmpty()) {
+                        relationExtractionService.extractAndPersist(userId, itemIds.getFirst(), markdown);
+                    }
                     log.info("报告已沉淀到知识库: userId={}, query={}", userId, query);
                 } catch (Exception e) {
                     log.warn("报告沉淀到知识库失败: query={}", query, e);

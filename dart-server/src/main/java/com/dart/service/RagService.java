@@ -3,8 +3,10 @@ package com.dart.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
+import com.dart.entity.KnowledgeRelation;
 import com.dart.mapper.KnowledgeChunkMapper;
 import com.dart.mapper.KnowledgeItemMapper;
+import com.dart.mapper.KnowledgeRelationMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -25,18 +27,21 @@ public class RagService {
     private final ChatModel chatModel;
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
+    private final KnowledgeRelationMapper relationMapper;
     private final double similarityThreshold;
     private final int topK;
 
     public RagService(EmbeddingService embeddingService, ChatModel chatModel,
                       KnowledgeItemMapper knowledgeItemMapper,
                       KnowledgeChunkMapper knowledgeChunkMapper,
+                      KnowledgeRelationMapper relationMapper,
                       @Value("${agent.rag.similarity-threshold:0.80}") double similarityThreshold,
                       @Value("${agent.rag.top-k:5}") int topK) {
         this.embeddingService = embeddingService;
         this.chatModel = chatModel;
         this.knowledgeItemMapper = knowledgeItemMapper;
         this.knowledgeChunkMapper = knowledgeChunkMapper;
+        this.relationMapper = relationMapper;
         this.similarityThreshold = similarityThreshold;
         this.topK = topK;
     }
@@ -110,7 +115,9 @@ public class RagService {
             // 按相似度降序排列
             matched.sort(Comparator.comparingDouble(RagChunk::similarity).reversed());
 
-            String answer = generateAnswer(query, matched);
+            // 1-hop 知识图谱扩展：命中条目的关联知识拼入生成上下文
+            List<String> relatedContext = loadRelatedContexts(itemMap);
+            String answer = generateAnswer(query, matched, relatedContext);
             List<String> sources = matched.stream().map(RagChunk::sourceUrl).distinct().toList();
             return Optional.of(new RagResult(answer, sources, matched.getFirst().similarity()));
 
@@ -121,6 +128,10 @@ public class RagService {
     }
 
     public String generateAnswer(String query, List<RagChunk> chunks) {
+        return generateAnswer(query, chunks, List.of());
+    }
+
+    public String generateAnswer(String query, List<RagChunk> chunks, List<String> relatedContext) {
         StringBuilder context = new StringBuilder();
         for (RagChunk c : chunks) {
             context.append("<source>\n");
@@ -129,10 +140,17 @@ public class RagService {
             context.append("内容: ").append(c.content()).append("\n");
             context.append("</source>\n\n");
         }
+        if (relatedContext != null && !relatedContext.isEmpty()) {
+            context.append("<related>\n");
+            for (String r : relatedContext) {
+                context.append(r).append("\n");
+            }
+            context.append("</related>\n\n");
+        }
 
         String prompt = """
                 你是一个技术问答助手。请基于以下参考材料回答用户问题。
-                如果参考材料不足以回答问题，请如实说明。
+                如果参考材料不足以回答问题，请如实说明。若存在关联知识补充上下文（related 标签块），可作为额外参考。
 
                 用户问题：%s
 
@@ -151,6 +169,55 @@ public class RagService {
                     .map(c -> "- [" + c.title() + "](" + c.sourceUrl() + ")")
                     .reduce("", (a, b) -> a + "\n" + b);
         }
+    }
+
+    /**
+     * 1-hop 图扩展：查命中条目关联的关系，取另一端知识条目（标题+摘要截断）作为补充上下文。
+     */
+    private List<String> loadRelatedContexts(Map<Long, KnowledgeItem> hitItems) {
+        if (hitItems.isEmpty()) {
+            return List.of();
+        }
+        List<KnowledgeRelation> relations;
+        try {
+            QueryWrapper<KnowledgeRelation> wrapper = new QueryWrapper<>();
+            wrapper.in("subject_id", hitItems.keySet()).or().in("object_id", hitItems.keySet());
+            relations = relationMapper.selectList(wrapper);
+        } catch (Exception e) {
+            log.warn("关系查询失败，跳过 1-hop 增强", e);
+            return List.of();
+        }
+        if (relations.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> relatedIds = new HashSet<>();
+        for (KnowledgeRelation r : relations) {
+            if (r.getSubjectId() != null && !hitItems.containsKey(r.getSubjectId())) {
+                relatedIds.add(r.getSubjectId());
+            }
+            if (r.getObjectId() != null && !hitItems.containsKey(r.getObjectId())) {
+                relatedIds.add(r.getObjectId());
+            }
+        }
+        List<String> context = new ArrayList<>();
+        for (Long id : relatedIds) {
+            KnowledgeItem item = hitItems.get(id);
+            if (item == null) {
+                try {
+                    item = knowledgeItemMapper.selectById(id);
+                } catch (Exception e) {
+                    continue;
+                }
+            }
+            if (item == null || item.getTitle() == null) {
+                continue;
+            }
+            String content = item.getContent();
+            String summary = content == null || content.length() <= 150
+                    ? content : content.substring(0, 150) + "...";
+            context.add(item.getTitle() + " | " + (summary == null ? "" : summary));
+        }
+        return context;
     }
 
     /**

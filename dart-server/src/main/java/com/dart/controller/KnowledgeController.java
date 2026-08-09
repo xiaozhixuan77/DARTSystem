@@ -2,6 +2,7 @@ package com.dart.controller;
 
 import com.dart.dto.response.ApiResponse;
 import com.dart.dto.response.KnowledgeDetailVO;
+import com.dart.dto.response.KnowledgeGraphDTO;
 import com.dart.dto.response.KnowledgeItemVO;
 import com.dart.dto.response.PageResult;
 import com.dart.service.KnowledgeService;
@@ -35,5 +36,11 @@ public class KnowledgeController {
         Long userId = SecurityUtils.getCurrentUserId();
         knowledgeService.deleteKnowledge(userId, id);
         return ApiResponse.ok(null);
+    }
+
+    @GetMapping("/{id}/graph")
+    public ApiResponse<KnowledgeGraphDTO> graph(@PathVariable Long id) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        return ApiResponse.ok(knowledgeService.getGraphData(userId, id));
     }
 }
