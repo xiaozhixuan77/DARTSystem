@@ -16,6 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -51,6 +53,36 @@ class CuratorAgentTest {
         verify(curatorTools).deduplicate(anyList());
         verify(curatorTools).generateReport(anyString(), anyList(), any());
         verify(emitter, atLeastOnce()).send(any(SseEmitter.SseEventBuilder.class));
+    }
+
+    @Test
+    void curate_withIntent_passesStyleHintToGenerateReport() throws IOException {
+        ScoredResource r1 = makeResource("https://a.com", "Title A", 4.5);
+        CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
+                List.of("https://a.com"), Instant.now());
+        when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
+        when(curatorTools.generateReport(anyString(), anyList(), any(), eq("deep_dive"))).thenReturn(expectedReport);
+        when(curatorTools.validateReport(any())).thenReturn(true);
+
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter, "deep_dive");
+
+        assertThat(report).isNotNull();
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("deep_dive"));
+    }
+
+    @Test
+    void curate_withoutIntent_threeArgDelegatesWithNullStyle() throws IOException {
+        ScoredResource r1 = makeResource("https://a.com", "Title A", 4.5);
+        CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
+                List.of("https://a.com"), Instant.now());
+        when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
+        when(curatorTools.generateReport(anyString(), anyList(), any(), isNull())).thenReturn(expectedReport);
+        when(curatorTools.validateReport(any())).thenReturn(true);
+
+        // 3 参入口 → 4 参委托（styleHint=null）
+        curatorAgent.curate("query", List.of(r1), emitter);
+
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), isNull());
     }
 
     @Test

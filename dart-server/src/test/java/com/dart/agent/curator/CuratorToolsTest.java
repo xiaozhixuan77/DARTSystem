@@ -176,6 +176,31 @@ class CuratorToolsTest {
     }
 
     @Test
+    void generateReport_withStyleHint_appendsStyleRequirementToSectionPrompt() {
+        stubThreeSections();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L), "deep_dive");
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(2)).call(captor.capture());
+        String promptText = captor.getAllValues().getFirst().getInstructions().getFirst().getText();
+        // deep_dive 意图 → 节 prompt 追加深入原理风格要求
+        assertThat(promptText).contains("深入原理与源码级分析");
+    }
+
+    @Test
+    void generateReport_withoutStyleHint_noStyleRequirementInPrompt() {
+        stubThreeSections();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(2)).call(captor.capture());
+        String promptText = captor.getAllValues().getFirst().getInstructions().getFirst().getText();
+        assertThat(promptText).doesNotContain("报告风格");
+    }
+
+    @Test
     void generateReport_callsCallTwiceAndStreamOnce() {
         stubThreeSections();
 
