@@ -73,13 +73,13 @@ class CuratorAgentTest {
         ScoredResource r1 = makeResource("https://a.com", "Title A", 4.5);
         CuratedReport invalidReport = new CuratedReport("query", "too short", List.of(), Instant.now());
         String rewritten = "# 重写报告\n\n核心内容 ".repeat(20);
-        CuratedReport rewrittenReport = new CuratedReport("query", rewritten,
-                List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
         when(curatorTools.generateReport(anyString(), anyList(), any())).thenReturn(invalidReport);
         when(curatorTools.validateReport(invalidReport)).thenReturn(false);
         when(curatorTools.regenerateReport(anyString(), anyList())).thenReturn(rewritten);
-        when(curatorTools.validateReport(rewrittenReport)).thenReturn(true);
+        // 语义匹配而非实例 equals：CuratorAgent 内部重写报告的 generatedAt 由 report 携带，
+        // 用 record 实例匹配依赖两个 Instant.now() 相等（Windows 时钟粒度侥幸通过，其他平台随机失败）
+        when(curatorTools.validateReport(argThat(r -> r.markdown().contains("重写报告")))).thenReturn(true);
 
         CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter);
 

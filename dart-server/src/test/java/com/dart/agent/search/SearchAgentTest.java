@@ -171,6 +171,33 @@ class SearchAgentTest {
     }
 
     @Test
+    void execute_multipleQueries_capsFetchedUrlsToAvoidExpansion() {
+        // 3 组词 × 8 个唯一 URL = 24 个合并结果，抓取必须截断在上限内，防止网络压力 3 倍
+        int[] call = {0};
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            int base = call[0]++ * 100;
+            return IntStream.range(0, 8)
+                    .mapToObj(i -> new SearchResult("https://u" + (base + i) + ".com", "T", "s"))
+                    .toList();
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        searchAgent.execute(List.of("q1", "q2", "q3"), 8, emitter);
+
+        // 24 个唯一 URL 只能抓取前 12 个；未抓取的后 12 个靠搜索摘要兜底参与评分
+        verify(searchTools).fetchPages(argThat(urls -> urls.size() == 12));
+    }
+
+    @Test
     void execute_sendsStatusEvents() throws IOException {
         when(searchTools.searchWeb(anyString(), anyInt()))
                 .thenReturn(List.of(new SearchResult("https://site.com", "Title", "Snippet")));
