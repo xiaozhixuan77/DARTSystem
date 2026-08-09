@@ -230,11 +230,13 @@ public class CuratorTools {
      */
     public String regenerateReport(String query, List<ScoredResource> resources) {
         String resourcesText = buildResourcesText(resources);
+        // 与 preProcessQuery 一致：XML 包裹 + < > 转义，防止用户输入注入 prompt 指令
+        String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
         String prompt = """
                 你是一个技术教育专家。以下搜索结果素材质量不足，无法生成完整分节报告。
                 请基于这些素材，输出一份 800-1200 字的精炼学习报告，严格按 markdown 格式：
 
-                # %s 精炼报告
+                # <user_query>%s</user_query> 精炼报告
 
                 ## 核心概念
                 3-5 个关键概念要点（每点 1-2 句）
@@ -249,9 +251,11 @@ public class CuratorTools {
 
                 素材：
                 %s
-                """.formatted(query, resourcesText);
+                """.formatted(sanitized, resourcesText);
         try {
-            String response = chatModel.call(new Prompt(new UserMessage(prompt)))
+            // 上限 4096：800-1200 字中文约 1500-2000 token，留余量防超长输出失控
+            ChatOptions options = ChatOptions.builder().maxTokens(4096).build();
+            String response = chatModel.call(new Prompt(new UserMessage(prompt), options))
                     .getResults().getFirst().getOutput().getText();
             String cleaned = response == null ? "" : response.trim();
             return cleaned.isBlank() ? null : cleaned;
