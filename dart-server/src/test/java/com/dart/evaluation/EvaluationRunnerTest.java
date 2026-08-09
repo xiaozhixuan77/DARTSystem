@@ -47,7 +47,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 数据隔离：专用评估用户 + 每次启动重建 dart_test 表 + 跑前清缓存与旧评估数据。
  */
 @Tag("evaluation")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+// RANDOM_PORT：保留 servlet web 类型以激活 springdoc/Knife4j（NONE 时 Knife4j 激活但 SpringDocConfigProperties 缺失）
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("eval")
 @EnabledIfEnvironmentVariable(named = "RUN_EVALUATION", matches = "true")
 class EvaluationRunnerTest {
