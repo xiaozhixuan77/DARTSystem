@@ -16,7 +16,7 @@ export interface KnowledgeItemDetail {
   title: string
   content: string
   sourceUrl: string
-  tags: string[]
+  tags: string
   scoreT: number
   scoreA: number
   scoreD: number

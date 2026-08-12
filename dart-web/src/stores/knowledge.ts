@@ -47,7 +47,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     }
     if (selectedItem.value?.id === id) {
       selectedItem.value.title = data.title
-      selectedItem.value.tags = (data.tags || '').split(',').map((t) => t.trim()).filter(Boolean)
+      selectedItem.value.tags = data.tags || ''
       selectedItem.value.notes = data.notes
     }
   }

@@ -35,7 +35,7 @@ watch(() => props.item, (val) => {
   if (val) {
     title.value = val.title
     notes.value = val.notes || ''
-    tagInput.value = (val.tags || []).join(', ')
+    tagInput.value = val.tags || ''
     activeTab.value = 'content'
     disposeChart()
   }
