@@ -2,6 +2,7 @@ package com.dart.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.dart.dto.request.KnowledgeUpdateRequest;
 import com.dart.dto.response.KnowledgeGraphDTO;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
@@ -12,6 +13,7 @@ import com.dart.mapper.KnowledgeRelationMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -22,6 +24,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -74,10 +77,108 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        var result = knowledgeService.listUserKnowledge(1L, 1, 10);
+        var result = knowledgeService.listUserKnowledge(1L, 1, 10, null);
         assertThat(result.getRecords()).hasSize(1);
         assertThat(result.getRecords().get(0).getTitle()).isEqualTo("Spring Guide");
         assertThat(result.getTotal()).isEqualTo(0L);
+    }
+
+    @Test
+    void listUserKnowledge_withTag_appliesFindInSet() {
+        Page<KnowledgeItem> mockPage = new Page<>(1, 10);
+        mockPage.setRecords(List.of(createItem(1L, 1L, "Spring Guide")));
+        when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
+                .thenReturn(mockPage);
+
+        knowledgeService.listUserKnowledge(1L, 1, 10, "Go");
+
+        ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
+        assertThat(captor.getValue().getCustomSqlSegment()).contains("FIND_IN_SET");
+    }
+
+    @Test
+    void listUserKnowledge_withoutTag_noFindInSet() {
+        Page<KnowledgeItem> mockPage = new Page<>(1, 10);
+        mockPage.setRecords(List.of(createItem(1L, 1L, "Spring Guide")));
+        when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
+                .thenReturn(mockPage);
+
+        knowledgeService.listUserKnowledge(1L, 1, 10, null);
+
+        ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
+        assertThat(captor.getValue().getCustomSqlSegment()).doesNotContain("FIND_IN_SET");
+    }
+
+    @Test
+    void updateKnowledge_updatesFieldsWithNormalizedTags() {
+        KnowledgeItem item = createItem(1L, 1L, "Spring Guide");
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
+
+        knowledgeService.updateKnowledge(1L, 1L,
+                new KnowledgeUpdateRequest("新标题", "Go, 并发, , Go,", "笔记"));
+
+        ArgumentCaptor<KnowledgeItem> captor = ArgumentCaptor.forClass(KnowledgeItem.class);
+        verify(knowledgeItemMapper).updateById(captor.capture());
+        assertThat(captor.getValue().getTitle()).isEqualTo("新标题");
+        assertThat(captor.getValue().getTags()).isEqualTo("Go,并发");
+        assertThat(captor.getValue().getNotes()).isEqualTo("笔记");
+    }
+
+    @Test
+    void updateKnowledge_notFound_throwsException() {
+        when(knowledgeItemMapper.selectById(99L)).thenReturn(null);
+        assertThatThrownBy(() -> knowledgeService.updateKnowledge(1L, 99L,
+                new KnowledgeUpdateRequest("新标题", "Go", "n")))
+                .hasMessageContaining("不存在");
+    }
+
+    @Test
+    void updateKnowledge_notOwned_throwsException() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 2L, "Others"));
+        assertThatThrownBy(() -> knowledgeService.updateKnowledge(1L, 1L,
+                new KnowledgeUpdateRequest("新标题", "Go", "n")))
+                .hasMessageContaining("无权访问");
+    }
+
+    @Test
+    void updateKnowledge_blankTitle_throwsException() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "x"));
+        assertThatThrownBy(() -> knowledgeService.updateKnowledge(1L, 1L,
+                new KnowledgeUpdateRequest("   ", "Go", "n")))
+                .hasMessageContaining("请求参数错误");
+    }
+
+    @Test
+    void updateKnowledge_titleTooLong_throwsException() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "x"));
+        String longTitle = "a".repeat(501);
+        assertThatThrownBy(() -> knowledgeService.updateKnowledge(1L, 1L,
+                new KnowledgeUpdateRequest(longTitle, "Go", "n")))
+                .hasMessageContaining("请求参数错误");
+    }
+
+    @Test
+    void aggregateTags_returnsDistinctSorted() {
+        KnowledgeItem a = createItem(1L, 1L, "a");
+        a.setTags("Go,并发");
+        KnowledgeItem b = createItem(2L, 1L, "b");
+        b.setTags("并发");
+        KnowledgeItem c = createItem(3L, 1L, "c");
+        c.setTags("Vue");
+        KnowledgeItem d = createItem(4L, 1L, "d");
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(a, b, c, d));
+
+        List<String> tags = knowledgeService.aggregateTags(1L);
+        assertThat(tags).containsExactly("Go", "Vue", "并发");
+    }
+
+    @Test
+    void aggregateTags_noTags_returnsEmpty() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        assertThat(knowledgeService.aggregateTags(1L)).isEmpty();
     }
 
     @Test

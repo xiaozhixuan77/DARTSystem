@@ -1,10 +1,13 @@
 package com.dart.controller;
 
+import com.dart.dto.request.KnowledgeUpdateRequest;
 import com.dart.dto.response.KnowledgeDetailVO;
 import com.dart.dto.response.KnowledgeGraphDTO;
 import com.dart.dto.response.KnowledgeItemVO;
 import com.dart.dto.response.PageResult;
 import com.dart.entity.User;
+import com.dart.exception.BusinessException;
+import com.dart.exception.ErrorCode;
 import com.dart.exception.GlobalExceptionHandler;
 import com.dart.security.UserPrincipal;
 import com.dart.service.KnowledgeService;
@@ -25,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -74,13 +78,56 @@ class KnowledgeControllerTest {
 
     @Test
     void listKnowledge_returnsList() throws Exception {
-        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt()))
+        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), any()))
                 .thenReturn(new PageResult<>(List.of(createItem(1L, "Spring Guide")), 1));
 
         mockMvc.perform(get("/api/knowledge")
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.records[0].title").value("Spring Guide"));
+    }
+
+    @Test
+    void listKnowledge_withTag_forwardsTag() throws Exception {
+        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), eq("Go")))
+                .thenReturn(new PageResult<>(List.of(createItem(1L, "Go Guide")), 1));
+
+        mockMvc.perform(get("/api/knowledge").param("tag", "Go")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[0].title").value("Go Guide"));
+    }
+
+    @Test
+    void updateKnowledge_success() throws Exception {
+        mockMvc.perform(put("/api/knowledge/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"新标题\",\"tags\":\"Go,并发\",\"notes\":\"笔记\"}"))
+                .andExpect(status().isOk());
+
+        verify(knowledgeService).updateKnowledge(eq(1L), eq(1L), any(KnowledgeUpdateRequest.class));
+    }
+
+    @Test
+    void updateKnowledge_serviceThrowsBadRequest() throws Exception {
+        when(knowledgeService.updateKnowledge(eq(1L), eq(1L), any(KnowledgeUpdateRequest.class)))
+                .thenThrow(new BusinessException(ErrorCode.BAD_REQUEST));
+
+        mockMvc.perform(put("/api/knowledge/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"\",\"tags\":\"\",\"notes\":\"\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    void getTags_returnsAggregatedTags() throws Exception {
+        when(knowledgeService.aggregateTags(1L)).thenReturn(List.of("Go", "Vue"));
+
+        mockMvc.perform(get("/api/knowledge/tags")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0]").value("Go"));
     }
 
     @Test
