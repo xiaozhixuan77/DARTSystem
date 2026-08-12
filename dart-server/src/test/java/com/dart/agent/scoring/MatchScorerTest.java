@@ -79,8 +79,35 @@ class MatchScorerTest {
 
     @Test
     void evaluate_shortKeywordsSkipped() {
-        // "a" 和 "in" 太短在命中率计算中被跳过，但在标题匹配仍参与 → 总命中率 1.0 + 标题匹配 → 5
+        // 英文 token 提取（≥2 字符）："a" 被过滤，[in, python] 有效；
+        // "language" 含 "in" 误命中 + "python" 命中 → 0.5 命中率 → 3
         int score = scorer.evaluate("a in Python", "Learning Python programming language");
+        assertThat(score).isEqualTo(3);
+    }
+
+    // === 中文分词（无标点长句不再整句匹配）===
+
+    @Test
+    void evaluate_chineseLongQuery_extractsKeywords() {
+        // 旧实现：整句 "spring框架中ioc容器和aop的概念与作用" 一个关键词 → M=1
+        // 新实现：英文 token [spring,ioc,aop] + 中文切分 [框架,容器,概念,作用] → 命中率高
+        int score = scorer.evaluate("Spring框架中IoC容器和AOP的概念与作用",
+                "Spring 框架的核心是 IoC 容器，AOP 用于处理横切关注点，本文介绍框架的作用。");
+        assertThat(score).isGreaterThanOrEqualTo(4);
+    }
+
+    @Test
+    void evaluate_chineseQuery_stopWordsStripped() {
+        int score = scorer.evaluate("什么是Spring框架",
+                "Spring 框架是一个 Java 企业级应用框架。");
         assertThat(score).isEqualTo(5);
+    }
+
+    @Test
+    void evaluate_chineseLongQuery_noKeywordHit_returns1() {
+        // 中文长句查询对完全无关内容（腰椎问答）仍返回 1 → 组合过滤条件可用
+        int score = scorer.evaluate("Spring框架中IoC容器和AOP的概念与作用",
+                "腰椎间盘突出患者日常护理注意事项，疼痛缓解方法与康复训练建议。");
+        assertThat(score).isEqualTo(1);
     }
 }
