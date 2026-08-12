@@ -17,6 +17,7 @@ import com.dart.mapper.SearchTraceMapper;
 import com.dart.util.RedisKeyConstants;
 import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
+import com.dart.util.VectorUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -81,6 +82,10 @@ public class ChatService {
             IntentKeys.DEEP_DIVE, "深入原理",
             IntentKeys.COMPARISON, "对比分析",
             IntentKeys.TROUBLESHOOTING, "排错诊断");
+
+    /** 变体词主题校验阈值：与主词 embedding 余弦低于此值视为跑题，搜索前丢弃 */
+    @Value("${agent.search.variant-similarity-threshold:0.5}")
+    private double variantSimilarityThreshold = 0.5;
 
     @Value("${agent.cache.ttl-hours:24}")
     private long cacheTtlHours;
@@ -168,10 +173,11 @@ public class ChatService {
         try {
             Future<Optional<RagService.RagResult>> ragFuture = parallelExecutor.submit(() ->
                     ragService.retrieve(effectiveQuery, userId));
-            // 主词 + 变体词并行网络搜索扩大召回（RAG 仅用主词，保持检索专注）
+            // 主词 + 变体词并行网络搜索扩大召回（RAG 仅用主词，保持检索专注）；
+            // 变体词先经 embedding 主题校验，跑题词（如 LLM 联想跑偏）在搜索前丢弃
             List<String> searchQueries = new ArrayList<>();
             searchQueries.add(effectiveQuery);
-            searchQueries.addAll(pre.variants());
+            searchQueries.addAll(filterVariants(effectiveQuery, pre.variants()));
             Future<List<ScoredResource>> searchFuture = parallelExecutor.submit(() ->
                     searchAgent.execute(searchQueries, targetResultsFor(pre.intent()), emitter));
 
@@ -534,6 +540,41 @@ public class ChatService {
     }
 
     // ─── 前置判断与提示词优化（合并为一次调用）────────────────────────
+
+    /**
+     * 变体词主题校验：与主词 embedding 余弦相似度低于阈值视为跑题，搜索前丢弃。
+     * fail-open：embedding 失败/返回 null 时保留全部变体词（校验是增强，失败不砍搜索）。
+     */
+    private List<String> filterVariants(String mainQuery, List<String> variants) {
+        if (variants == null || variants.isEmpty()) {
+            return List.of();
+        }
+        float[] mainVec;
+        try {
+            mainVec = embeddingService.embed(mainQuery);
+        } catch (Exception e) {
+            log.warn("主词向量化失败，跳过变体词校验", e);
+            return variants;
+        }
+        if (mainVec == null) {
+            return variants;
+        }
+        List<String> kept = new ArrayList<>();
+        for (String variant : variants) {
+            try {
+                float[] vec = embeddingService.embed(variant);
+                if (vec == null || VectorUtils.cosineSimilarity(mainVec, vec) >= variantSimilarityThreshold) {
+                    kept.add(variant);
+                } else {
+                    log.debug("变体词与主词主题不一致，丢弃: variant={}", variant);
+                }
+            } catch (Exception e) {
+                log.warn("变体词向量化失败，保留: variant={}", variant);
+                kept.add(variant);
+            }
+        }
+        return kept;
+    }
 
     public record QueryPreProcess(boolean isTech, String optimized, List<String> variants, String intent) {}
 

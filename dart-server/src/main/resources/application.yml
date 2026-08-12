@@ -109,6 +109,8 @@ agent:
     max-results: 6
     fetch-timeout-ms: 6000
     score-threshold: 1.5
+    # 变体词主题校验阈值：与主词 embedding 余弦低于此值视为跑题，搜索前丢弃
+    variant-similarity-threshold: 0.5
   scoring:
     weights:
       timeliness: 0.15
