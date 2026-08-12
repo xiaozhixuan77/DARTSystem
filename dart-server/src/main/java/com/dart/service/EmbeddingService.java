@@ -57,16 +57,19 @@ public class EmbeddingService {
 
     /**
      * 对文本进行分块、向量化，写入 MySQL + Redis。
+     *
+     * @param tags 逗号分隔的标签（沉淀时为受控类别标签，可空）
      */
     @Transactional
     public List<Long> embedAndPersist(Long userId, String title, String content,
-                                       String sourceUrl, ScoredResource scores) {
+                                       String sourceUrl, ScoredResource scores, String tags) {
         // Step 1: 保存 KnowledgeItem
         KnowledgeItem item = new KnowledgeItem();
         item.setUserId(userId);
         item.setTitle(title);
         item.setContent(content);
         item.setSourceUrl(sourceUrl);
+        item.setTags(tags);
         item.setSourceUrlHash(sha256(sourceUrl));
         item.setScoreT(scores.getScoreT());
         item.setScoreA(scores.getScoreA());

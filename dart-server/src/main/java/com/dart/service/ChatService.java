@@ -66,6 +66,16 @@ public class ChatService {
     private final SearchTraceMapper searchTraceMapper;
     private final RelationExtractionService relationExtractionService;
 
+    /**
+     * 查询意图 → 沉淀条目标签（受控集合：每条目恰好 1 个类别标签；未定义意图降级操作指南）。
+     */
+    private static final Map<String, String> INTENT_TAG = Map.of(
+            "quick_fact", "速查",
+            "how_to", "操作指南",
+            "deep_dive", "深入原理",
+            "comparison", "对比分析",
+            "troubleshooting", "排错诊断");
+
     @Value("${agent.cache.ttl-hours:24}")
     private long cacheTtlHours;
 
@@ -226,7 +236,7 @@ public class ChatService {
             final CuratedReport finalReport = report;
             final Long finalUserId = userId;
             Runnable followUpAndCache = () -> generateFollowUpAndUpdate(
-                    msg, finalReport, query, emitter, finalUserId);
+                    msg, finalReport, query, emitter, finalUserId, pre.intent());
             if (TransactionSynchronizationManager.isSynchronizationActive()) {
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
@@ -246,7 +256,8 @@ public class ChatService {
      * 整体失败仅告警，不影响报告主流程。
      */
     private void generateFollowUpAndUpdate(Message assistantMessage, CuratedReport report,
-                                           String query, SseEmitter emitter, Long userId) {
+                                           String query, SseEmitter emitter, Long userId,
+                                           String intent) {
         String markdown = report.markdown();
         try {
             String followUp = generateFollowUp(query, markdown);
@@ -263,15 +274,17 @@ public class ChatService {
             log.warn("追问生成失败", e);
         } finally {
             writeCache(query, markdown, report.sources());
-            sedimentReport(userId, query, markdown, report.sources());
+            sedimentReport(userId, query, markdown, report.sources(), intent);
         }
     }
 
     /**
      * 报告自动沉淀（预灌 RAG）：无占位节且未达数量上限时，将报告写入用户知识库，
      * 后续相似查询直接 RAG 命中。Embedding 分块向量化较慢（约 10-30s），异步执行不阻塞主流程。
+     * 沉淀条目标签取意图对应的受控类别标签（每条目恰好 1 个，防止标签爆炸）。
      */
-    private void sedimentReport(Long userId, String query, String markdown, List<String> sources) {
+    private void sedimentReport(Long userId, String query, String markdown, List<String> sources,
+                                String intent) {
         if (!sedimentEnabled || markdown == null || markdown.isBlank()) {
             return;
         }
@@ -289,10 +302,11 @@ public class ChatService {
             String sourceUrl = sources.isEmpty() ? "" : sources.getFirst();
             ScoredResource defaultScores =
                     new ScoredResource(sourceUrl, query, markdown, 4, 4, 4, 4, 4.0);
+            String tag = INTENT_TAG.getOrDefault(intent, "操作指南");
             Thread.startVirtualThread(() -> {
                 try {
                     List<Long> itemIds =
-                            embeddingService.embedAndPersist(userId, query, markdown, sourceUrl, defaultScores);
+                            embeddingService.embedAndPersist(userId, query, markdown, sourceUrl, defaultScores, tag);
                     // 沉淀成功 → 异步抽取知识关系（单次 LLM 调用，失败仅告警）
                     if (itemIds != null && !itemIds.isEmpty()) {
                         relationExtractionService.extractAndPersist(userId, itemIds.getFirst(), markdown);

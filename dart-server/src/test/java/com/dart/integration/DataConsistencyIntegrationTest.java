@@ -81,7 +81,7 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
                 "Test content for embedding.", 4, 5, 3, 4, 3.5);
 
         List<Long> ids = embeddingService.embedAndPersist(testUserId, "Test Title",
-                "Test content for embedding test.", "http://example.com/doc", scores);
+                "Test content for embedding test.", "http://example.com/doc", scores, "操作指南");
 
         assertThat(ids).isNotEmpty();
         Long itemId = ids.get(0);
@@ -107,7 +107,7 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
                 "Content to be deleted.", 3, 3, 3, 3, 3.0);
 
         List<Long> ids = embeddingService.embedAndPersist(testUserId, "To Delete",
-                "Content to be deleted.", "http://example.com/del", scores);
+                "Content to be deleted.", "http://example.com/del", scores, "操作指南");
         Long itemId = ids.get(0);
 
         knowledgeService.deleteKnowledge(testUserId, itemId);
@@ -128,7 +128,7 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
                 "RAG test content.", 5, 5, 5, 5, 5.0);
 
         List<Long> ids = embeddingService.embedAndPersist(testUserId, "RAG Test",
-                "RAG test content.", "http://example.com/rag", scores);
+                "RAG test content.", "http://example.com/rag", scores, "操作指南");
         Long itemId = ids.get(0);
 
         KnowledgeItem item = knowledgeItemMapper.selectById(itemId);
@@ -148,7 +148,7 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
         String sourceUrl = "http://example.com/unique-" + System.nanoTime();
         ScoredResource scores = new ScoredResource(sourceUrl, "Unique", "Content.", 4, 4, 4, 4, 4.0);
 
-        embeddingService.embedAndPersist(testUserId, "Unique", "Content.", sourceUrl, scores);
+        embeddingService.embedAndPersist(testUserId, "Unique", "Content.", sourceUrl, scores, "操作指南");
 
         boolean exists = knowledgeService.existsBySourceUrl(sha256(sourceUrl));
         assertThat(exists).isTrue();
@@ -169,7 +169,7 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
                 "Content for retry exhaustion test.", 4, 4, 4, 4, 4.0);
 
         List<Long> ids = embeddingService.embedAndPersist(testUserId, "Retry Title",
-                "Content for retry exhaustion test.", "http://example.com/retry", scores);
+                "Content for retry exhaustion test.", "http://example.com/retry", scores, "操作指南");
 
         // MySQL 写入正常（事务已提交）
         assertThat(ids).isNotEmpty();
@@ -197,7 +197,7 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
                 "Content for retry recovery test.", 4, 4, 4, 4, 4.0);
 
         List<Long> ids = embeddingService.embedAndPersist(testUserId, "Recover Title",
-                "Content for retry recovery test.", "http://example.com/recover", scores);
+                "Content for retry recovery test.", "http://example.com/recover", scores, "操作指南");
 
         assertThat(ids).isNotEmpty();
 
@@ -221,7 +221,7 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
 
         assertThatThrownBy(() ->
                 embeddingService.embedAndPersist(testUserId, "Rollback Title",
-                        "Content for transaction rollback test.", "http://example.com/rollback", scores))
+                        "Content for transaction rollback test.", "http://example.com/rollback", scores, "操作指南"))
                 .isInstanceOf(RuntimeException.class);
 
         // MySQL 知识条目未创建
@@ -246,7 +246,8 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
 
         embeddingService.embedAndPersist(testUserId, "Missing Title",
                 "Content for missing vector detection.", "http://example.com/missing",
-                new ScoredResource("http://example.com/missing", "Missing", "Content.", 4, 4, 4, 4, 4.0));
+                new ScoredResource("http://example.com/missing", "Missing", "Content.", 4, 4, 4, 4, 4.0),
+                "操作指南");
 
         // 重置 spy 以恢复真实 Redis（detectMissingVectors 需要）
         reset(redisTemplate);

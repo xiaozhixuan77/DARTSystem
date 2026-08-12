@@ -103,7 +103,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                 "RAG content for matching test with sufficient length.", 4, 4, 4, 4, 4.0);
         embeddingService.embedAndPersist(userId, "RAG Entry",
                 "RAG content for matching test with sufficient length.",
-                "http://example.com/rag", scores);
+                "http://example.com/rag", scores, "操作指南");
 
         // 重置后仍返回相同向量 → 余弦相似度 1.0 ≥ 0.80
         Mockito.reset(embeddingModel);
