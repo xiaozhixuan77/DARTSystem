@@ -779,6 +779,60 @@ class ChatServiceTest {
         assertThat(result.curatedReport().markdown()).contains("不可用");
     }
 
+    // === 变体词主题校验（embedding 相似度）===
+
+    private void stubFullFlowForVariantTest(String variantsJson) {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(new AssistantMessage(variantsJson))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenReturn(chatResponse)
+                .thenThrow(new RuntimeException("timeout"));
+    }
+
+    @Test
+    void executeSearchAndCurate_filtersIrrelevantVariants() {
+        stubFullFlowForVariantTest(
+                "{\"isTech\":true,\"optimized\":\"Spring 框架\",\"variants\":[\"Spring Boot 教程\",\"腰椎间盘突出治疗\"],\"intent\":\"how_to\"}");
+        // 主词与变体词 A 同向量（余弦 1.0 → 保留），变体词 B 反向（余弦 -1.0 → 丢弃）
+        when(embeddingService.embed(anyString())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            float[] vec = new float[1024];
+            java.util.Arrays.fill(vec, q.contains("腰椎") ? -0.5f : 0.5f);
+            return vec;
+        });
+
+        chatService.executeSearchAndCurate("Spring", 1L, 100L, emitter);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
+        verify(searchAgent).execute(captor.capture(), anyInt(), any());
+        List<String> queries = captor.getValue();
+        assertThat(queries).contains("Spring 框架", "Spring Boot 教程");
+        assertThat(queries).doesNotContain("腰椎间盘突出治疗");
+    }
+
+    @Test
+    void executeSearchAndCurate_embeddingFailure_keepsAllVariants() {
+        // fail-open：embed 异常时变体词全保留，搜索不降级
+        stubFullFlowForVariantTest(
+                "{\"isTech\":true,\"optimized\":\"Spring 框架\",\"variants\":[\"Spring Boot 教程\",\"腰椎间盘突出治疗\"],\"intent\":\"how_to\"}");
+        when(embeddingService.embed(anyString())).thenThrow(new RuntimeException("embed api error"));
+
+        chatService.executeSearchAndCurate("Spring", 1L, 100L, emitter);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
+        verify(searchAgent).execute(captor.capture(), anyInt(), any());
+        List<String> queries = captor.getValue();
+        assertThat(queries).contains("Spring 框架", "Spring Boot 教程", "腰椎间盘突出治疗");
+    }
+
     // === 沉淀自动打标（intent → 受控类别标签）===
 
     @ParameterizedTest
