@@ -96,7 +96,9 @@ public class SearchAgent {
     }
 
     /**
-     * 并行执行多组检索词的搜索，合并结果保持顺序（查询组内按返回顺序）。
+     * 并行执行多组检索词的搜索。主词（queries.getFirst()）结果优先：
+     * 达标（≥maxResults）时变体词结果不混入——少而精；未达标时变体词按序补足。
+     * 变体词结果去重并排除与主词重复的 URL。
      */
     private List<SearchResult> searchQueriesInParallel(List<String> queries, int maxResults) {
         if (queries == null || queries.isEmpty()) {
@@ -107,20 +109,55 @@ public class SearchAgent {
             List<Future<List<SearchResult>>> futures = queries.stream()
                     .map(q -> executor.submit(() -> searchTools.searchWeb(q, maxResults)))
                     .toList();
-            List<SearchResult> merged = new ArrayList<>();
-            for (Future<List<SearchResult>> future : futures) {
+            List<SearchResult> primary = new ArrayList<>();
+            List<SearchResult> variants = new ArrayList<>();
+            for (int i = 0; i < futures.size(); i++) {
+                List<SearchResult> results;
                 try {
-                    List<SearchResult> results = future.get(15, TimeUnit.SECONDS);
-                    if (results != null) {
-                        merged.addAll(results);
-                    }
+                    results = futures.get(i).get(15, TimeUnit.SECONDS);
                 } catch (Exception e) {
-                    log.warn("单组检索词搜索失败（非阻断）", e);
+                    log.warn("单组检索词搜索失败（非阻断）: query={}", queries.get(i), e);
+                    continue;
+                }
+                if (results == null) {
+                    continue;
+                }
+                if (i == 0) {
+                    primary.addAll(results);
+                } else {
+                    variants.addAll(results);
+                }
+            }
+            List<SearchResult> primaryUnique = uniqueByUrl(primary);
+            if (primaryUnique.isEmpty()) {
+                return List.of();
+            }
+            if (primaryUnique.size() >= maxResults) {
+                return primaryUnique;
+            }
+            // 主词未达标：变体词按序补足（URL 去重 + 排除与主词重复）
+            List<SearchResult> merged = new ArrayList<>(primaryUnique);
+            for (SearchResult vr : variants) {
+                if (merged.stream().noneMatch(r -> r.url().equals(vr.url()))) {
+                    merged.add(vr);
                 }
             }
             return merged;
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    private static List<SearchResult> uniqueByUrl(List<SearchResult> results) {
+        List<SearchResult> unique = new ArrayList<>();
+        for (SearchResult r : results) {
+            if (r.url() == null || r.url().isBlank()) {
+                continue;
+            }
+            if (unique.stream().noneMatch(u -> u.url().equals(r.url()))) {
+                unique.add(r);
+            }
+        }
+        return unique;
     }
 }
