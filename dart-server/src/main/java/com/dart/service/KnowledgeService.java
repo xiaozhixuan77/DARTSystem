@@ -2,6 +2,7 @@ package com.dart.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.dart.dto.request.KnowledgeUpdateRequest;
 import com.dart.dto.response.KnowledgeDetailVO;
 import com.dart.dto.response.KnowledgeGraphDTO;
 import com.dart.dto.response.KnowledgeItemVO;
@@ -35,12 +36,15 @@ public class KnowledgeService {
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final KnowledgeRelationMapper relationMapper;
 
-    public PageResult<KnowledgeItemVO> listUserKnowledge(Long userId, int page, int size) {
+    public PageResult<KnowledgeItemVO> listUserKnowledge(Long userId, int page, int size, String tag) {
         Page<KnowledgeItem> p = new Page<>(page, size);
         QueryWrapper<KnowledgeItem> query = new QueryWrapper<>();
         query.eq("user_id", userId)
                 .eq("is_deleted", 0)
                 .orderByDesc("created_at");
+        if (tag != null && !tag.isBlank()) {
+            query.apply("FIND_IN_SET({0}, tags)", tag.trim());
+        }
         p = knowledgeItemMapper.selectPage(p, query);
         List<KnowledgeItemVO> records = p.getRecords().stream()
                 .map(this::toVO)
@@ -73,6 +77,64 @@ public class KnowledgeService {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
         knowledgeItemMapper.deleteById(item.getId());
+    }
+
+    public void updateKnowledge(Long userId, Long knowledgeId, KnowledgeUpdateRequest req) {
+        KnowledgeItem item = knowledgeItemMapper.selectById(knowledgeId);
+        if (item == null) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_NOT_FOUND);
+        }
+        if (!item.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        String title = req.title() == null ? "" : req.title().trim();
+        if (title.isEmpty() || title.length() > 500) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST);
+        }
+        String tags = normalizeTags(req.tags());
+        if (tags.length() > 500) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST);
+        }
+        item.setTitle(title);
+        item.setTags(tags);
+        item.setNotes(req.notes());
+        item.setUpdatedAt(LocalDateTime.now());
+        knowledgeItemMapper.updateById(item);
+    }
+
+    /**
+     * 标签规范化：逗号拆分 → trim → 去空去重 → 无空格逗号连接（配合 FIND_IN_SET 精确匹配）。
+     */
+    private static String normalizeTags(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        List<String> tags = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            String t = part.trim();
+            if (!t.isEmpty() && !tags.contains(t)) {
+                tags.add(t);
+            }
+        }
+        return String.join(",", tags);
+    }
+
+    public List<String> aggregateTags(Long userId) {
+        QueryWrapper<KnowledgeItem> query = new QueryWrapper<>();
+        query.eq("user_id", userId).eq("is_deleted", 0);
+        Set<String> tags = new LinkedHashSet<>();
+        for (KnowledgeItem item : knowledgeItemMapper.selectList(query)) {
+            if (item.getTags() == null || item.getTags().isBlank()) {
+                continue;
+            }
+            for (String part : item.getTags().split(",")) {
+                String t = part.trim();
+                if (!t.isEmpty()) {
+                    tags.add(t);
+                }
+            }
+        }
+        return new ArrayList<>(tags).stream().sorted().toList();
     }
 
     /**

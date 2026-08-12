@@ -1,5 +1,6 @@
 package com.dart.controller;
 
+import com.dart.dto.request.KnowledgeUpdateRequest;
 import com.dart.dto.response.ApiResponse;
 import com.dart.dto.response.KnowledgeDetailVO;
 import com.dart.dto.response.KnowledgeGraphDTO;
@@ -9,6 +10,8 @@ import com.dart.service.KnowledgeService;
 import com.dart.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/knowledge")
@@ -20,9 +23,24 @@ public class KnowledgeController {
     @GetMapping
     public ApiResponse<PageResult<KnowledgeItemVO>> list(
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String tag) {
         Long userId = SecurityUtils.getCurrentUserId();
-        return ApiResponse.ok(knowledgeService.listUserKnowledge(userId, page, size));
+        return ApiResponse.ok(knowledgeService.listUserKnowledge(userId, page, size, tag));
+    }
+
+    @GetMapping("/tags")
+    public ApiResponse<List<String>> tags() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        return ApiResponse.ok(knowledgeService.aggregateTags(userId));
+    }
+
+    @PutMapping("/{id}")
+    public ApiResponse<Void> update(@PathVariable Long id,
+                                    @RequestBody KnowledgeUpdateRequest request) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        knowledgeService.updateKnowledge(userId, id, request);
+        return ApiResponse.ok(null);
     }
 
     @GetMapping("/{id}")
