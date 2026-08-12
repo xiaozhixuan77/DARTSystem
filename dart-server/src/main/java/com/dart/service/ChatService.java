@@ -1,7 +1,9 @@
 package com.dart.service;
 
+import com.dart.agent.IntentKeys;
 import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.curator.CuratorAgent;
+import com.dart.agent.curator.CuratorTools;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -67,15 +69,18 @@ public class ChatService {
     private final RelationExtractionService relationExtractionService;
     private final KnowledgeService knowledgeService;
 
+    /** 未识别意图的默认沉淀标签（与 how_to 标签一致） */
+    private static final String DEFAULT_SEDIMENT_TAG = "操作指南";
+
     /**
-     * 查询意图 → 沉淀条目标签（受控集合：每条目恰好 1 个类别标签；未定义意图降级操作指南）。
+     * 查询意图 → 沉淀条目标签（受控集合：每条目恰好 1 个类别标签）。
      */
     private static final Map<String, String> INTENT_TAG = Map.of(
-            "quick_fact", "速查",
-            "how_to", "操作指南",
-            "deep_dive", "深入原理",
-            "comparison", "对比分析",
-            "troubleshooting", "排错诊断");
+            IntentKeys.QUICK_FACT, "速查",
+            IntentKeys.HOW_TO, DEFAULT_SEDIMENT_TAG,
+            IntentKeys.DEEP_DIVE, "深入原理",
+            IntentKeys.COMPARISON, "对比分析",
+            IntentKeys.TROUBLESHOOTING, "排错诊断");
 
     @Value("${agent.cache.ttl-hours:24}")
     private long cacheTtlHours;
@@ -291,7 +296,7 @@ public class ChatService {
         if (!sedimentEnabled || markdown == null || markdown.isBlank()) {
             return;
         }
-        if (markdown.contains("本节内容生成失败")) {
+        if (markdown.contains(CuratorTools.SECTION_FAILED_MARKER)) {
             log.debug("报告含占位节，跳过沉淀: query={}", query);
             return;
         }
@@ -305,7 +310,7 @@ public class ChatService {
             String sourceUrl = sources.isEmpty() ? "" : sources.getFirst();
             ScoredResource defaultScores =
                     new ScoredResource(sourceUrl, query, markdown, 4, 4, 4, 4, 4.0);
-            String tag = INTENT_TAG.getOrDefault(intent, "操作指南");
+            String tag = INTENT_TAG.getOrDefault(intent, DEFAULT_SEDIMENT_TAG);
             Thread.startVirtualThread(() -> {
                 try {
                     List<Long> itemIds =
@@ -338,7 +343,7 @@ public class ChatService {
         if (markdown == null) {
             return null;
         }
-        if (markdown.contains("本节内容生成失败")) {
+        if (markdown.contains(CuratorTools.SECTION_FAILED_MARKER)) {
             return "section_failed";
         }
         if (markdown.contains("AI 报告生成暂时不可用")) {
@@ -612,8 +617,8 @@ public class ChatService {
      */
     private static int targetResultsFor(String intent) {
         return switch (intent == null ? "" : intent) {
-            case "quick_fact" -> 5;
-            case "deep_dive", "comparison" -> 12;
+            case IntentKeys.QUICK_FACT -> 5;
+            case IntentKeys.DEEP_DIVE, IntentKeys.COMPARISON -> 12;
             default -> 8;
         };
     }

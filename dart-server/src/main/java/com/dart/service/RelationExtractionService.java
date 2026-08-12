@@ -5,6 +5,7 @@ import com.dart.entity.KnowledgeItem;
 import com.dart.entity.KnowledgeRelation;
 import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.KnowledgeRelationMapper;
+import com.dart.util.TextUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -90,7 +91,7 @@ public class RelationExtractionService {
         Map<String, Long> titleIndex = loadTitleIndex(userId);
         for (ExtractedRelation relation : relations) {
             // object 与主题标题互相包含（大小写不敏感）→ 抽取对象就是主题自身，整条跳过
-            if (title != null && !title.isBlank() && containsIgnoreCase(title, relation.object())) {
+            if (title != null && !title.isBlank() && TextUtils.containsIgnoreCase(title, relation.object())) {
                 log.debug("抽取对象与主题标题匹配，跳过: itemId={}, object={}", itemId, relation.object());
                 continue;
             }
@@ -124,12 +125,6 @@ public class RelationExtractionService {
             }
         }
         return index;
-    }
-
-    private static boolean containsIgnoreCase(String a, String b) {
-        String la = a.toLowerCase();
-        String lb = b.toLowerCase();
-        return la.equals(lb) || (la.contains(lb) && lb.length() >= 2) || (lb.contains(la) && la.length() >= 2);
     }
 
     private Long matchObjectId(String object, Map<String, Long> titleIndex, Long subjectId) {

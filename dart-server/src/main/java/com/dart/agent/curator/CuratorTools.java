@@ -1,5 +1,6 @@
 package com.dart.agent.curator;
 
+import com.dart.agent.IntentKeys;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
@@ -30,16 +31,19 @@ public class CuratorTools {
     private static final int MAX_CONTENT_PER_RESOURCE = 1500;
     private static final int MAX_TOKENS_PER_SECTION = 2048;
 
+    /** 占位节标记（沉淀检查/降级判定引用同一标记，防文案改动静默失效） */
+    public static final String SECTION_FAILED_MARKER = "本节内容生成失败";
+
     private static final String SECTION_FAILED =
-            "> ⚠️ 本节内容生成失败，请稍后重试或访问参考文献了解详情。";
+            "> ⚠️ " + SECTION_FAILED_MARKER + "，请稍后重试或访问参考文献了解详情。";
 
     // 查询意图 → 报告风格要求（注入每节 prompt 首部；未知意图不加）
     private static final Map<String, String> INTENT_STYLE = Map.of(
-            "quick_fact", "报告风格：简洁定义式回答，直击要点，避免冗长铺垫",
-            "how_to", "报告风格：操作步骤式教程，步骤清晰可执行",
-            "deep_dive", "报告风格：深入原理与源码级分析，讲清底层机制",
-            "comparison", "报告风格：对比分析，用表格呈现差异与适用场景",
-            "troubleshooting", "报告风格：诊断排错式，从现象到原因再到解决方案");
+            IntentKeys.QUICK_FACT, "报告风格：简洁定义式回答，直击要点，避免冗长铺垫",
+            IntentKeys.HOW_TO, "报告风格：操作步骤式教程，步骤清晰可执行",
+            IntentKeys.DEEP_DIVE, "报告风格：深入原理与源码级分析，讲清底层机制",
+            IntentKeys.COMPARISON, "报告风格：对比分析，用表格呈现差异与适用场景",
+            IntentKeys.TROUBLESHOOTING, "报告风格：诊断排错式，从现象到原因再到解决方案");
 
     private final ChatModel chatModel;
     private final double jaccardThreshold;
