@@ -96,8 +96,9 @@ public class SearchTools {
                     int m = scoreMatch(query, p);
                     return qualityScorer.evaluate(p.getUrl(), p.getTitle(), p.getContent(), t, a, d, m);
                 })
-                // M=1 一票否决：关键词零命中（无关页面）即使靠 T/A 加权过线也过滤
-                .filter(r -> r.getScoreM() > 1
+                // 无关页过滤：M=1（关键词零命中）且 D=1（内容极浅）即使靠 T/A 加权过线也过滤；
+                // 仅 M=1 不砍——中文长句查询分词缺陷下真实长文页也会 M=1，需 D 兜底
+                .filter(r -> (r.getScoreM() > 1 || r.getScoreD() > 1)
                         && qualityScorer.isAboveThreshold(r.getWeightedScore()))
                 .sorted(Comparator.comparingDouble(ScoredResource::getWeightedScore).reversed())
                 .toList();

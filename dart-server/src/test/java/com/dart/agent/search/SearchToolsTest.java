@@ -123,15 +123,29 @@ class SearchToolsTest {
     }
 
     @Test
-    void scoreResources_filtersMatchOneEvenAboveThreshold() {
-        // T=5(2026)/A=5(spring.io)/D=5/M=1 → S=3.60 > 3.0，但 M=1（内容不含查询关键词）→ 一票否决
+    void scoreResources_filtersMatchOneWithThinContent() {
+        // 腰椎问答类：M=1（关键词零命中）且 D=1（内容极浅）→ 即使 T/A 加权过线也过滤
         when(matchScorer.evaluate(anyString(), anyString())).thenReturn(1);
         PageContent irrelevant = new PageContent("https://spring.io", "Official Spring",
-                "rich content ".repeat(200), 2000, 3, true, true, 2026);
+                "thin", 100, 0, false, false, 2026);
 
         List<ScoredResource> results = searchTools.scoreResources("Spring", List.of(irrelevant));
 
         assertThat(results).isEmpty();
+    }
+
+    @Test
+    void scoreResources_keepsMatchOneWithRichContent() {
+        // 中文长句查询分词缺陷：真实相关长文页可能 M=1（整句无标点切不出关键词），
+        // 但 D≥2 内容丰富 → 保留（组合条件：仅 M=1 且 D=1 才砍）
+        when(matchScorer.evaluate(anyString(), anyString())).thenReturn(1);
+        PageContent rich = new PageContent("https://spring.io", "Official Spring",
+                "rich content ".repeat(200), 2000, 3, true, true, 2026);
+
+        List<ScoredResource> results = searchTools.scoreResources("Spring", List.of(rich));
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).getUrl()).isEqualTo("https://spring.io");
     }
 
     @Test
