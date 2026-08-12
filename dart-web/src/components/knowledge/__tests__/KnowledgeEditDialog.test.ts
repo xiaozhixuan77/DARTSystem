@@ -34,7 +34,7 @@ describe('KnowledgeEditDialog.vue', () => {
 
   const mockDetail = {
     id: 1, title: 'Go 并发', content: '# 内容',
-    sourceUrl: 'https://go.dev', tags: ['Go', '并发'],
+    sourceUrl: 'https://go.dev', tags: 'Go, 并发',
     scoreT: 4, scoreA: 5, scoreD: 3, scoreM: 4,
     notes: '学习笔记', chunks: [],
     createdAt: '2026-01-01', updatedAt: '2026-07-01'
@@ -86,6 +86,17 @@ describe('KnowledgeEditDialog.vue', () => {
 
     const titleInput = wrapper.find('#edit-title')
     expect((titleInput.element as HTMLInputElement).value).toBe('Go 并发')
+  })
+
+  it('字符串 tags 正常显示不崩溃', async () => {
+    // 后端 detail 返回 tags 为字符串（"Go, 并发"），类型声明 string[] 曾导致 join 崩溃
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+    await wrapper.find('.tab-detail').trigger('click')
+
+    const tagInput = wrapper.find('#edit-tags')
+    expect((tagInput.element as HTMLInputElement).value).toBe('Go, 并发')
   })
 
   it('编辑 tab 显示备注字段', async () => {

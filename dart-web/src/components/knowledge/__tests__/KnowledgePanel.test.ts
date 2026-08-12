@@ -79,7 +79,7 @@ describe('KnowledgePanel.vue', () => {
     store.panelOpen = true
     store.selectedItem = {
       id: 1, title: '旧标题', content: '', sourceUrl: '',
-      tags: ['Go'], scoreT: 0, scoreA: 0, scoreD: 0, scoreM: 0,
+      tags: 'Go', scoreT: 0, scoreA: 0, scoreD: 0, scoreM: 0,
       notes: '', chunks: [], createdAt: '', updatedAt: ''
     }
 
