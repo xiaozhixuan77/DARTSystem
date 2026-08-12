@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, getKnowledgeTags, updateKnowledge } from '@/api/knowledge'
 import type { KnowledgeItemVO, KnowledgeItemDetail, GraphData } from '@/types/knowledge'
 
+export const ALL_TAG = '全部'
+
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const items = ref<KnowledgeItemVO[]>([])
   const total = ref(0)
@@ -10,7 +12,6 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   const size = ref(12)
   const selectedItem = ref<KnowledgeItemDetail | null>(null)
   const filter = ref<string>('全部')
-  const keyword = ref('')
   const loading = ref(false)
   const panelOpen = ref(false)
   const graphData = ref<GraphData | null>(null)
@@ -20,7 +21,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   async function loadItems() {
     loading.value = true
     try {
-      const res = await listKnowledge(page.value, size.value, filter.value === '全部' ? undefined : filter.value)
+      const res = await listKnowledge(page.value, size.value, filter.value === ALL_TAG ? undefined : filter.value)
       if (res.code === 200) {
         items.value = res.data.records
         total.value = res.data.total
@@ -86,7 +87,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   }
 
   return {
-    items, total, page, size, selectedItem, filter, keyword,
+    items, total, page, size, selectedItem, filter,
     loading, panelOpen, graphData, graphLoading, tags,
     loadItems, loadTags, loadDetail, removeItem, loadGraph, saveItem,
     setFilter, togglePanel

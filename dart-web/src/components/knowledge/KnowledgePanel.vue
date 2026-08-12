@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { useKnowledgeStore } from '@/stores/knowledge'
+import { useKnowledgeStore, ALL_TAG } from '@/stores/knowledge'
 import KnowledgeCard from './KnowledgeCard.vue'
 import KnowledgeEditDialog from './KnowledgeEditDialog.vue'
-import type { KnowledgeItemDetail } from '@/types/knowledge'
 
 const store = useKnowledgeStore()
 
@@ -12,7 +11,7 @@ onMounted(() => {
   store.loadTags()
 })
 
-const tags = computed(() => ['全部', ...store.tags])
+const tags = computed(() => [ALL_TAG, ...store.tags])
 
 function handleCloseDetail() {
   store.selectedItem = null
