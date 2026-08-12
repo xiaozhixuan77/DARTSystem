@@ -96,7 +96,9 @@ public class SearchTools {
                     int m = scoreMatch(query, p);
                     return qualityScorer.evaluate(p.getUrl(), p.getTitle(), p.getContent(), t, a, d, m);
                 })
-                .filter(r -> qualityScorer.isAboveThreshold(r.getWeightedScore()))
+                // M=1 一票否决：关键词零命中（无关页面）即使靠 T/A 加权过线也过滤
+                .filter(r -> r.getScoreM() > 1
+                        && qualityScorer.isAboveThreshold(r.getWeightedScore()))
                 .sorted(Comparator.comparingDouble(ScoredResource::getWeightedScore).reversed())
                 .toList();
     }
