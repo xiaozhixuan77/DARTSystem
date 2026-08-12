@@ -36,13 +36,15 @@ public class DataConsistencyTask {
     }
 
     /**
-     * 每 5 分钟分页检查缺失的向量（仅记录，实际补偿在 ChatService 持久化时完成）。
+     * 每 5 分钟分页检查缺失的向量并补偿：MySQL 有记录而 Redis 无对应 key 时，
+     * 以与 EmbeddingService 相同的格式回填（历史遗留缺失由此自愈）。
      */
     @Scheduled(fixedDelay = 300_000)
     public void detectMissingVectors() {
         log.debug("开始补偿缺失向量...");
         try {
             int compensated = 0;
+            int skipped = 0;
             int pageNum = 1;
             while (true) {
                 Page<KnowledgeChunk> page = new Page<>(pageNum, BATCH_SIZE);
@@ -65,23 +67,61 @@ public class DataConsistencyTask {
                         });
 
                 if (pipeResults != null) {
+                    List<KnowledgeChunk> missing = new java.util.ArrayList<>();
                     for (int i = 0; i < pipeResults.size(); i++) {
                         Boolean exists = (Boolean) pipeResults.get(i);
                         if (!Boolean.TRUE.equals(exists)) {
-                            log.info("发现缺失向量: {}", records.get(i).getEmbeddingId());
-                            compensated++;
+                            missing.add(records.get(i));
                         }
+                    }
+                    if (!missing.isEmpty()) {
+                        int[] pageResult = backfill(missing);
+                        compensated += pageResult[0];
+                        skipped += pageResult[1];
                     }
                 }
                 if (!result.hasNext()) break;
                 pageNum++;
             }
-            if (compensated > 0) {
-                log.info("向量补偿完成: 发现 {} 条缺失", compensated);
+            if (compensated > 0 || skipped > 0) {
+                log.info("向量补偿完成: 补偿成功 {} 条，跳过 {} 条（解码失败）", compensated, skipped);
             }
         } catch (Exception e) {
             log.error("向量补偿任务异常", e);
         }
+    }
+
+    /**
+     * 回填缺失 chunk：Base64 向量解码后以统一格式写 Redis；解码失败跳过（坏数据应修源，
+     * 会持续报告缺失直至修复）。
+     *
+     * @return [补偿成功数, 跳过数]
+     */
+    private int[] backfill(List<KnowledgeChunk> missing) {
+        List<String> ids = new java.util.ArrayList<>();
+        List<float[]> vectors = new java.util.ArrayList<>();
+        int skipped = 0;
+        for (KnowledgeChunk chunk : missing) {
+            if (chunk.getEmbedding() == null) {
+                skipped++;
+                continue;
+            }
+            try {
+                float[] vec = com.dart.util.VectorUtils.bytesToFloatArray(
+                        java.util.Base64.getDecoder().decode(chunk.getEmbedding()));
+                ids.add(chunk.getEmbeddingId());
+                vectors.add(vec);
+            } catch (Exception e) {
+                log.warn("chunk 向量解码失败，跳过补偿: embeddingId={}", chunk.getEmbeddingId());
+                skipped++;
+            }
+        }
+        if (ids.isEmpty()) {
+            return new int[]{0, skipped};
+        }
+        EmbeddingService.writeChunkVectorsToRedis(redisTemplate, ids, vectors);
+        log.info("补偿写入 Redis: {} 条", ids.size());
+        return new int[]{ids.size(), skipped};
     }
 
     /**
