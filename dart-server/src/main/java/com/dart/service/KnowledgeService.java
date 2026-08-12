@@ -256,7 +256,8 @@ public class KnowledgeService {
             return;
         }
         List<KnowledgeItem> items = loadItems(userId);
-        Map<Long, float[]> vectors = loadFirstChunkVectors();
+        Map<Long, float[]> vectors = loadFirstChunkVectors(
+                items.stream().map(KnowledgeItem::getId).toList());
         for (KnowledgeItem other : items) {
             if (other.getId().equals(newItemId)) {
                 continue;
@@ -275,7 +276,8 @@ public class KnowledgeService {
         if (items.size() < 2) {
             return 0;
         }
-        Map<Long, float[]> vectors = loadFirstChunkVectors();
+        Map<Long, float[]> vectors = loadFirstChunkVectors(
+                items.stream().map(KnowledgeItem::getId).toList());
         int created = 0;
         for (int i = 0; i < items.size(); i++) {
             for (int j = i + 1; j < items.size(); j++) {
@@ -296,18 +298,23 @@ public class KnowledgeService {
 
     /**
      * 每条目取首块（chunk_index 最小）向量；首个出现的 chunk 即 index 最小的块。
+     * 只查指定条目（限定当前用户，避免全表扫描）。
      */
-    private Map<Long, float[]> loadFirstChunkVectors() {
+    private Map<Long, float[]> loadFirstChunkVectors(List<Long> itemIds) {
+        if (itemIds.isEmpty()) {
+            return Map.of();
+        }
         Map<Long, float[]> vectors = new HashMap<>();
-        for (KnowledgeChunk c : knowledgeChunkMapper.selectList(
-                new QueryWrapper<KnowledgeChunk>().orderByAsc("chunk_index"))) {
+        QueryWrapper<KnowledgeChunk> wrapper = new QueryWrapper<>();
+        wrapper.in("knowledge_item_id", itemIds).orderByAsc("chunk_index");
+        for (KnowledgeChunk c : knowledgeChunkMapper.selectList(wrapper)) {
             if (c.getEmbedding() == null) {
                 continue;
             }
             try {
                 float[] vec = VectorUtils.bytesToFloatArray(Base64.getDecoder().decode(c.getEmbedding()));
                 vectors.putIfAbsent(c.getKnowledgeItemId(), vec);
-            } catch (IllegalArgumentException e) {
+            } catch (RuntimeException e) {
                 log.warn("chunk 向量解码失败，跳过: chunkId={}", c.getId());
             }
         }
