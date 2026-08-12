@@ -9,6 +9,7 @@ import com.dart.mapper.KnowledgeItemMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -82,7 +83,7 @@ class EmbeddingServiceTest {
         ScoredResource scores = new ScoredResource("https://spring.io", "Spring Tutorial", content, 5, 5, 5, 4, 4.85);
 
         List<Long> ids = embeddingService.embedAndPersist(1L, "Spring Boot", content,
-                "https://spring.io", scores);
+                "https://spring.io", scores, "操作指南");
 
         assertThat(ids).isNotEmpty();
         verify(knowledgeItemMapper).insert(any(KnowledgeItem.class));
@@ -100,7 +101,7 @@ class EmbeddingServiceTest {
         String shortContent = "这是一段简短的Spring教程内容，包含足够的字符来通过最小长度过滤。";
         ScoredResource scores = new ScoredResource("https://x.com", "X", shortContent, 4, 4, 3, 4, 4.0);
 
-        embeddingService.embedAndPersist(1L, "Short", shortContent, "https://x.com", scores);
+        embeddingService.embedAndPersist(1L, "Short", shortContent, "https://x.com", scores, "操作指南");
         verify(knowledgeChunkMapper, atMost(1)).insert(any(KnowledgeChunk.class));
     }
 
@@ -114,7 +115,7 @@ class EmbeddingServiceTest {
                 .thenThrow(new RuntimeException("API error"));
 
         assertThatThrownBy(() ->
-                embeddingService.embedAndPersist(1L, "Title", longContent, "https://a.com", scores))
+                embeddingService.embedAndPersist(1L, "Title", longContent, "https://a.com", scores, "操作指南"))
                 .isInstanceOf(RuntimeException.class);
     }
 
@@ -128,9 +129,27 @@ class EmbeddingServiceTest {
 
         ScoredResource scores = new ScoredResource("https://a.com", "A", "", 3, 3, 3, 3, 3.0);
 
-        List<Long> ids = embeddingService.embedAndPersist(1L, "Title", "", "https://a.com", scores);
+        List<Long> ids = embeddingService.embedAndPersist(1L, "Title", "", "https://a.com", scores, "操作指南");
         assertThat(ids).isNotEmpty();
         verify(knowledgeItemMapper).insert(any(KnowledgeItem.class));
         verify(embeddingModel, never()).call(any(EmbeddingRequest.class));
+    }
+
+    @Test
+    void embedAndPersist_persistsTags() {
+        setupMappersAndRedis();
+        float[] emb = new float[1024];
+        when(embeddingModel.call(any(EmbeddingRequest.class)))
+                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
+                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+
+        String content = "# 标题\n\n这是一段用于分块测试的内容。".repeat(30);
+        ScoredResource scores = new ScoredResource("https://a.com", "A", content, 5, 5, 5, 5, 5.0);
+
+        embeddingService.embedAndPersist(1L, "标题", content, "https://a.com", scores, "深入原理");
+
+        ArgumentCaptor<KnowledgeItem> captor = ArgumentCaptor.forClass(KnowledgeItem.class);
+        verify(knowledgeItemMapper).insert(captor.capture());
+        assertThat(captor.getValue().getTags()).isEqualTo("深入原理");
     }
 }

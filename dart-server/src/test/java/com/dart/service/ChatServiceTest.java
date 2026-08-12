@@ -15,6 +15,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -165,7 +167,7 @@ class ChatServiceTest {
         // 报告无占位节 → 异步沉淀到知识库
         verify(embeddingService, timeout(3000))
                 .embedAndPersist(eq(1L), eq("Spring Boot"), contains("# Report"),
-                        eq("https://a.com"), any());
+                        eq("https://a.com"), any(), eq("操作指南"));
         // 中间断言：走到 persist 与 writeCache（finally）
         verify(messageMapper, times(2)).insert(any(Message.class));
         verify(valueOps).set(anyString(), contains("# Report"), any(java.time.Duration.class));
@@ -182,7 +184,7 @@ class ChatServiceTest {
         when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置与追问失败降级
-        when(embeddingService.embedAndPersist(any(), any(), any(), any(), any()))
+        when(embeddingService.embedAndPersist(any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(99L));
 
         chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
@@ -208,7 +210,7 @@ class ChatServiceTest {
         chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
         // 含占位节的残缺报告不沉淀
-        verify(embeddingService, after(1500).never()).embedAndPersist(any(), any(), any(), any(), any());
+        verify(embeddingService, after(1500).never()).embedAndPersist(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -226,7 +228,7 @@ class ChatServiceTest {
 
         chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
-        verify(embeddingService, after(1500).never()).embedAndPersist(any(), any(), any(), any(), any());
+        verify(embeddingService, after(1500).never()).embedAndPersist(any(), any(), any(), any(), any(), any());
     }
 
     // === preProcessQuery（领域判断 + 提示词优化合并为一次调用）===
@@ -771,5 +773,58 @@ class ChatServiceTest {
         ChatService.SearchResult result = chatService.executeSearchAndCurate("query", 1L, 100L, emitter);
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).contains("不可用");
+    }
+
+    // === 沉淀自动打标（intent → 受控类别标签）===
+
+    @ParameterizedTest
+    @ValueSource(strings = {"quick_fact", "how_to", "deep_dive", "comparison", "troubleshooting"})
+    void executeSearchAndCurate_intentMapsToSedimentTag(String intent) {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(new AssistantMessage(
+                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\",\"variants\":[\"sb\"],\"intent\":\"" + intent + "\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenReturn(chatResponse)
+                .thenThrow(new RuntimeException("timeout"));
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        String expectedTag = switch (intent) {
+            case "quick_fact" -> "速查";
+            case "deep_dive" -> "深入原理";
+            case "comparison" -> "对比分析";
+            case "troubleshooting" -> "排错诊断";
+            default -> "操作指南";
+        };
+        verify(embeddingService, timeout(3000))
+                .embedAndPersist(eq(1L), any(), any(), any(), any(), eq(expectedTag));
+    }
+
+    @Test
+    void executeSearchAndCurate_unknownIntent_usesDefaultTag() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(new AssistantMessage(
+                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\",\"variants\":[\"sb\"],\"intent\":\"general\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenReturn(chatResponse)
+                .thenThrow(new RuntimeException("timeout"));
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        // LLM 幻觉出未定义意图 → 默认操作指南
+        verify(embeddingService, timeout(3000))
+                .embedAndPersist(eq(1L), any(), any(), any(), any(), eq("操作指南"));
     }
 }
