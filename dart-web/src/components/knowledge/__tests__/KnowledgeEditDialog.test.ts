@@ -54,18 +54,46 @@ describe('KnowledgeEditDialog.vue', () => {
     expect(wrapper.find('.dialog-overlay').exists()).toBe(true)
   })
 
-  it('显示标题字段', () => {
+  it('默认显示正文 tab', () => {
     const wrapper = mount(KnowledgeEditDialog, {
       props: { visible: true, item: mockDetail }
     })
+    expect(wrapper.find('.content-tab').exists()).toBe(true)
+    expect(wrapper.find('.detail-tab').exists()).toBe(false)
+    expect(wrapper.find('.graph-tab').exists()).toBe(false)
+  })
+
+  it('正文 tab 渲染 Markdown 内容', () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+    // useMarkdown 真实渲染 '# 内容' → <h1>
+    expect(wrapper.find('.content-tab .markdown').html()).toContain('<h1')
+  })
+
+  it('空正文显示占位提示', () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: { ...mockDetail, content: '' } }
+    })
+    expect(wrapper.find('.content-tab').text()).toContain('暂无正文')
+  })
+
+  it('切换到编辑 tab 显示标题字段', async () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+    await wrapper.find('.tab-detail').trigger('click')
+
     const titleInput = wrapper.find('#edit-title')
     expect((titleInput.element as HTMLInputElement).value).toBe('Go 并发')
   })
 
-  it('显示备注字段', () => {
+  it('编辑 tab 显示备注字段', async () => {
     const wrapper = mount(KnowledgeEditDialog, {
       props: { visible: true, item: mockDetail }
     })
+    await wrapper.find('.tab-detail').trigger('click')
+
     const notesInput = wrapper.find('#edit-notes')
     expect((notesInput.element as HTMLTextAreaElement).value).toBe('学习笔记')
   })
@@ -103,10 +131,11 @@ describe('KnowledgeEditDialog.vue', () => {
     expect(saveBtn.attributes('disabled')).toBeDefined()
   })
 
-  it('显示详情/关系图两个 tab', () => {
+  it('显示正文/编辑/关系图三个 tab', () => {
     const wrapper = mount(KnowledgeEditDialog, {
       props: { visible: true, item: mockDetail }
     })
+    expect(wrapper.find('.tab-content').exists()).toBe(true)
     expect(wrapper.find('.tab-detail').exists()).toBe(true)
     expect(wrapper.find('.tab-graph').exists()).toBe(true)
   })
@@ -121,11 +150,15 @@ describe('KnowledgeEditDialog.vue', () => {
     expect(wrapper.find('.graph-tab').exists()).toBe(true)
   })
 
-  it('默认显示详情内容', () => {
+  it('关闭后重置为正文 tab', async () => {
     const wrapper = mount(KnowledgeEditDialog, {
       props: { visible: true, item: mockDetail }
     })
+    await wrapper.find('.tab-detail').trigger('click')
     expect(wrapper.find('.detail-tab').exists()).toBe(true)
-    expect(wrapper.find('.graph-tab').exists()).toBe(false)
+
+    await wrapper.setProps({ visible: false })
+    await wrapper.setProps({ visible: true, item: mockDetail })
+    expect(wrapper.find('.content-tab').exists()).toBe(true)
   })
 })

@@ -6,10 +6,12 @@ vi.mock('@/api/knowledge', () => ({
   listKnowledge: vi.fn(),
   getKnowledgeDetail: vi.fn(),
   deleteKnowledge: vi.fn(),
-  getKnowledgeGraph: vi.fn()
+  getKnowledgeGraph: vi.fn(),
+  updateKnowledge: vi.fn(),
+  getKnowledgeTags: vi.fn()
 }))
 
-import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph } from '@/api/knowledge'
+import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, updateKnowledge, getKnowledgeTags } from '@/api/knowledge'
 
 function mockKnowledgeItem(overrides: Record<string, unknown> = {}) {
   return {
@@ -119,7 +121,7 @@ describe('useKnowledgeStore', () => {
     expect(store.selectedItem).toBeNull()
   })
 
-  it('标签筛选重置分页并重新加载', async () => {
+  it('标签筛选重置分页并携带标签重新加载', async () => {
     vi.mocked(listKnowledge).mockResolvedValue({
       code: 200, message: 'ok', suggestion: null,
       data: { records: [], total: 0 }
@@ -131,6 +133,78 @@ describe('useKnowledgeStore', () => {
 
     expect(store.filter).toBe('Go')
     expect(store.page).toBe(1)
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, 'Go')
+  })
+
+  it('全部标签不携带过滤参数', async () => {
+    vi.mocked(listKnowledge).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: { records: [], total: 0 }
+    })
+
+    const store = useKnowledgeStore()
+    store.setFilter('全部')
+
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined)
+  })
+
+  it('加载标签填充 tags', async () => {
+    vi.mocked(getKnowledgeTags).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: ['Go', 'Vue']
+    })
+
+    const store = useKnowledgeStore()
+    await store.loadTags()
+
+    expect(store.tags).toEqual(['Go', 'Vue'])
+  })
+
+  it('加载标签失败时 tags 保持空', async () => {
+    vi.mocked(getKnowledgeTags).mockRejectedValue(new Error('Network error'))
+
+    const store = useKnowledgeStore()
+    await store.loadTags()
+
+    expect(store.tags).toEqual([])
+  })
+
+  it('保存条目更新 items 和 selectedItem', async () => {
+    vi.mocked(listKnowledge).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: { records: [mockKnowledgeItem()], total: 1 }
+    })
+    vi.mocked(getKnowledgeDetail).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: {
+        id: 1, title: '旧标题', content: '# Markdown', sourceUrl: 'https://x.com',
+        tags: ['Go'], scoreT: 4, scoreA: 5, scoreD: 3, scoreM: 4,
+        notes: '', chunks: [], createdAt: '', updatedAt: ''
+      }
+    })
+    vi.mocked(updateKnowledge).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null, data: null as any
+    })
+
+    const store = useKnowledgeStore()
+    await store.loadItems()
+    await store.loadDetail(1)
+    await store.saveItem(1, { title: '新标题', tags: 'Go,并发', notes: '笔记' })
+
+    expect(updateKnowledge).toHaveBeenCalledWith(1, { title: '新标题', tags: 'Go,并发', notes: '笔记' })
+    expect(store.items[0].title).toBe('新标题')
+    expect(store.items[0].tags).toBe('Go,并发')
+    expect(store.selectedItem!.title).toBe('新标题')
+  })
+
+  it('保存失败时抛出异常', async () => {
+    vi.mocked(updateKnowledge).mockResolvedValue({
+      code: 400, message: '请求参数错误', suggestion: null, data: null as any
+    })
+
+    const store = useKnowledgeStore()
+    await expect(store.saveItem(1, { title: '', tags: '', notes: '' }))
+      .rejects.toBeTruthy()
   })
 
   it('面板开关切换状态', () => {
