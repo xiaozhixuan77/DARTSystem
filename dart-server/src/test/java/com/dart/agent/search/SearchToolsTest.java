@@ -121,4 +121,29 @@ class SearchToolsTest {
     void scoreResources_emptyInput_returnsEmpty() {
         assertThat(searchTools.scoreResources("query", List.of())).isEmpty();
     }
+
+    @Test
+    void scoreResources_filtersMatchOneEvenAboveThreshold() {
+        // T=5(2026)/A=5(spring.io)/D=5/M=1 → S=3.60 > 3.0，但 M=1（内容不含查询关键词）→ 一票否决
+        when(matchScorer.evaluate(anyString(), anyString())).thenReturn(1);
+        PageContent irrelevant = new PageContent("https://spring.io", "Official Spring",
+                "rich content ".repeat(200), 2000, 3, true, true, 2026);
+
+        List<ScoredResource> results = searchTools.scoreResources("Spring", List.of(irrelevant));
+
+        assertThat(results).isEmpty();
+    }
+
+    @Test
+    void scoreResources_keepsMatchTwo() {
+        // M=2 的边缘相关页面不被误杀（M>1 通过，其余维度高分 → 保留）
+        when(matchScorer.evaluate(anyString(), anyString())).thenReturn(2);
+        PageContent weak = new PageContent("https://spring.io", "Official Spring",
+                "rich content ".repeat(200), 2000, 3, true, true, 2026);
+
+        List<ScoredResource> results = searchTools.scoreResources("Spring", List.of(weak));
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).getUrl()).isEqualTo("https://spring.io");
+    }
 }
