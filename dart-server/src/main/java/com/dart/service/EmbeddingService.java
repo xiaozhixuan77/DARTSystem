@@ -17,8 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -116,7 +114,8 @@ public class EmbeddingService {
             kc.setChunkIndex(chunks.get(i).chunkIndex());
             kc.setChunkText(chunks.get(i).chunkText());
             kc.setEmbeddingId(embeddingIds.get(i));
-            kc.setEmbedding(Base64.getEncoder().encodeToString(floatArrayToBytes(embeddings.get(i))));
+            kc.setEmbedding(Base64.getEncoder().encodeToString(
+                    com.dart.util.VectorUtils.floatArrayToBytes(embeddings.get(i))));
             kc.setCreatedAt(LocalDateTime.now());
             chunkEntities.add(kc);
         }
@@ -158,7 +157,7 @@ public class EmbeddingService {
                     for (int i = 0; i < embeddingIds.size(); i++) {
                         String key = RedisKeyConstants.DART_PREFIX + embeddingIds.get(i);
                         byte[] keyBytes = key.getBytes(StandardCharsets.UTF_8);
-                        byte[] vectorBytes = floatArrayToBytes(embeddings.get(i));
+                        byte[] vectorBytes = com.dart.util.VectorUtils.floatArrayToBytes(embeddings.get(i));
                         connection.hashCommands().hSet(keyBytes,
                                 "embedding".getBytes(StandardCharsets.UTF_8), vectorBytes);
                         connection.hashCommands().hSet(keyBytes,
@@ -181,20 +180,6 @@ public class EmbeddingService {
                 }
             }
         }
-    }
-
-    static byte[] floatArrayToBytes(float[] floats) {
-        ByteBuffer buffer = ByteBuffer.allocate(floats.length * 4).order(ByteOrder.LITTLE_ENDIAN);
-        for (float f : floats) {
-            buffer.putFloat(f);
-        }
-        return buffer.array();
-    }
-
-    static float[] bytesToFloatArray(byte[] bytes) {
-        float[] floats = new float[bytes.length / 4];
-        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(floats);
-        return floats;
     }
 
     private String sha256(String input) {

@@ -15,6 +15,8 @@ import com.dart.exception.ErrorCode;
 import com.dart.mapper.KnowledgeChunkMapper;
 import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.KnowledgeRelationMapper;
+import com.dart.util.TextUtils;
+import com.dart.util.VectorUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -303,7 +305,7 @@ public class KnowledgeService {
                 continue;
             }
             try {
-                float[] vec = EmbeddingService.bytesToFloatArray(Base64.getDecoder().decode(c.getEmbedding()));
+                float[] vec = VectorUtils.bytesToFloatArray(Base64.getDecoder().decode(c.getEmbedding()));
                 vectors.putIfAbsent(c.getKnowledgeItemId(), vec);
             } catch (IllegalArgumentException e) {
                 log.warn("chunk 向量解码失败，跳过: chunkId={}", c.getId());
@@ -317,10 +319,12 @@ public class KnowledgeService {
             return false;
         }
         String source;
-        if (titleSubstring(a.getTitle(), b.getTitle())) {
+        // 标题互相包含（排除同名）+ 向量余弦 ≥ 阈值，双通道并集
+        if (TextUtils.containsIgnoreCase(a.getTitle(), b.getTitle())
+                && !a.getTitle().equalsIgnoreCase(b.getTitle())) {
             source = "TITLE_MATCH@item_id=" + a.getId();
         } else if (vecA != null && vecB != null
-                && cosineSimilarity(vecA, vecB) >= linkSimilarityThreshold) {
+                && VectorUtils.cosineSimilarity(vecA, vecB) >= linkSimilarityThreshold) {
             source = "VECTOR_SIMILARITY@item_id=" + a.getId();
         } else {
             return false;
@@ -339,42 +343,11 @@ public class KnowledgeService {
         return true;
     }
 
-    /**
-     * 标题大小写不敏感双向包含（排除相等与单字符子串，防误报）。
-     */
-    private static boolean titleSubstring(String titleA, String titleB) {
-        if (titleA == null || titleB == null) {
-            return false;
-        }
-        String a = titleA.toLowerCase();
-        String b = titleB.toLowerCase();
-        if (a.equals(b)) {
-            return false;
-        }
-        return (a.contains(b) && b.length() >= 2) || (b.contains(a) && a.length() >= 2);
-    }
-
     private boolean relationExists(Long idA, Long idB) {
         QueryWrapper<KnowledgeRelation> wrapper = new QueryWrapper<>();
         wrapper.eq("subject_id", idA).eq("object_id", idB)
                 .or().eq("subject_id", idB).eq("object_id", idA);
         return relationMapper.selectCount(wrapper) > 0;
-    }
-
-    private static double cosineSimilarity(float[] a, float[] b) {
-        if (a == null || b == null || a.length != b.length) {
-            return 0.0;
-        }
-        double dot = 0, normA = 0, normB = 0;
-        for (int i = 0; i < a.length; i++) {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-        if (normA == 0 || normB == 0) {
-            return 0.0;
-        }
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
     public boolean existsBySourceUrl(String sourceUrlHash) {

@@ -99,9 +99,9 @@ public class RagService {
             for (KnowledgeChunk c : chunks) {
                 KnowledgeItem item = itemMap.get(c.getKnowledgeItemId());
                 if (item == null || c.getEmbedding() == null) continue;
-                float[] chunkVec = EmbeddingService.bytesToFloatArray(
+                float[] chunkVec = com.dart.util.VectorUtils.bytesToFloatArray(
                         java.util.Base64.getDecoder().decode(c.getEmbedding()));
-                double similarity = cosineSimilarity(queryVec, chunkVec);
+                double similarity = com.dart.util.VectorUtils.cosineSimilarity(queryVec, chunkVec);
                 if (similarity >= similarityThreshold) {
                     matched.add(new RagChunk(c.getChunkText(), item.getTitle(),
                             item.getSourceUrl(), similarity));
@@ -220,18 +220,4 @@ public class RagService {
         return context;
     }
 
-    /**
-     * 计算两个向量的余弦相似度。
-     */
-    private static double cosineSimilarity(float[] a, float[] b) {
-        if (a == null || b == null || a.length != b.length) return 0.0;
-        double dot = 0, normA = 0, normB = 0;
-        for (int i = 0; i < a.length; i++) {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-        if (normA == 0 || normB == 0) return 0.0;
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-    }
 }

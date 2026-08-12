@@ -191,7 +191,7 @@ class KnowledgeServiceTest {
         c.setChunkIndex(0);
         c.setChunkText("text");
         c.setEmbedding(java.util.Base64.getEncoder().encodeToString(
-                EmbeddingService.floatArrayToBytes(vec)));
+                com.dart.util.VectorUtils.floatArrayToBytes(vec)));
         return c;
     }
 

@@ -84,7 +84,7 @@ class RagServiceTest {
         chunk.setChunkText("Spring Boot 教程内容");
         chunk.setChunkIndex(0);
         chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
-                EmbeddingService.floatArrayToBytes(emb)));
+                com.dart.util.VectorUtils.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
@@ -172,7 +172,7 @@ class RagServiceTest {
         chunk.setChunkText("Spring Boot 教程内容");
         chunk.setChunkIndex(0);
         chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
-                EmbeddingService.floatArrayToBytes(emb)));
+                com.dart.util.VectorUtils.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
         KnowledgeRelation relation = new KnowledgeRelation();
@@ -217,7 +217,7 @@ class RagServiceTest {
         chunk.setChunkText("Spring Boot 教程内容");
         chunk.setChunkIndex(0);
         chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
-                EmbeddingService.floatArrayToBytes(emb)));
+                com.dart.util.VectorUtils.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
         // 无关系 → 不拼接 related 块
