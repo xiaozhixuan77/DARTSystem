@@ -63,6 +63,8 @@ class ChatServiceTest {
     private SearchTraceMapper searchTraceMapper;
     @Mock
     private RelationExtractionService relationExtractionService;
+    @Mock
+    private KnowledgeService knowledgeService;
 
     private ChatService chatService;
     private SseEmitter emitter;
@@ -72,7 +74,7 @@ class ChatServiceTest {
     void setUp() {
         chatService = new ChatService(chatModel, searchAgent, curatorAgent, ragService,
                 embeddingService, messageMapper, redisTemplate, knowledgeItemMapper,
-                searchTraceMapper, relationExtractionService);
+                searchTraceMapper, relationExtractionService, knowledgeService);
         emitter = spy(new SseEmitter(60_000L));
         // lenient：仅缓存相关用例使用，避免其他用例报 UnnecessaryStubbing
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -192,6 +194,8 @@ class ChatServiceTest {
         // 沉淀成功后触发关系抽取（同一虚拟线程，itemId 取自 embedAndPersist 返回）
         verify(relationExtractionService, timeout(3000))
                 .extractAndPersist(eq(1L), eq(99L), contains("# Report"));
+        // 随后触发跨条目向量关联（图谱闭环增量通道）
+        verify(knowledgeService, timeout(3000)).linkRelatedItems(eq(1L), eq(99L));
     }
 
     @Test

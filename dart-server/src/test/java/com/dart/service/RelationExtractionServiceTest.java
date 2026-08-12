@@ -155,4 +155,19 @@ class RelationExtractionServiceTest {
         assertThat(prompt).doesNotContain("<user_query>");
         assertThat(prompt).contains("&lt;user_query&gt;");
     }
+
+    @Test
+    void extractAndPersist_selfTitleMatch_skipsSelfRelation() {
+        // LLM 抽取的 object 与 subject 自身标题相同 → 标题匹配命中自己 → 不建自环
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("[{\"predicate\":\"related_to\",\"object\":\"Spring Boot\"}]"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+        when(knowledgeItemMapper.selectById(5L)).thenReturn(item(5L, "Spring Boot"));
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item(5L, "Spring Boot")));
+        when(relationMapper.selectCount(any())).thenReturn(0L);
+
+        service.extractAndPersist(1L, 5L, "内容");
+
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
+    }
 }

@@ -181,6 +181,156 @@ class KnowledgeServiceTest {
         assertThat(knowledgeService.aggregateTags(1L)).isEmpty();
     }
 
+    // === 跨条目关联（双通道：标题子串 + 向量相似度）===
+
+    private static KnowledgeChunk chunkOf(Long itemId, float[] vec) {
+        KnowledgeChunk c = new KnowledgeChunk();
+        c.setKnowledgeItemId(itemId);
+        c.setChunkIndex(0);
+        c.setChunkText("text");
+        c.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                EmbeddingService.floatArrayToBytes(vec)));
+        return c;
+    }
+
+    private static float[] fullVector(float fill) {
+        float[] vec = new float[1024];
+        java.util.Arrays.fill(vec, fill);
+        return vec;
+    }
+
+    @Test
+    void linkRelatedItems_titleSubstring_createsRelation() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "Spring Boot"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "Spring")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(relationMapper.selectCount(any())).thenReturn(0L);
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        ArgumentCaptor<KnowledgeRelation> captor = ArgumentCaptor.forClass(KnowledgeRelation.class);
+        verify(relationMapper).insert(captor.capture());
+        assertThat(captor.getValue().getSubjectId()).isEqualTo(1L);
+        assertThat(captor.getValue().getObjectId()).isEqualTo(2L);
+        assertThat(captor.getValue().getPredicate()).isEqualTo("related_to");
+        assertThat(captor.getValue().getSource()).contains("TITLE_MATCH");
+    }
+
+    @Test
+    void linkRelatedItems_caseInsensitiveSubstring_matches() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "spring"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "Spring Boot")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(relationMapper.selectCount(any())).thenReturn(0L);
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        verify(relationMapper).insert(any(KnowledgeRelation.class));
+    }
+
+    @Test
+    void linkRelatedItems_equalTitles_skips() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "Spring"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "Spring")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
+    }
+
+    @Test
+    void linkRelatedItems_singleCharSubstring_skips() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "AOP"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "A")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
+    }
+
+    @Test
+    void linkRelatedItems_vectorSimilarity_createsRelation() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "Kubernetes"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "Spring Boot")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(chunkOf(1L, fullVector(0.5f)), chunkOf(2L, fullVector(0.5f))));
+        when(relationMapper.selectCount(any())).thenReturn(0L);
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        ArgumentCaptor<KnowledgeRelation> captor = ArgumentCaptor.forClass(KnowledgeRelation.class);
+        verify(relationMapper).insert(captor.capture());
+        assertThat(captor.getValue().getSource()).contains("VECTOR_SIMILARITY");
+    }
+
+    @Test
+    void linkRelatedItems_noMatch_skips() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "Kubernetes"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "Spring Boot")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(chunkOf(1L, fullVector(0.0f)), chunkOf(2L, fullVector(0.5f))));
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
+    }
+
+    @Test
+    void linkRelatedItems_existingRelation_skips() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "Spring Boot"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "Spring")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(relationMapper.selectCount(any())).thenReturn(1L);
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
+    }
+
+    @Test
+    void rebuildLinks_createsAllPairs() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(
+                        createItem(1L, 1L, "Spring"),
+                        createItem(2L, 1L, "Spring Boot"),
+                        createItem(3L, 1L, "Spring Cloud")));
+        when(relationMapper.selectCount(any())).thenReturn(0L);
+
+        int created = knowledgeService.rebuildLinks(1L);
+
+        // (Spring,Spring Boot) 与 (Spring,Spring Cloud) 子串命中；(Spring Boot,Spring Cloud) 无
+        assertThat(created).isEqualTo(2);
+        verify(relationMapper, times(2)).insert(any(KnowledgeRelation.class));
+    }
+
+    @Test
+    void rebuildLinks_idempotent_secondRunSkipsExisting() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(
+                        createItem(1L, 1L, "Spring"),
+                        createItem(2L, 1L, "Spring Boot")));
+        when(relationMapper.selectCount(any())).thenReturn(0L, 1L);
+
+        assertThat(knowledgeService.rebuildLinks(1L)).isEqualTo(1);
+        assertThat(knowledgeService.rebuildLinks(1L)).isZero();
+        verify(relationMapper, times(1)).insert(any(KnowledgeRelation.class));
+    }
+
+    @Test
+    void rebuildLinks_emptyItems_returnsZero() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        assertThat(knowledgeService.rebuildLinks(1L)).isZero();
+    }
+
     @Test
     void getKnowledgeDetail_returnsDetail() {
         KnowledgeItem item = createItem(1L, 1L, "Spring Guide");

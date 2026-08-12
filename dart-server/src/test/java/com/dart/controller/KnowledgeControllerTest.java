@@ -28,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -110,8 +111,9 @@ class KnowledgeControllerTest {
 
     @Test
     void updateKnowledge_serviceThrowsBadRequest() throws Exception {
-        when(knowledgeService.updateKnowledge(eq(1L), eq(1L), any(KnowledgeUpdateRequest.class)))
-                .thenThrow(new BusinessException(ErrorCode.BAD_REQUEST));
+        doThrow(new BusinessException(ErrorCode.BAD_REQUEST))
+                .when(knowledgeService)
+                .updateKnowledge(eq(1L), eq(1L), any(KnowledgeUpdateRequest.class));
 
         mockMvc.perform(put("/api/knowledge/1")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -128,6 +130,17 @@ class KnowledgeControllerTest {
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0]").value("Go"));
+    }
+
+    @Test
+    void rebuildLinks_returnsCreatedCount() throws Exception {
+        when(knowledgeService.rebuildLinks(1L)).thenReturn(3);
+
+        mockMvc.perform(post("/api/knowledge/rebuild-links")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(3));
+        verify(knowledgeService).rebuildLinks(1L);
     }
 
     @Test
