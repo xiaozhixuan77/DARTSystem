@@ -151,6 +151,15 @@ public class EmbeddingService {
     }
 
     private void writeToRedisWithRetry(List<String> embeddingIds, List<float[]> embeddings) {
+        writeChunkVectorsToRedis(redisTemplate, embeddingIds, embeddings);
+    }
+
+    /**
+     * 按统一格式批量写 chunk 向量到 Redis（hash：embedding + chunk_id），3 次重试。
+     * 持久化（afterCommit）与 DataConsistencyTask 补偿共用，杜绝格式漂移。
+     */
+    public static void writeChunkVectorsToRedis(StringRedisTemplate redisTemplate,
+                                                List<String> embeddingIds, List<float[]> embeddings) {
         for (int retry = 0; retry < MAX_RETRIES; retry++) {
             try {
                 redisTemplate.executePipelined((org.springframework.data.redis.connection.RedisConnection connection) -> {
