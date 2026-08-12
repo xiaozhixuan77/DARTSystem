@@ -6,38 +6,44 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { EChartsType } from 'echarts/core'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useMarkdown } from '@/composables/useMarkdown'
 import type { KnowledgeItemDetail, GraphData } from '@/types/knowledge'
 
 echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
 const props = defineProps<{ visible: boolean; item: KnowledgeItemDetail | null }>()
 const emit = defineEmits<{
-  save: [data: { title: string; notes: string; tags: string }]
+  save: [data: { title: string; tags: string; notes: string }]
   close: []
 }>()
 
 const store = useKnowledgeStore()
+const { render, renderMermaidDiagrams } = useMarkdown()
 
 const title = ref('')
 const notes = ref('')
 const tagInput = ref('')
-const activeTab = ref<'detail' | 'graph'>('detail')
+const activeTab = ref<'content' | 'detail' | 'graph'>('content')
+const contentEl = ref<HTMLElement | null>(null)
 const graphEl = ref<HTMLDivElement | null>(null)
 let chart: EChartsType | null = null
+
+const renderedContent = computed(() =>
+  props.item?.content ? render(props.item.content) : '')
 
 watch(() => props.item, (val) => {
   if (val) {
     title.value = val.title
     notes.value = val.notes || ''
     tagInput.value = (val.tags || []).join(', ')
-    activeTab.value = 'detail'
+    activeTab.value = 'content'
     disposeChart()
   }
 }, { immediate: true })
 
 watch(() => props.visible, (val) => {
   if (!val) {
-    activeTab.value = 'detail'
+    activeTab.value = 'content'
     disposeChart()
   }
 })
@@ -59,8 +65,14 @@ function handleOverlayClick(e: MouseEvent) {
   }
 }
 
-async function switchTab(tab: 'detail' | 'graph') {
+async function switchTab(tab: 'content' | 'detail' | 'graph') {
   activeTab.value = tab
+  if (tab === 'content' && props.item?.content) {
+    await nextTick()
+    if (contentEl.value) {
+      await renderMermaidDiagrams(contentEl.value)
+    }
+  }
   if (tab === 'graph' && props.item) {
     disposeChart()
     await store.loadGraph(props.item.id)
@@ -112,16 +124,28 @@ function disposeChart() {
 <template>
   <div v-if="visible" class="dialog-overlay" @click="handleOverlayClick">
     <div class="dialog-box">
-      <h3 class="dialog-title">编辑知识条目</h3>
+      <h3 class="dialog-title">知识条目</h3>
 
       <div class="dialog-tabs">
+        <button class="dialog-tab tab-content" :class="{ active: activeTab === 'content' }"
+                @click="switchTab('content')">正文</button>
         <button class="dialog-tab tab-detail" :class="{ active: activeTab === 'detail' }"
-                @click="activeTab = 'detail'">详情</button>
+                @click="activeTab = 'detail'">编辑</button>
         <button class="dialog-tab tab-graph" :class="{ active: activeTab === 'graph' }"
                 @click="switchTab('graph')">关系图</button>
       </div>
 
-      <div v-if="activeTab === 'detail'" class="detail-tab">
+      <div v-if="activeTab === 'content'" class="content-tab">
+        <div
+          v-if="item && item.content"
+          ref="contentEl"
+          class="markdown content-preview"
+          v-html="renderedContent"
+        />
+        <div v-else class="graph-hint">暂无正文</div>
+      </div>
+
+      <div v-else-if="activeTab === 'detail'" class="detail-tab">
         <div class="dialog-field">
           <label for="edit-title">标题</label>
           <input id="edit-title" v-model="title" type="text" />
@@ -162,7 +186,7 @@ function disposeChart() {
   display: flex; align-items: center; justify-content: center;
 }
 .dialog-box {
-  width: 460px; max-height: 80vh;
+  width: 560px; max-height: 80vh;
   background: $color-surface;
   border-radius: $radius-lg;
   padding: 24px;
@@ -191,6 +215,14 @@ function disposeChart() {
     border-bottom-color: $color-accent;
     font-weight: 600;
   }
+}
+.content-preview {
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid $color-border;
+  border-radius: $radius;
+  padding: 16px;
+  font-size: 14px; line-height: 1.8;
 }
 .graph-container {
   width: 100%; height: 320px;

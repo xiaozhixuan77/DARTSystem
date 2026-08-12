@@ -32,15 +32,6 @@ export interface KnowledgeChunk {
   text: string
 }
 
-export interface TagGroups {
-  [category: string]: string[]
-}
-
-export interface TagsResponse {
-  system: TagGroups
-  custom: string[]
-}
-
 export interface GraphNode {
   id: string
   label: string

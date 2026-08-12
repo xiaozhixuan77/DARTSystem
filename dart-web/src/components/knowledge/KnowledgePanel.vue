@@ -1,19 +1,33 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import KnowledgeCard from './KnowledgeCard.vue'
 import KnowledgeEditDialog from './KnowledgeEditDialog.vue'
+import type { KnowledgeItemDetail } from '@/types/knowledge'
 
 const store = useKnowledgeStore()
 
 onMounted(() => {
   store.loadItems()
+  store.loadTags()
 })
 
-const tags = ['全部', 'Go', 'Vue', 'K8s', '数据库']
+const tags = computed(() => ['全部', ...store.tags])
 
 function handleCloseDetail() {
   store.selectedItem = null
+}
+
+async function handleSave(data: { title: string; tags: string; notes: string }) {
+  if (!store.selectedItem) return
+  try {
+    await store.saveItem(store.selectedItem.id, data)
+    handleCloseDetail()
+    store.loadItems()
+    store.loadTags()
+  } catch {
+    // 保存失败保持弹窗打开，由用户修正后重试
+  }
 }
 </script>
 
@@ -61,7 +75,7 @@ function handleCloseDetail() {
   <KnowledgeEditDialog
     :visible="!!store.selectedItem"
     :item="store.selectedItem"
-    @save="handleCloseDetail"
+    @save="handleSave"
     @close="handleCloseDetail"
   />
 </template>

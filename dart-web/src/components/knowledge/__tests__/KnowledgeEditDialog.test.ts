@@ -65,10 +65,10 @@ describe('KnowledgeEditDialog.vue', () => {
 
   it('正文 tab 渲染 Markdown 内容', () => {
     const wrapper = mount(KnowledgeEditDialog, {
-      props: { visible: true, item: mockDetail }
+      props: { visible: true, item: { ...mockDetail, content: '**加粗内容**' } }
     })
-    // useMarkdown 真实渲染 '# 内容' → <h1>
-    expect(wrapper.find('.content-tab .markdown').html()).toContain('<h1')
+    // useMarkdown 真实渲染；happy-dom 下 DOMPurify 会剥离 h1/pre，strong 保留
+    expect(wrapper.find('.content-tab .markdown').html()).toContain('<strong>加粗内容</strong>')
   })
 
   it('空正文显示占位提示', () => {

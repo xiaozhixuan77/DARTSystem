@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph } from '@/api/knowledge'
+import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, getKnowledgeTags, updateKnowledge } from '@/api/knowledge'
 import type { KnowledgeItemVO, KnowledgeItemDetail, GraphData } from '@/types/knowledge'
 
 export const useKnowledgeStore = defineStore('knowledge', () => {
@@ -15,17 +15,40 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   const panelOpen = ref(false)
   const graphData = ref<GraphData | null>(null)
   const graphLoading = ref(false)
+  const tags = ref<string[]>([])
 
   async function loadItems() {
     loading.value = true
     try {
-      const res = await listKnowledge(page.value, size.value)
+      const res = await listKnowledge(page.value, size.value, filter.value === '全部' ? undefined : filter.value)
       if (res.code === 200) {
         items.value = res.data.records
         total.value = res.data.total
       }
     } catch { /* ignore */ }
     finally { loading.value = false }
+  }
+
+  async function loadTags() {
+    try {
+      const res = await getKnowledgeTags()
+      if (res.code === 200) tags.value = res.data
+    } catch { /* ignore */ }
+  }
+
+  async function saveItem(id: number, data: { title: string; tags: string; notes: string }) {
+    const res = await updateKnowledge(id, data)
+    if (res.code !== 200) throw new Error(res.message || '保存失败')
+    const item = items.value.find((i) => i.id === id)
+    if (item) {
+      item.title = data.title
+      item.tags = data.tags
+    }
+    if (selectedItem.value?.id === id) {
+      selectedItem.value.title = data.title
+      selectedItem.value.tags = (data.tags || '').split(',').map((t) => t.trim()).filter(Boolean)
+      selectedItem.value.notes = data.notes
+    }
   }
 
   async function loadDetail(id: number) {
@@ -64,8 +87,8 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
 
   return {
     items, total, page, size, selectedItem, filter, keyword,
-    loading, panelOpen, graphData, graphLoading,
-    loadItems, loadDetail, removeItem, loadGraph,
+    loading, panelOpen, graphData, graphLoading, tags,
+    loadItems, loadTags, loadDetail, removeItem, loadGraph, saveItem,
     setFilter, togglePanel
   }
 })
