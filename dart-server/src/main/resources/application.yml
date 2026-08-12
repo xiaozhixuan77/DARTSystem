@@ -125,6 +125,9 @@ agent:
   rag:
     similarity-threshold: 0.80
     top-k: 5
+  graph:
+    # 知识条目跨条目关联的向量相似度阈值（标题子串通道不依赖此阈值）
+    link-similarity-threshold: 0.75
 
 # Knife4j
 springdoc:

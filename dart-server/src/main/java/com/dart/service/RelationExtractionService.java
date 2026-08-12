@@ -53,9 +53,11 @@ public class RelationExtractionService {
             return;
         }
         List<ExtractedRelation> relations;
+        KnowledgeItem subject;
+        String title;
         try {
-            KnowledgeItem subject = knowledgeItemMapper.selectById(itemId);
-            String title = subject == null || subject.getTitle() == null ? "" : subject.getTitle();
+            subject = knowledgeItemMapper.selectById(itemId);
+            title = subject == null || subject.getTitle() == null ? "" : subject.getTitle();
             String sanitized = markdown.length() > 6000 ? markdown.substring(0, 6000) : markdown;
             // 标题/报告可含用户输入，转义尖括号防 prompt 注入（与 preProcessQuery/regenerateReport 一致）
             String prompt = """
@@ -87,8 +89,13 @@ public class RelationExtractionService {
 
         Map<String, Long> titleIndex = loadTitleIndex(userId);
         for (ExtractedRelation relation : relations) {
+            // object 与主题标题互相包含（大小写不敏感）→ 抽取对象就是主题自身，整条跳过
+            if (title != null && !title.isBlank() && containsIgnoreCase(title, relation.object())) {
+                log.debug("抽取对象与主题标题匹配，跳过: itemId={}, object={}", itemId, relation.object());
+                continue;
+            }
             String predicate = PREDICATES.contains(relation.predicate()) ? relation.predicate() : "related_to";
-            Long objectId = matchObjectId(relation.object(), titleIndex);
+            Long objectId = matchObjectId(relation.object(), titleIndex, itemId);
             String objectLabel = objectId == null ? relation.object() : null;
             if (exists(itemId, predicate, objectId, objectLabel)) {
                 log.debug("关系已存在，跳过: itemId={}, predicate={}, object={}",
@@ -119,8 +126,18 @@ public class RelationExtractionService {
         return index;
     }
 
-    private Long matchObjectId(String object, Map<String, Long> titleIndex) {
+    private static boolean containsIgnoreCase(String a, String b) {
+        String la = a.toLowerCase();
+        String lb = b.toLowerCase();
+        return la.equals(lb) || (la.contains(lb) && lb.length() >= 2) || (lb.contains(la) && la.length() >= 2);
+    }
+
+    private Long matchObjectId(String object, Map<String, Long> titleIndex, Long subjectId) {
         for (Map.Entry<String, Long> entry : titleIndex.entrySet()) {
+            // 标题匹配命中自身（subject 与 object 是同一条目）→ 跳过，避免自环
+            if (subjectId.equals(entry.getValue())) {
+                continue;
+            }
             if (entry.getKey().contains(object) || object.contains(entry.getKey())) {
                 return entry.getValue();
             }

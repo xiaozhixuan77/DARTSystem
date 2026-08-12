@@ -61,4 +61,13 @@ public class KnowledgeController {
         Long userId = SecurityUtils.getCurrentUserId();
         return ApiResponse.ok(knowledgeService.getGraphData(userId, id));
     }
+
+    /**
+     * 手动补建知识条目间关联（双通道：标题子串 + 向量相似度；幂等）。
+     */
+    @PostMapping("/rebuild-links")
+    public ApiResponse<Integer> rebuildLinks() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        return ApiResponse.ok(knowledgeService.rebuildLinks(userId));
+    }
 }

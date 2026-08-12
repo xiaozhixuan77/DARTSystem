@@ -17,10 +17,14 @@ import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.KnowledgeRelationMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -32,9 +36,14 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class KnowledgeService {
 
+    private static final String PREDICATE_RELATED = "related_to";
+
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final KnowledgeRelationMapper relationMapper;
+
+    @Value("${agent.graph.link-similarity-threshold:0.75}")
+    private double linkSimilarityThreshold = 0.75;
 
     public PageResult<KnowledgeItemVO> listUserKnowledge(Long userId, int page, int size, String tag) {
         Page<KnowledgeItem> p = new Page<>(page, size);
@@ -232,6 +241,140 @@ public class KnowledgeService {
 
     private static String nodeId(Long itemId) {
         return "item:" + itemId;
+    }
+
+    // === 跨条目关联（双通道：标题子串 + 向量相似度）===
+
+    /**
+     * 新沉淀条目与知识库现有条目建立关联（增量通道，沉淀后调用）。
+     */
+    public void linkRelatedItems(Long userId, Long newItemId) {
+        KnowledgeItem self = knowledgeItemMapper.selectById(newItemId);
+        if (self == null || self.getTitle() == null || self.getTitle().isBlank()) {
+            return;
+        }
+        List<KnowledgeItem> items = loadItems(userId);
+        Map<Long, float[]> vectors = loadFirstChunkVectors();
+        for (KnowledgeItem other : items) {
+            if (other.getId().equals(newItemId)) {
+                continue;
+            }
+            linkPair(self, other, vectors.get(newItemId), vectors.get(other.getId()));
+        }
+    }
+
+    /**
+     * 手动补建：知识库全部条目两两计算并建关系（幂等，重复执行跳过已有关系）。
+     *
+     * @return 本次新增的关系条数
+     */
+    public int rebuildLinks(Long userId) {
+        List<KnowledgeItem> items = loadItems(userId);
+        if (items.size() < 2) {
+            return 0;
+        }
+        Map<Long, float[]> vectors = loadFirstChunkVectors();
+        int created = 0;
+        for (int i = 0; i < items.size(); i++) {
+            for (int j = i + 1; j < items.size(); j++) {
+                if (linkPair(items.get(i), items.get(j),
+                        vectors.get(items.get(i).getId()), vectors.get(items.get(j).getId()))) {
+                    created++;
+                }
+            }
+        }
+        return created;
+    }
+
+    private List<KnowledgeItem> loadItems(Long userId) {
+        QueryWrapper<KnowledgeItem> wrapper = new QueryWrapper<>();
+        wrapper.eq("user_id", userId).eq("is_deleted", 0);
+        return knowledgeItemMapper.selectList(wrapper);
+    }
+
+    /**
+     * 每条目取首块（chunk_index 最小）向量；首个出现的 chunk 即 index 最小的块。
+     */
+    private Map<Long, float[]> loadFirstChunkVectors() {
+        Map<Long, float[]> vectors = new HashMap<>();
+        for (KnowledgeChunk c : knowledgeChunkMapper.selectList(
+                new QueryWrapper<KnowledgeChunk>().orderByAsc("chunk_index"))) {
+            if (c.getEmbedding() == null) {
+                continue;
+            }
+            try {
+                float[] vec = EmbeddingService.bytesToFloatArray(Base64.getDecoder().decode(c.getEmbedding()));
+                vectors.putIfAbsent(c.getKnowledgeItemId(), vec);
+            } catch (IllegalArgumentException e) {
+                log.warn("chunk 向量解码失败，跳过: chunkId={}", c.getId());
+            }
+        }
+        return vectors;
+    }
+
+    private boolean linkPair(KnowledgeItem a, KnowledgeItem b, float[] vecA, float[] vecB) {
+        if (a.getId().equals(b.getId())) {
+            return false;
+        }
+        String source;
+        if (titleSubstring(a.getTitle(), b.getTitle())) {
+            source = "TITLE_MATCH@item_id=" + a.getId();
+        } else if (vecA != null && vecB != null
+                && cosineSimilarity(vecA, vecB) >= linkSimilarityThreshold) {
+            source = "VECTOR_SIMILARITY@item_id=" + a.getId();
+        } else {
+            return false;
+        }
+        if (relationExists(a.getId(), b.getId())) {
+            return false;
+        }
+        KnowledgeRelation r = new KnowledgeRelation();
+        r.setSubjectId(a.getId());
+        r.setPredicate(PREDICATE_RELATED);
+        r.setObjectId(b.getId());
+        r.setConfidence(1.0);
+        r.setSource(source);
+        r.setCreatedAt(LocalDateTime.now());
+        relationMapper.insert(r);
+        return true;
+    }
+
+    /**
+     * 标题大小写不敏感双向包含（排除相等与单字符子串，防误报）。
+     */
+    private static boolean titleSubstring(String titleA, String titleB) {
+        if (titleA == null || titleB == null) {
+            return false;
+        }
+        String a = titleA.toLowerCase();
+        String b = titleB.toLowerCase();
+        if (a.equals(b)) {
+            return false;
+        }
+        return (a.contains(b) && b.length() >= 2) || (b.contains(a) && a.length() >= 2);
+    }
+
+    private boolean relationExists(Long idA, Long idB) {
+        QueryWrapper<KnowledgeRelation> wrapper = new QueryWrapper<>();
+        wrapper.eq("subject_id", idA).eq("object_id", idB)
+                .or().eq("subject_id", idB).eq("object_id", idA);
+        return relationMapper.selectCount(wrapper) > 0;
+    }
+
+    private static double cosineSimilarity(float[] a, float[] b) {
+        if (a == null || b == null || a.length != b.length) {
+            return 0.0;
+        }
+        double dot = 0, normA = 0, normB = 0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        if (normA == 0 || normB == 0) {
+            return 0.0;
+        }
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
     public boolean existsBySourceUrl(String sourceUrlHash) {

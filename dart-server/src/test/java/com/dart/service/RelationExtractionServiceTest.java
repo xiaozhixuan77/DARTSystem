@@ -164,7 +164,6 @@ class RelationExtractionServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
         when(knowledgeItemMapper.selectById(5L)).thenReturn(item(5L, "Spring Boot"));
         when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item(5L, "Spring Boot")));
-        when(relationMapper.selectCount(any())).thenReturn(0L);
 
         service.extractAndPersist(1L, 5L, "内容");
 
