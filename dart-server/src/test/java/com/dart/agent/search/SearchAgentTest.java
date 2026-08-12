@@ -172,11 +172,16 @@ class SearchAgentTest {
     }
 
     @Test
-    void execute_multipleQueries_capsFetchedUrlsToAvoidExpansion() {
-        // 3 组词 × 8 个唯一 URL = 24 个合并结果，抓取必须截断在上限内，防止网络压力 3 倍
-        int[] call = {0};
+    void execute_variantsSupplement_capsFetchedUrlsToAvoidExpansion() {
+        // 主词 4 条（未达标 8）+ 变体词各 8 条 = 20 个合并结果，抓取必须截断在上限 12
         when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
-            int base = call[0]++ * 100;
+            String q = inv.getArgument(0);
+            if (q.equals("q1")) {
+                return IntStream.range(0, 4)
+                        .mapToObj(i -> new SearchResult("https://p" + i + ".com", "T", "s"))
+                        .toList();
+            }
+            int base = q.equals("q2") ? 100 : 200;
             return IntStream.range(0, 8)
                     .mapToObj(i -> new SearchResult("https://u" + (base + i) + ".com", "T", "s"))
                     .toList();
@@ -195,8 +200,71 @@ class SearchAgentTest {
 
         searchAgent.execute(List.of("q1", "q2", "q3"), 8, emitter);
 
-        // 24 个唯一 URL 只能抓取前 12 个；未抓取的后 12 个靠搜索摘要兜底参与评分
+        // 20 个唯一 URL 只能抓取前 12 个；未抓取的后 8 个靠搜索摘要兜底参与评分
         verify(searchTools).fetchPages(argThat(urls -> urls.size() == 12));
+    }
+
+    @Test
+    void execute_primarySatisfiesMaxResults_dropsVariantResults() {
+        // 主词 5 条已达标（maxResults=5）→ 变体词结果不混入；但 searchWeb 仍并行调用
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            if (q.equals("primary")) {
+                return IntStream.range(0, 5)
+                        .mapToObj(i -> new SearchResult("https://site" + i + ".com", "T", "s"))
+                        .toList();
+            }
+            return IntStream.range(0, 5)
+                    .mapToObj(i -> new SearchResult("https://variant" + i + ".com", "T", "s"))
+                    .toList();
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        List<ScoredResource> result = searchAgent.execute(List.of("primary", "variant"), 5, emitter);
+
+        verify(searchTools, times(2)).searchWeb(anyString(), anyInt());
+        verify(searchTools).fetchPages(argThat(urls -> urls.size() == 5
+                && urls.stream().noneMatch(u -> u.startsWith("https://variant"))));
+        assertThat(result).allMatch(r -> r.getUrl().startsWith("https://site"));
+    }
+
+    @Test
+    void execute_primaryInsufficient_supplementsWithVariants() {
+        // 主词 3 条（未达标 5）→ 变体词结果补入（去重后）
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            if (q.equals("primary")) {
+                return List.of(new SearchResult("https://a.com", "A", "s"),
+                        new SearchResult("https://b.com", "B", "s"),
+                        new SearchResult("https://c.com", "C", "s"));
+            }
+            return List.of(new SearchResult("https://b.com", "B", "s"),
+                    new SearchResult("https://d.com", "D", "s"));
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        searchAgent.execute(List.of("primary", "variant"), 5, emitter);
+
+        // 3 条主词 + 1 条补充（b.com 重复去重）
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://a.com", "https://b.com", "https://c.com", "https://d.com"))));
     }
 
     @Test
