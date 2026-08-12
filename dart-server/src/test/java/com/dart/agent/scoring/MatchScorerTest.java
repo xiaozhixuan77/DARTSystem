@@ -80,9 +80,9 @@ class MatchScorerTest {
     @Test
     void evaluate_shortKeywordsSkipped() {
         // 英文 token 提取（≥2 字符）："a" 被过滤，[in, python] 有效；
-        // "language" 含 "in" 误命中 + "python" 命中 → 0.5 命中率 → 3
+        // "language" 含 "in" 误命中 + "python" 命中 → 1.0 命中率 + 标题匹配 → 5
         int score = scorer.evaluate("a in Python", "Learning Python programming language");
-        assertThat(score).isEqualTo(3);
+        assertThat(score).isEqualTo(5);
     }
 
     // === 中文分词（无标点长句不再整句匹配）===
