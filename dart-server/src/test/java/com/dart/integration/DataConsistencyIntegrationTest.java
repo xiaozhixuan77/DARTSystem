@@ -252,9 +252,12 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
         // 重置 spy 以恢复真实 Redis（detectMissingVectors 需要）
         reset(redisTemplate);
 
-        // detectMissingVectors 应发现 MySQL 中有记录但 Redis 中无对应 key
+        // detectMissingVectors 应发现 MySQL 中有记录但 Redis 中无对应 key，并补偿写入
         dataConsistencyTask.detectMissingVectors();
-        // 不抛异常即为成功
+
+        // 补偿后缺失的 chunk 应写入 Redis（dart_test 库每用例清库，非空即本次补偿）
+        Set<String> keys = waitForRedisKeys(5000);
+        assertThat(keys).isNotEmpty();
     }
 
     @Test

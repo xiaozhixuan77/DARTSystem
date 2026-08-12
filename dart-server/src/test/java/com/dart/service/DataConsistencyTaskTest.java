@@ -124,4 +124,103 @@ class DataConsistencyTaskTest {
                 .map(ILoggingEvent::getFormattedMessage).toList();
         assertThat(messages).noneMatch(m -> m.contains("发现缺失向量"));
     }
+
+    // === 补偿写入（缺失即回填）===
+
+    private org.springframework.data.redis.connection.RedisHashCommands mockHashCommands(
+            RedisConnection connection, List<Object[]> hSets) {
+        org.springframework.data.redis.connection.RedisHashCommands hashCommands =
+                mock(org.springframework.data.redis.connection.RedisHashCommands.class);
+        when(hashCommands.hSet(any(byte[].class), any(byte[].class), any(byte[].class)))
+                .thenAnswer(inv -> {
+                    hSets.add(new Object[]{inv.getArgument(0), inv.getArgument(1), inv.getArgument(2)});
+                    return true;
+                });
+        when(connection.hashCommands()).thenReturn(hashCommands);
+        return hashCommands;
+    }
+
+    private KnowledgeChunk chunkWithEmbedding(String embeddingId, String base64Embedding) {
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setEmbeddingId(embeddingId);
+        chunk.setEmbedding(base64Embedding);
+        return chunk;
+    }
+
+    @Test
+    @DisplayName("检测到缺失向量时补偿写入 Redis（格式与 EmbeddingService 一致）")
+    void detectMissingVectors_backfillsMissingChunks() {
+        String validBase64 = java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(new float[1024]));
+        KnowledgeChunk chunk = chunkWithEmbedding("chunk:1:0", validBase64);
+        Page<KnowledgeChunk> page = new Page<>(1, 500);
+        page.setTotal(1);
+        page.setRecords(List.of(chunk));
+        when(knowledgeChunkMapper.selectPage(any(IPage.class), any(Wrapper.class)))
+                .thenReturn(page);
+
+        RedisKeyCommands keyCommands = mock(RedisKeyCommands.class);
+        when(keyCommands.exists(any(byte[].class))).thenReturn(false);
+        List<Object[]> hSets = new ArrayList<>();
+        RedisConnection connection = mock(RedisConnection.class);
+        when(connection.keyCommands()).thenReturn(keyCommands);
+        mockHashCommands(connection, hSets);
+        int[] call = {0};
+        when(redisTemplate.executePipelined(any(RedisCallback.class))).thenAnswer(invocation -> {
+            RedisCallback<?> callback = invocation.getArgument(0);
+            callback.doInRedis(connection);
+            // 第一次调用是 exists 检测（返回 false → 缺失），第二次是补偿写入
+            return call[0]++ == 0 ? List.of(false) : List.of();
+        });
+
+        dataConsistencyTask.detectMissingVectors();
+
+        // 补偿写入了 dart:chunk:1:0 的 hash（embedding + chunk_id 字段，与 EmbeddingService 格式一致）
+        assertThat(hSets).hasSize(2);
+        String key = new String((byte[]) hSets.get(0)[0], StandardCharsets.UTF_8);
+        String field1 = new String((byte[]) hSets.get(0)[1], StandardCharsets.UTF_8);
+        String field2 = new String((byte[]) hSets.get(1)[1], StandardCharsets.UTF_8);
+        assertThat(key).isEqualTo("dart:chunk:1:0");
+        assertThat(java.util.Set.of(field1, field2)).containsExactlyInAnyOrder("embedding", "chunk_id");
+        List<String> messages = appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage).toList();
+        assertThat(messages).anyMatch(m -> m.contains("补偿成功"));
+    }
+
+    @Test
+    @DisplayName("embedding 解码失败的 chunk 跳过补偿，其余正常写入")
+    void detectMissingVectors_skipsChunkWithBadEmbedding() {
+        String validBase64 = java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(new float[1024]));
+        KnowledgeChunk good = chunkWithEmbedding("chunk:1:0", validBase64);
+        KnowledgeChunk bad = chunkWithEmbedding("chunk:2:0", "!!!not-base64!!!");
+        Page<KnowledgeChunk> page = new Page<>(1, 500);
+        page.setTotal(2);
+        page.setRecords(List.of(good, bad));
+        when(knowledgeChunkMapper.selectPage(any(IPage.class), any(Wrapper.class)))
+                .thenReturn(page);
+
+        RedisKeyCommands keyCommands = mock(RedisKeyCommands.class);
+        when(keyCommands.exists(any(byte[].class))).thenReturn(false);
+        List<Object[]> hSets = new ArrayList<>();
+        RedisConnection connection = mock(RedisConnection.class);
+        when(connection.keyCommands()).thenReturn(keyCommands);
+        mockHashCommands(connection, hSets);
+        int[] call = {0};
+        when(redisTemplate.executePipelined(any(RedisCallback.class))).thenAnswer(invocation -> {
+            RedisCallback<?> callback = invocation.getArgument(0);
+            callback.doInRedis(connection);
+            return call[0]++ == 0 ? List.of(false, false) : List.of();
+        });
+
+        dataConsistencyTask.detectMissingVectors();
+
+        // 只有合法 chunk 被补偿写入（2 个 hSet = 1 条 chunk 的 embedding + chunk_id）
+        assertThat(hSets).hasSize(2);
+        String key = new String((byte[]) hSets.get(0)[0], StandardCharsets.UTF_8);
+        assertThat(key).isEqualTo("dart:chunk:1:0");
+        List<String> messages = appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage).toList();
+        assertThat(messages).anyMatch(m -> m.contains("跳过 1 条"));
+    }
 }
