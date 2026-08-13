@@ -255,10 +255,11 @@ class CuratorToolsTest {
         try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
             curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
+            // 节 1/3 整节流式各 1 次 + 节 2 分片回放（SECTION_PRINCIPLE_CODE ~500 字符 / 30 = 多片）
             mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("📖")), times(1));
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("🔬")), times(1));
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("🔬")), atLeast(1));
             mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("⚠️")), times(1));
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), times(3));
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), atLeast(5));
         }
     }
 
@@ -326,7 +327,7 @@ class CuratorToolsTest {
 
             ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
             mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contentCaptor.capture()),
-                    times(7)); // 节 1 流式 5 个 delta + 节 2/3 整块 2 次
+                    times(14)); // 节 1 流式 5 个 delta + 节 2 分片回放 ~8 片 + 节 3 流式 1 次
             // 空白 delta（"\n"、" "）也在推送列表中
             assertThat(contentCaptor.getAllValues())
                     .contains("### ", "1. ", "概念名\n", "- ", "**定义**");
@@ -748,9 +749,13 @@ class CuratorToolsTest {
         try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
             CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
-            // 节 2 分片推送（SECTION_PRINCIPLE_CODE ~500 字符 / 30 字符每片 = 多片）
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("🔬")), atLeast(2));
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), atLeast(5));
+            ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contentCaptor.capture()),
+                    atLeast(5));
+            // 节 2 分片回放：单片不超过 30 字符（打字机观感），无整块大事件
+            assertThat(contentCaptor.getAllValues())
+                    .filteredOn(c -> c.contains("关键原理") || c.contains("代码示例"))
+                    .allSatisfy(c -> assertThat(c.length()).isLessThanOrEqualTo(30));
             assertThat(report.markdown()).contains("JVM 内存模型");
         }
     }
