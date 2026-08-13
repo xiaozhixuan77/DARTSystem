@@ -113,6 +113,15 @@ public class CuratorTools {
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources,
                                         SseEmitter emitter, String styleHint) {
+        return generateReport(query, resources, emitter, styleHint, null);
+    }
+
+    /**
+     * @param styleHint 查询意图（风格要求）；null/未知意图不注入风格句
+     * @param sessionSummary 会话滚动摘要（占位：暂未注入，feat 实现）；null 表示无历史
+     */
+    public CuratedReport generateReport(String query, List<ScoredResource> resources,
+                                        SseEmitter emitter, String styleHint, String sessionSummary) {
         if (resources == null || resources.isEmpty()) {
             return emptyReport(query);
         }

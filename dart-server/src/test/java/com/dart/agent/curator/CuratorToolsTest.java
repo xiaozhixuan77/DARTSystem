@@ -772,6 +772,36 @@ class CuratorToolsTest {
     }
 
     @Test
+    void generateReport_withSessionSummary_injectsContextIntoSectionPrompts() {
+        stubThreeSections();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L), "deep_dive", "主题：Spring IoC\n已讨论：三级缓存");
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(2)).call(captor.capture());
+        for (Prompt p : captor.getAllValues()) {
+            String promptText = p.getInstructions().getFirst().getText();
+            // 会话上下文段注入节 prompt，含安全边界（引用来源必须来自本次素材）
+            assertThat(promptText).contains("会话上下文");
+            assertThat(promptText).contains("主题：Spring IoC\n已讨论：三级缓存");
+            assertThat(promptText).contains("不得虚构来源");
+        }
+    }
+
+    @Test
+    void generateReport_withoutSessionSummary_noContextSection() {
+        stubThreeSections();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(2)).call(captor.capture());
+        for (Prompt p : captor.getAllValues()) {
+            assertThat(p.getInstructions().getFirst().getText()).doesNotContain("会话上下文");
+        }
+    }
+
+    @Test
     void generateReport_faqSectionNotSwallowedByUnclosedCodeBlock() {
         // 偶发 bug 复现：节 2 输出在代码块内被截断（闭合 ``` 未输出），且 finishReason 未检测到截断
         // （spring-ai 未映射 finish_reason 的最坏情况）→ 代码块平衡兜底须在节内闭合，FAQ 不被吞

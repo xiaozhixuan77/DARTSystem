@@ -256,10 +256,17 @@ public class ChatService {
             return emptyResult;
         }
 
-        // 5. Curator Agent（意图透传为报告风格要求）
+        // 5. Curator Agent（意图透传为报告风格要求；会话摘要注入延续前文叙述）
         CuratedReport report;
         try {
-            report = curatorAgent.curate(effectiveQuery, searchResults, emitter, pre.intent());
+            // 摘要读取失败不降级报告生成（fail-open）
+            String sessionSummary = null;
+            try {
+                sessionSummary = conversationSummaryService.getSummary(userId, conversationId);
+            } catch (Exception e) {
+                log.warn("会话摘要读取失败，报告生成不带历史上下文: conversationId={}", conversationId, e);
+            }
+            report = curatorAgent.curate(effectiveQuery, searchResults, emitter, pre.intent(), sessionSummary);
         } catch (Exception e) {
             log.error("Curator Agent 异常", e);
             report = buildFallbackReport(effectiveQuery, searchResults);
