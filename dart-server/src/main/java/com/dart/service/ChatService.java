@@ -576,14 +576,24 @@ public class ChatService {
         return kept;
     }
 
-    public record QueryPreProcess(boolean isTech, String optimized, List<String> variants, String intent) {}
+    public record QueryPreProcess(boolean isTech, String optimized, List<String> variants,
+                                  String intent, boolean followUp) {}
 
     /**
-     * 合并领域判断、意图分类与提示词优化为一次 LLM 调用（JSON 输出 {isTech, optimized, variants, intent}）。
-     * 失败/解析失败降级：isTech=true（放行）、optimized=原查询、variants=空列表、intent=how_to。
+     * 合并领域判断、意图分类与提示词优化为一次 LLM 调用（JSON 输出 {isTech, optimized, variants, intent, isFollowUp}）。
+     * 失败/解析失败降级：isTech=true（放行）、optimized=原查询、variants=空列表、intent=how_to、followUp=false。
      * 用户输入用 XML 标签包裹防注入。
      */
     public QueryPreProcess preProcessQuery(String query) {
+        return preProcessQuery(query, "");
+    }
+
+    /** 占位（feat 实现）：注入会话摘要辅助续答意图判定与指代解析。 */
+    public QueryPreProcess preProcessQuery(String query, String summary) {
+        return preProcessQueryLegacy(query);
+    }
+
+    private QueryPreProcess preProcessQueryLegacy(String query) {
         try {
             String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
             String prompt = """
@@ -619,10 +629,10 @@ public class ChatService {
             String intent = isTech ? parseIntent(response) : "non_tech";
             return new QueryPreProcess(isTech,
                     (optimized == null || optimized.isBlank()) ? query : optimized,
-                    variants, intent);
+                    variants, intent, false);
         } catch (Exception e) {
             log.warn("LLM 前置判断与提示词优化失败，降级为技术查询+原文", e);
-            return new QueryPreProcess(true, query, List.of(), "how_to");
+            return new QueryPreProcess(true, query, List.of(), "how_to", false);
         }
     }
 

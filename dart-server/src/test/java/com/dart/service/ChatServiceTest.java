@@ -372,6 +372,98 @@ class ChatServiceTest {
         assertThat(pre.intent()).isEqualTo("non_tech");
     }
 
+    // === 会话记忆注入与续答意图判定 ===
+
+    @Test
+    void preProcessQuery_withSummary_injectsMemorySectionIntoPrompt() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"Spring 三级缓存原理\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":false}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.preProcessQuery("接着讲讲它", "主题：Spring IoC\n已讨论：三级缓存");
+
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        String promptText = captor.getValue().getInstructions().getFirst().getText();
+        // 会话摘要以 <session_memory> 块注入前置调用 prompt
+        assertThat(promptText).contains("<session_memory>");
+        assertThat(promptText).contains("主题：Spring IoC\n已讨论：三级缓存");
+    }
+
+    @Test
+    void preProcessQuery_withoutSummary_omitsMemorySection() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"Spring 三级缓存原理\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.preProcessQuery("Spring 三级缓存", "");
+
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        String promptText = captor.getValue().getInstructions().getFirst().getText();
+        // 无摘要时不注入 memory 段（省 token）
+        assertThat(promptText).doesNotContain("<session_memory>");
+    }
+
+    @Test
+    void preProcessQuery_parsesIsFollowUpTrue() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"\","
+                        + "\"variants\":[],\"intent\":\"followup\",\"isFollowUp\":true}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("为什么不行", "主题：Spring IoC\n关键结论：三级缓存");
+        assertThat(pre.followUp()).isTrue();
+        assertThat(pre.intent()).isEqualTo("followup");
+    }
+
+    @Test
+    void preProcessQuery_missingIsFollowUp_defaultsFalse() {
+        // 旧格式 JSON（无 isFollowUp 字段）→ 兼容，默认非续答
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"Spring 三级缓存原理\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Spring 三级缓存", "主题：Spring IoC");
+        assertThat(pre.followUp()).isFalse();
+    }
+
+    @Test
+    void preProcessQuery_malformedIsFollowUp_defaultsFalse() {
+        // isFollowUp 字段畸形（非法值）→ 降级 false，不抛异常
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"Spring 三级缓存\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":maybe}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Spring 三级缓存", "");
+        assertThat(pre.followUp()).isFalse();
+    }
+
+    @Test
+    void preProcessQuery_promptIncludesFollowUpDetectionInstructions() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"Spring 三级缓存原理\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":false}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.preProcessQuery("Spring 三级缓存", "");
+
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        String promptText = captor.getValue().getInstructions().getFirst().getText();
+        // 续答意图判定指令 + 无历史时恒 false 的安全约束
+        assertThat(promptText).contains("续答");
+        assertThat(promptText).contains("isFollowUp");
+        assertThat(promptText).contains("无历史");
+    }
+
     // === executeSearchAndCurate ===
 
     @Test
