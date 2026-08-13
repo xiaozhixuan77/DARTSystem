@@ -728,7 +728,7 @@ class CuratorToolsTest {
                     section2LengthTruncatedOnce = true;
                     return new ChatResponse(List.of(new Generation(
                             new AssistantMessage("## 🔬 关键原理\n\n（截断）"),
-                            ChatGenerationMetadata.builder().finishReason("length").build())));
+                            ChatGenerationMetadata.builder().finishReason("LENGTH").build())));
                 }
                 return new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_PRINCIPLE_CODE))));
             }
@@ -755,7 +755,7 @@ class CuratorToolsTest {
             if (text.contains("关键原理")) {
                 return new ChatResponse(List.of(new Generation(
                         new AssistantMessage("## 🔬 关键原理\n\n（截断）"),
-                        ChatGenerationMetadata.builder().finishReason("length").build())));
+                        ChatGenerationMetadata.builder().finishReason("LENGTH").build())));
             }
             return new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
         });
@@ -852,7 +852,7 @@ class CuratorToolsTest {
         when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(new ChatResponse(
                 List.of(new Generation(
                         new AssistantMessage("## 📖 核心概念\n\n```java\npublic class X {\n    @"),
-                        ChatGenerationMetadata.builder().finishReason("length").build())))));
+                        ChatGenerationMetadata.builder().finishReason("LENGTH").build())))));
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
