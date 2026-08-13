@@ -374,6 +374,24 @@ class ChatServiceTest {
         assertThat(pre.intent()).isEqualTo("non_tech");
     }
 
+    @Test
+    void preProcessQuery_architectureQuery_promptDemandsFrameworkAnchors() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"LangGraph AutoGen CrewAI Agent 架构对比\","
+                        + "\"variants\":[],\"intent\":\"comparison\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.preProcessQuery("现在主流的Agent系统技术架构", "");
+
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        String promptText = captor.getValue().getInstructions().getFirst().getText();
+        // 架构/选型类查询：检索词必须附带主流系统锚点，否则搜索只能返回入门科普
+        assertThat(promptText).contains("主流系统")
+                .contains("LangGraph").contains("AutoGen").contains("CrewAI");
+    }
+
     // === 会话记忆注入与续答意图判定 ===
 
     @Test
