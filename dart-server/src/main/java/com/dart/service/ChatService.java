@@ -743,6 +743,9 @@ public class ChatService {
                    - 术语有歧义时（如"三级缓存"可能指 CPU 缓存或 Spring 循环依赖），
                      以历史摘要「已讨论」字段的语境为准，不按字面默认理解
                    - 补充关键上下文（技术栈、版本、场景）；非技术输入输出空字符串
+                   - 查询主题涉及"架构/框架/选型/对比/主流方案"时，检索词必须附带 2-3 个该领域主流系统名作锚点
+                     （例：AI Agent 编排→LangGraph、AutoGen、CrewAI、OpenAI Agents；大模型→ChatGPT、Claude、Gemini；
+                     Web 后端→Spring Boot、Node.js、FastAPI），仅写抽象概念词（如"主流AI Agent系统"）会让搜索只返回入门科普
                 3. 生成 2 个检索变体词（variants）用于并行网络搜索扩大召回：
                    - 与 optimized 不同的表达角度/补充上下文（如英文术语、更短的关键词组合、场景化描述）
                    - 每个不超过 50 字；非技术输入输出空数组 []
