@@ -184,7 +184,6 @@ class ConversationSummaryServiceTest {
     @Test
     void updateSummary_disabled_skipsLlmAndPersist() {
         ReflectionTestUtils.setField(summaryService, "memoryEnabled", false);
-        when(conversationMapper.selectById(1L)).thenReturn(conversation(1L, 10L, null));
 
         summaryService.updateSummary(10L, 1L, "query", "报告");
 
