@@ -7,7 +7,6 @@ import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -15,9 +14,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -35,6 +36,9 @@ public class CuratorTools {
 
     /** 占位节标记（沉淀检查/降级判定引用同一标记，防文案改动静默失效） */
     public static final String SECTION_FAILED_MARKER = "本节内容生成失败";
+
+    /** 节 2 队列结束标记：NUL 前缀保证 LLM 输出不可能包含 */
+    private static final String QUEUE_END_MARKER = "\u0000__SECTION_END__";
 
     private static final String SECTION_FAILED =
             "> ⚠️ " + SECTION_FAILED_MARKER + "，请稍后重试或访问参考文献了解详情。";
@@ -100,9 +104,9 @@ public class CuratorTools {
     }
 
     /**
-     * 分节生成结构化 Markdown 学习报告：
-     * ①核心概念（token 级流式直推，感知最快）→ ②原理+代码示例 → ③误区FAQ+进阶+参考文献。
-     * 节 1 流式推送的同时，节 2/3 并行预生成缓冲，完成后按序整块推送。
+     * 分节生成结构化 Markdown 学习报告（三节全部流式输出，打字机效果）：
+     * ①核心概念（token 级流式直推）→ ②原理+代码示例（与节 1 并行流式生成进队列，
+     * 节 1 完成后实时消费推送）→ ③误区FAQ+进阶+参考文献（流式直推）。
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources, SseEmitter emitter) {
         return generateReport(query, resources, emitter, null);
@@ -135,33 +139,34 @@ public class CuratorTools {
         List<String> sections = new ArrayList<>();
 
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
-            // 阶段 A：节 1（token 流式直推）+ 节 2 并行（峰值 2 并发——
+            // 阶段 A：节 1（token 流式直推）+ 节 2 并行流式生成进队列（峰值 2 并发——
             // 官网对并发长输入偶发空响应，2 并发实测 0 空，3 并发 ~1/3 空）
             SseUtils.sendStatus(emitter, "curating", "正在讲解核心概念...");
+            BlockingQueue<String> queue2 = new LinkedBlockingQueue<>();
             Future<String> section2Future = pool.submit(() -> {
-                SseUtils.sendStatus(emitter, "curating", "正在解析原理与代码示例...");
-                return generateSection(query, resourcesText,
-                        buildPrincipleCodePrompt(query), "principles_code", styleHint, sessionSummary);
+                try {
+                    SseUtils.sendStatus(emitter, "curating", "正在解析原理与代码示例...");
+                    return streamSectionToQueue(query, resourcesText,
+                            buildPrincipleCodePrompt(query), "principles_code", styleHint, sessionSummary, queue2);
+                } finally {
+                    queue2.offer(QUEUE_END_MARKER); // 无论成败都发结束标记
+                }
             });
 
             String section1 = streamSection(query, resourcesText,
                     buildConceptPrompt(query), "concepts", emitter, styleHint, sessionSummary);
             sections.add(section1);
 
-            String section2 = section2Future.get();
-            sections.add(section2);
-            if (!section2.equals(SECTION_FAILED)) {
-                SseUtils.sendEvent(emitter, SseEvents.CONTENT, section2);
-            }
+            // 节 1 完成后消费节 2 队列：打字机（已缓冲部分快速出、未生成部分实时到）
+            // 队列为空（生产端空白/失败）→ 按失败节处理（SECTION_FAILED），保证 fallback 判定一致
+            String section2 = consumeQueueAndPush(queue2, emitter);
+            sections.add(section2.isBlank() ? SECTION_FAILED : section2);
 
-            // 阶段 B：节 3 单独生成（避免与节 2 并发造成 3 并发峰值）
+            // 阶段 B：节 3 流式直推（与节 2 串行，保持 2 并发峰值）
             SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
-            String section3 = generateSection(query, resourcesText,
-                    buildFaqAdvancePrompt(query), "faq_advance", styleHint, sessionSummary);
+            String section3 = streamSection(query, resourcesText,
+                    buildFaqAdvancePrompt(query), "faq_advance", emitter, styleHint, sessionSummary);
             sections.add(section3);
-            if (!section3.equals(SECTION_FAILED)) {
-                SseUtils.sendEvent(emitter, SseEvents.CONTENT, section3);
-            }
         } catch (Exception e) {
             log.warn("并行分节生成异常，追加占位节", e);
             while (sections.size() < 3) {
@@ -195,35 +200,63 @@ public class CuratorTools {
     }
 
     /**
-     * 调用 LLM 生成单节内容；失败或空白响应重试一次（DeepSeek 官网长输入并发时
-     * 偶发 HTTP 200 + 空内容），仍失败返回占位文本，不影响主流程。
+     * 节 2 并行流式生成进队列（后台线程）：每个 delta 入 BlockingQueue（不推送 SSE，
+     * 避免与节 1 的推送交错），同时累积完整文本返回。
+     * 截断策略与 streamSection（节 1）一致——截断不重试（token 已入队列，节 1 完成时
+     * 消费者已在 take，重试清队列会破坏已推送内容）；空白响应重试（空白时队列为空，安全）。
      */
-    private String generateSection(String query, String resourcesText,
-                                   String sectionPrompt, String sectionName, String styleHint,
-                                   String sessionSummary) {
+    private String streamSectionToQueue(String query, String resourcesText, String sectionPrompt,
+                                        String sectionName, String styleHint, String sessionSummary,
+                                        BlockingQueue<String> queue) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
         String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint, sessionSummary);
         for (int attempt = 1; attempt <= 3; attempt++) {
+            queue.clear(); // 防御性清空：空白重试时队列天然为空；有内容时（截断）不重试，无污染
+            AtomicReference<String> finishReason = new AtomicReference<>();
+            StringBuilder sb = new StringBuilder();
             try {
-                ChatResponse response = chatModel.call(new Prompt(new UserMessage(prompt), options));
-                // finish_reason=length/insufficient_system_resource：输出被服务端截断，内容不完整，
-                // 视为失败重试（DeepSeek 截断不抛异常、非空白，旧逻辑会静默接受坏节）
-                String finishReason = response.getResults().getFirst().getMetadata().getFinishReason();
-                if (isTruncated(finishReason)) {
-                    log.warn("报告节[{}]第 {} 次调用输出截断({})，重试", sectionName, attempt, finishReason);
-                    continue;
+                chatModel.stream(new Prompt(new UserMessage(prompt), options))
+                        .doOnNext(resp -> {
+                            finishReason.set(resp.getResults().getFirst().getMetadata().getFinishReason());
+                            String delta = resp.getResults().getFirst().getOutput().getText();
+                            if (delta == null) {
+                                return;
+                            }
+                            sb.append(delta);
+                            queue.offer(delta);
+                        })
+                        .blockLast();
+                if (isTruncated(finishReason.get())) {
+                    // 与节 1 一致：截断内容直接接受（代码块平衡兜底保证渲染），不重试
+                    log.warn("报告节[{}]第 {} 次流式输出截断({})，接受当前内容", sectionName, attempt, finishReason.get());
                 }
-                String responseText = response.getResults().getFirst().getOutput().getText();
-                String cleaned = cleanSection(responseText);
+                String cleaned = cleanSection(sb.toString());
                 if (!cleaned.isBlank()) {
                     return cleaned;
                 }
-                log.warn("报告节[{}]第 {} 次调用返回空白，重试", sectionName, attempt);
+                log.warn("报告节[{}]第 {} 次流式返回空白，重试", sectionName, attempt);
             } catch (Exception e) {
-                log.warn("报告节[{}]第 {} 次调用失败", sectionName, attempt, e);
+                log.warn("报告节[{}]第 {} 次流式生成失败", sectionName, attempt, e);
             }
         }
         return SECTION_FAILED;
+    }
+
+    /**
+     * 消费节 2 队列：逐 delta 推送 SSE CONTENT（打字机——已缓冲部分快速出、未生成部分实时到），
+     * 拼接完整文本返回；遇到结束标记退出。
+     */
+    private String consumeQueueAndPush(BlockingQueue<String> queue, SseEmitter emitter) throws InterruptedException {
+        StringBuilder sb = new StringBuilder();
+        while (true) {
+            String delta = queue.take();
+            if (QUEUE_END_MARKER.equals(delta)) {
+                break;
+            }
+            sb.append(delta);
+            SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
+        }
+        return sb.toString();
     }
 
     /**

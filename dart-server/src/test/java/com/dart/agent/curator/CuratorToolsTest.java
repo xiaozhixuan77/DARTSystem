@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mockStatic;
@@ -262,7 +263,7 @@ class CuratorToolsTest {
 
     @Test
     void generateReport_allSectionsFail_streamsFallbackOnce() {
-        when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
+        when(chatModel.stream(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "content ".repeat(200), 4.5);
         ScoredResource r2 = makeResource("https://medium.com", "Medium Guide", "content ".repeat(200), 4.0);
 
@@ -286,7 +287,8 @@ class CuratorToolsTest {
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(section)))));
         });
         // 节 1 流式：纯空白 delta（独立空格/换行）与文字 delta 混合，模拟 DeepSeek 流式推送
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+                .thenReturn(Flux.just(
                 new ChatResponse(List.of(new Generation(new AssistantMessage("## ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("📖 ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("核心概念"))))));
@@ -310,7 +312,8 @@ class CuratorToolsTest {
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(section)))));
         });
         // 纯空白 delta（换行/空格）必须推送：前端依赖空格/换行识别 markdown 标题与列表
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+                .thenReturn(Flux.just(
                 new ChatResponse(List.of(new Generation(new AssistantMessage("### ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("1. ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("概念名\n")))),
@@ -355,10 +358,6 @@ class CuratorToolsTest {
             String promptText = p.getInstructions().getFirst().getText();
             assertThat(promptText).contains("1000-1200 字");
         }
-        ArgumentCaptor<Prompt> streamCaptor = ArgumentCaptor.forClass(Prompt.class);
-        verify(chatModel).stream(streamCaptor.capture());
-        assertThat(streamCaptor.getValue().getInstructions().getFirst().getText())
-                .contains("1000-1200 字");
     }
 
     @Test
@@ -371,7 +370,8 @@ class CuratorToolsTest {
                     ? SECTION_PRINCIPLE_CODE : SECTION_FAQ_ADVANCE;
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(section)))));
         });
-        when(chatModel.stream(any(Prompt.class))).thenAnswer(inv -> Flux.just(
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+        .thenAnswer(inv -> Flux.just(
                 new ChatResponse(List.of(new Generation(new AssistantMessage("## ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("📖 核心"))))));
 
@@ -518,7 +518,7 @@ class CuratorToolsTest {
             }
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE)))));
         });
-        when(chatModel.stream(any(Prompt.class))).thenAnswer(inv -> {
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念")))).thenAnswer(inv -> {
             Prompt p = inv.getArgument(0);
             String text = p.getInstructions().getFirst().getText();
             if (text.contains("核心概念")) {
@@ -555,8 +555,9 @@ class CuratorToolsTest {
             }
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE)))));
         });
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
-                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+                .thenReturn(Flux.just(
+                        new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
@@ -577,7 +578,8 @@ class CuratorToolsTest {
                     ? SECTION_PRINCIPLE_CODE : SECTION_FAQ_ADVANCE;
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(section)))));
         });
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.empty());
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+                .thenReturn(Flux.empty());
 
         try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
             CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
@@ -604,8 +606,9 @@ class CuratorToolsTest {
             }
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE)))));
         });
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
-                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+                .thenReturn(Flux.just(
+                        new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
         assertThat(report.markdown()).contains("📖");
@@ -618,7 +621,6 @@ class CuratorToolsTest {
 
     @Test
     void generateReport_allSectionsFail_returnsFallback() {
-        when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
         when(chatModel.stream(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "content ".repeat(200), 4.5);
         ScoredResource r2 = makeResource("https://medium.com", "Medium Guide", "content ".repeat(200), 4.0);
@@ -719,8 +721,9 @@ class CuratorToolsTest {
             }
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE)))));
         });
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
-                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+                .thenReturn(Flux.just(
+                        new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
@@ -742,8 +745,9 @@ class CuratorToolsTest {
             }
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE)))));
         });
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
-                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+                .thenReturn(Flux.just(
+                        new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
@@ -808,8 +812,9 @@ class CuratorToolsTest {
                     ? truncatedSection2 : SECTION_FAQ_ADVANCE;
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(section)))));
         });
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
-                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+                .thenReturn(Flux.just(
+                        new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
         CuratedReport report = curatorTools.generateReport("Spring IoC", fourResources(), new SseEmitter(0L));
 
@@ -832,14 +837,16 @@ class CuratorToolsTest {
                     ? SECTION_PRINCIPLE_CODE : SECTION_FAQ_ADVANCE;
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(section)))));
         });
-        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(new ChatResponse(
-                List.of(new Generation(
-                        new AssistantMessage("## 📖 核心概念\n\n```java\npublic class X {\n    @"),
-                        ChatGenerationMetadata.builder().finishReason("LENGTH").build())))));
+        when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
+                .thenReturn(Flux.just(new ChatResponse(
+                        List.of(new Generation(
+                                new AssistantMessage("## 📖 核心概念\n\n```java\npublic class X {\n    @"),
+                                ChatGenerationMetadata.builder().finishReason("LENGTH").build())))));
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
-        verify(chatModel, times(1)).stream(any(Prompt.class));
+        // 节 1 截断不重试：三节各 1 次 stream
+        verify(chatModel, times(3)).stream(any(Prompt.class));
         String md = report.markdown();
         String beforeFaq = md.substring(0, md.indexOf("## ⚠️ 常见误区与 FAQ"));
         assertThat(countFenceLines(beforeFaq)).isEven();
