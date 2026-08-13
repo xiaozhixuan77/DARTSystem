@@ -268,10 +268,15 @@ public class CuratorTools {
         return SECTION_FAILED;
     }
 
-    /** DeepSeek（OpenAI 兼容）内容截断标记：达 max_tokens / 服务端资源不足中断。 */
+    /**
+     * DeepSeek（OpenAI 兼容）内容截断标记：达 max_tokens / 服务端资源不足中断。
+     * spring-ai-deepseek 将 finish_reason 映射为枚举 name()（大写 "LENGTH"），
+     * 故比较必须忽略大小写（曾有大小写不匹配导致检测失效的教训）。
+     */
     private static boolean isTruncated(String finishReason) {
         return finishReason != null
-                && (finishReason.equals("length") || finishReason.equals("insufficient_system_resource"));
+                && (finishReason.equalsIgnoreCase("length")
+                    || finishReason.equalsIgnoreCase("insufficient_system_resource"));
     }
 
     /**
