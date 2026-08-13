@@ -7,6 +7,7 @@ import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -17,6 +18,7 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
@@ -29,7 +31,7 @@ public class CuratorTools {
     private static final int MIN_REPORT_LENGTH = 800;
     private static final int MAX_REPORT_LENGTH = 16000;
     private static final int MAX_CONTENT_PER_RESOURCE = 1500;
-    private static final int MAX_TOKENS_PER_SECTION = 2048;
+    private static final int MAX_TOKENS_PER_SECTION = 4096;
 
     /** 占位节标记（沉淀检查/降级判定引用同一标记，防文案改动静默失效） */
     public static final String SECTION_FAILED_MARKER = "本节内容生成失败";
@@ -176,7 +178,9 @@ public class CuratorTools {
             }
         }
 
-        String markdown = truncateReport(String.join("\n\n---\n\n", sections));
+        // 节级代码块平衡修复：节内未闭合 fence 在节内闭合（拼接后才补会把后续节吞进代码块）
+        List<String> balancedSections = sections.stream().map(this::ensureClosedCodeBlocks).toList();
+        String markdown = truncateReport(ensureClosedCodeBlocks(String.join("\n\n---\n\n", balancedSections)));
         List<String> sources = resources.stream().map(ScoredResource::getUrl).toList();
         return new CuratedReport(query, markdown, sources, Instant.now());
     }
@@ -191,12 +195,16 @@ public class CuratorTools {
         String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint);
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                String response = chatModel.call(new Prompt(new UserMessage(prompt), options))
-                        .getResults()
-                        .getFirst()
-                        .getOutput()
-                        .getText();
-                String cleaned = cleanSection(response);
+                ChatResponse response = chatModel.call(new Prompt(new UserMessage(prompt), options));
+                // finish_reason=length/insufficient_system_resource：输出被服务端截断，内容不完整，
+                // 视为失败重试（DeepSeek 截断不抛异常、非空白，旧逻辑会静默接受坏节）
+                String finishReason = response.getResults().getFirst().getMetadata().getFinishReason();
+                if (isTruncated(finishReason)) {
+                    log.warn("报告节[{}]第 {} 次调用输出截断({})，重试", sectionName, attempt, finishReason);
+                    continue;
+                }
+                String responseText = response.getResults().getFirst().getOutput().getText();
+                String cleaned = cleanSection(responseText);
                 if (!cleaned.isBlank()) {
                     return cleaned;
                 }
@@ -219,8 +227,11 @@ public class CuratorTools {
         for (int attempt = 1; attempt <= 3; attempt++) {
             StringBuilder sb = new StringBuilder();
             try {
+                // 截断响应不做流式重试（token 已推送无法回滚），记录后交给代码块平衡兜底
+                AtomicReference<String> finishReason = new AtomicReference<>();
                 chatModel.stream(new Prompt(new UserMessage(prompt), options))
                         .doOnNext(resp -> {
+                            finishReason.set(resp.getResults().getFirst().getMetadata().getFinishReason());
                             String delta = resp.getResults().getFirst().getOutput().getText();
                             if (delta == null) {
                                 return;
@@ -231,6 +242,9 @@ public class CuratorTools {
                             SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
                         })
                         .blockLast();
+                if (isTruncated(finishReason.get())) {
+                    log.warn("报告节[{}]第 {} 次流式输出截断({})，内容不完整", sectionName, attempt, finishReason.get());
+                }
                 String cleaned = cleanSection(sb.toString());
                 if (!cleaned.isBlank()) {
                     return cleaned;
@@ -241,6 +255,12 @@ public class CuratorTools {
             }
         }
         return SECTION_FAILED;
+    }
+
+    /** DeepSeek（OpenAI 兼容）内容截断标记：达 max_tokens / 服务端资源不足中断。 */
+    private static boolean isTruncated(String finishReason) {
+        return finishReason != null
+                && (finishReason.equals("length") || finishReason.equals("insufficient_system_resource"));
     }
 
     /**
@@ -448,7 +468,7 @@ public class CuratorTools {
         }
 
         List<String> sources = resources.stream().map(ScoredResource::getUrl).toList();
-        return new CuratedReport(query, sb.toString(), sources, Instant.now());
+        return new CuratedReport(query, ensureClosedCodeBlocks(sb.toString()), sources, Instant.now());
     }
 
     /**
@@ -481,9 +501,16 @@ public class CuratorTools {
         return result;
     }
 
-    /** 代码块平衡兜底（占位，feat 实现）：行首 ``` 数量为奇数时在末尾追加闭合。 */
+    /**
+     * 代码块平衡兜底：行首 ``` 数量为奇数（存在未闭合代码块）时在末尾追加闭合，
+     * 防止未闭合 fence 吞掉后续所有节（markdown 渲染进代码区域）。节级调用，非拼接级。
+     */
     String ensureClosedCodeBlocks(String markdown) {
-        return markdown;
+        long fences = markdown.lines().filter(l -> l.startsWith("```")).count();
+        if ((fences & 1L) == 0L) {
+            return markdown;
+        }
+        return markdown + (markdown.endsWith("\n") ? "" : "\n") + "```";
     }
 
     private String cleanSection(String markdown) {
@@ -516,6 +543,6 @@ public class CuratorTools {
                 + "## " + r.getTitle() + "\n\n"
                 + "- **来源**: " + r.getUrl() + "\n"
                 + "- **内容**: " + truncateContent(r.getContent(), 1000) + "\n";
-        return new CuratedReport(query, md, List.of(r.getUrl()), Instant.now());
+        return new CuratedReport(query, ensureClosedCodeBlocks(md), List.of(r.getUrl()), Instant.now());
     }
 }
