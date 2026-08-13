@@ -44,6 +44,7 @@ class CuratorToolsTest {
 
     private CuratorTools curatorTools;
     private boolean streamBlankFirst;
+    private boolean section2LengthTruncatedOnce;
 
     private static final String SECTION_CONCEPT = """
             ## 📖 核心概念
@@ -342,7 +343,7 @@ class CuratorToolsTest {
         verify(chatModel, times(3)).stream(captor.capture());
         for (Prompt p : captor.getAllValues()) {
             assertThat(p.getOptions()).isNotNull();
-            assertThat(p.getOptions().getMaxTokens()).isEqualTo(4096);
+            assertThat(p.getOptions().getMaxTokens()).isEqualTo(8192);
         }
     }
 
@@ -708,16 +709,20 @@ class CuratorToolsTest {
     }
 
     @Test
-    void generateReport_section2Truncated_acceptedWithoutRetry() {
-        // 节 2 流式截断（finish_reason="LENGTH"）：token 已入队列无法回滚（节 1 可能已完成、消费者已在 take），
-        // 与节 1 截断策略一致——不重试，截断文本进入报告；代码块平衡兜底保证渲染不破坏
+    void generateReport_section2Truncated_retriesAndServesComplete() {
+        // 节 2 流式截断（finish_reason="LENGTH"）→ 必须重试（消费者等生产端完整结束后才分片回放，
+        // 无竞态可安全清队列）；第 2 次成功 → 报告含完整节 2，不含截断片段
         when(chatModel.stream(any(Prompt.class))).thenAnswer(inv -> {
             Prompt p = inv.getArgument(0);
             String text = p.getInstructions().getFirst().getText();
             if (text.contains("关键原理")) {
-                return Flux.just(new ChatResponse(List.of(new Generation(
-                        new AssistantMessage("## 🔬 关键原理\n\n（截断）"),
-                        ChatGenerationMetadata.builder().finishReason("LENGTH").build()))));
+                if (!section2LengthTruncatedOnce) {
+                    section2LengthTruncatedOnce = true;
+                    return Flux.just(new ChatResponse(List.of(new Generation(
+                            new AssistantMessage("## 🔬 关键原理\n\n（截断）"),
+                            ChatGenerationMetadata.builder().finishReason("LENGTH").build()))));
+                }
+                return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_PRINCIPLE_CODE)))));
             }
             return Flux.just(new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE)))));
         });
@@ -727,11 +732,27 @@ class CuratorToolsTest {
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
 
-        // 无重试：三节各 1 次 stream
-        verify(chatModel, times(3)).stream(any(Prompt.class));
-        // 截断文本被接受（不重试、不降级），节 2/3 正常拼接
-        assertThat(report.markdown()).contains("（截断）");
+        // 节 2 截断 1 次 + 重试成功 1 次 + 节 1/节 3 各 1 次 = stream 共 4 次
+        verify(chatModel, times(4)).stream(any(Prompt.class));
+        // 截断片段被丢弃，报告含完整节 2 内容
+        assertThat(report.markdown()).doesNotContain("（截断）");
+        assertThat(report.markdown()).contains("JVM 内存模型");
         assertThat(report.markdown()).contains("📚");
+    }
+
+    @Test
+    void generateReport_section2StreamsInChunks() {
+        // 节 2 预生成完成后分片回放（模拟打字机）：多片 CONTENT 事件而非单片整块
+        stubThreeSections();
+
+        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
+            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+            // 节 2 分片推送（SECTION_PRINCIPLE_CODE ~500 字符 / 30 字符每片 = 多片）
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("🔬")), atLeast(2));
+            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), atLeast(5));
+            assertThat(report.markdown()).contains("JVM 内存模型");
+        }
     }
 
     @Test
