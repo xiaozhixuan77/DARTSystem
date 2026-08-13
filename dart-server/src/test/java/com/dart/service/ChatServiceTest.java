@@ -561,9 +561,9 @@ class ChatServiceTest {
 
         chatService.executeSearchAndCurate("Spring 三级缓存", 1L, 100L, emitter);
 
-        // 正常查询走完整搜索流程，不走续答
+        // 正常查询走完整搜索流程，不走续答；报告产生后仍更新会话摘要（预期行为）
         verify(searchAgent).execute(anyList(), anyInt(), any());
-        verify(summaryService, never()).updateSummary(any(), any(), any(), any());
+        verify(summaryService).updateSummary(eq(1L), eq(100L), any(), any());
     }
 
     // === 会话摘要更新与追问注入 ===
@@ -624,10 +624,10 @@ class ChatServiceTest {
 
         chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
-        // 追问 prompt 注入会话摘要（可引用前几轮内容）
+        // 追问 prompt 注入会话摘要（可引用前几轮内容）；调用 2 次 = 前置调用 + 追问
         ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
                 ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-        verify(chatModel, timeout(3000)).call(captor.capture());
+        verify(chatModel, timeout(3000).times(2)).call(captor.capture());
         String followUpPrompt = captor.getAllValues().stream()
                 .filter(p -> p.getInstructions().getFirst().getText().contains("追问方向"))
                 .map(p -> p.getInstructions().getFirst().getText())

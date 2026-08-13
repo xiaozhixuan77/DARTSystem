@@ -105,6 +105,17 @@ agent:
     # 报告自动沉淀：生成成功的报告写入用户知识库（RAG 预灌），相似查询直接命中
     enabled: true
     max-items-per-user: 50
+  memory:
+    # 会话长记忆（滚动摘要）：模糊输入解析、追问与报告生成注入会话上下文
+    enabled: true
+    # 滚动摘要字数上限（结构化 5 字段）
+    summary-max-chars: 400
+    # 增量压缩时的报告输入截断（防 token 膨胀）
+    summary-report-chars: 4000
+    # 续答路径加载的最近报告轮数
+    recent-reports: 2
+    # 每轮报告注入续答路径的截断字符数
+    report-chars-per-round: 3000
   search:
     max-results: 6
     fetch-timeout-ms: 6000

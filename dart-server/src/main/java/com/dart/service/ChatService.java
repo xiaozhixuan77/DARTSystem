@@ -222,6 +222,9 @@ public class ChatService {
                 recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
                         true, ragResult.get().maxSimilarity(), effectiveQuery,
                         List.of(), "rag", null, startNanos);
+                // RAG 命中也有问答产生 → 更新会话摘要（异步，不阻塞）
+                conversationSummaryService.updateSummary(userId, conversationId,
+                        query, result.ragAnswer().answer());
                 return result;
             }
 
@@ -308,7 +311,8 @@ public class ChatService {
                                            String intent) {
         String markdown = report.markdown();
         try {
-            String followUp = generateFollowUp(query, markdown);
+            String followUp = generateFollowUp(query, markdown,
+                    assistantMessage.getConversationId(), userId);
             if (followUp != null && !followUp.isBlank()) {
                 SseUtils.sendStatus(emitter, "curating", "正在生成追问建议...");
                 SseUtils.sendEvent(emitter, SseEvents.CONTENT,
@@ -323,6 +327,11 @@ public class ChatService {
         } finally {
             writeCache(query, markdown, report.sources());
             sedimentReport(userId, query, markdown, report.sources(), intent);
+            // 摘要更新必须传原始报告（不含追问段），追问段会污染摘要
+            if (assistantMessage.getConversationId() != null) {
+                conversationSummaryService.updateSummary(userId,
+                        assistantMessage.getConversationId(), query, report.markdown());
+            }
         }
     }
 
@@ -504,14 +513,24 @@ public class ChatService {
      * 基于知识图谱报告内容，由 LLM 生成 2-3 条自然语言追问建议。
      * 失败时返回 null，不影响主流程。
      */
-    private String generateFollowUp(String query, String reportMarkdown) {
+    private String generateFollowUp(String query, String reportMarkdown,
+                                    Long conversationId, Long userId) {
         try {
             String truncated = reportMarkdown.length() > FOLLOW_UP_MAX_REPORT_CHARS
                     ? reportMarkdown.substring(0, FOLLOW_UP_MAX_REPORT_CHARS)
                     : reportMarkdown;
             String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
+            String summary = null;
+            try {
+                summary = conversationSummaryService.getSummary(userId, conversationId);
+            } catch (Exception e) {
+                log.warn("追问会话摘要读取失败，跳过注入: conversationId={}", conversationId, e);
+            }
+            String memorySection = (summary == null || summary.isBlank()) ? ""
+                    : "历史会话摘要（可引用前几轮已讨论内容，追问应延续而非重复）：\n<session_memory>\n"
+                            + summary + "\n</session_memory>\n\n";
             String prompt = """
-                    以下是一份知识学习报告（含 Mermaid 知识图谱和结构化章节），根据报告已覆盖的内容，提出2-3个读者可能感兴趣的追问方向。
+                    %s以下是一份知识学习报告（含 Mermaid 知识图谱和结构化章节），根据报告已覆盖的内容，提出2-3个读者可能感兴趣的追问方向。
                     追问应与知识图谱的分支主题相关但不重复已讲内容，以自然对话语气、中文写出。
 
                     用户查询：<user_query>%s</user_query>
@@ -522,7 +541,7 @@ public class ChatService {
                     - 追问问题1
                     - 追问问题2
                     - 追问问题3
-                    """.formatted(sanitized, truncated);
+                    """.formatted(memorySection, sanitized, truncated);
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResults().getFirst().getOutput().getText().trim();
             return response.isBlank() ? null : response;

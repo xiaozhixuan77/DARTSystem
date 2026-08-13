@@ -118,7 +118,7 @@ public class CuratorTools {
 
     /**
      * @param styleHint 查询意图（风格要求）；null/未知意图不注入风格句
-     * @param sessionSummary 会话滚动摘要（占位：暂未注入，feat 实现）；null 表示无历史
+     * @param sessionSummary 会话滚动摘要（长记忆）：注入节 prompt 延续前文叙述；null 表示无历史
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources,
                                         SseEmitter emitter, String styleHint, String sessionSummary) {
@@ -141,11 +141,11 @@ public class CuratorTools {
             Future<String> section2Future = pool.submit(() -> {
                 SseUtils.sendStatus(emitter, "curating", "正在解析原理与代码示例...");
                 return generateSection(query, resourcesText,
-                        buildPrincipleCodePrompt(query), "principles_code", styleHint);
+                        buildPrincipleCodePrompt(query), "principles_code", styleHint, sessionSummary);
             });
 
             String section1 = streamSection(query, resourcesText,
-                    buildConceptPrompt(query), "concepts", emitter, styleHint);
+                    buildConceptPrompt(query), "concepts", emitter, styleHint, sessionSummary);
             sections.add(section1);
 
             String section2 = section2Future.get();
@@ -157,7 +157,7 @@ public class CuratorTools {
             // 阶段 B：节 3 单独生成（避免与节 2 并发造成 3 并发峰值）
             SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
             String section3 = generateSection(query, resourcesText,
-                    buildFaqAdvancePrompt(query), "faq_advance", styleHint);
+                    buildFaqAdvancePrompt(query), "faq_advance", styleHint, sessionSummary);
             sections.add(section3);
             if (!section3.equals(SECTION_FAILED)) {
                 SseUtils.sendEvent(emitter, SseEvents.CONTENT, section3);
@@ -199,9 +199,10 @@ public class CuratorTools {
      * 偶发 HTTP 200 + 空内容），仍失败返回占位文本，不影响主流程。
      */
     private String generateSection(String query, String resourcesText,
-                                   String sectionPrompt, String sectionName, String styleHint) {
+                                   String sectionPrompt, String sectionName, String styleHint,
+                                   String sessionSummary) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
-        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint);
+        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint, sessionSummary);
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
                 ChatResponse response = chatModel.call(new Prompt(new UserMessage(prompt), options));
@@ -230,9 +231,10 @@ public class CuratorTools {
      * 同时累积完整文本返回；空白响应重试一次（官网偶发空流），失败返回占位文本。
      */
     private String streamSection(String query, String resourcesText, String sectionPrompt,
-                                 String sectionName, SseEmitter emitter, String styleHint) {
+                                 String sectionName, SseEmitter emitter, String styleHint,
+                                 String sessionSummary) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
-        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint);
+        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint, sessionSummary);
         for (int attempt = 1; attempt <= 3; attempt++) {
             StringBuilder sb = new StringBuilder();
             try {
@@ -315,13 +317,21 @@ public class CuratorTools {
     }
 
     private String buildSectionPrompt(String query, String resourcesText,
-                                      String sectionPrompt, String styleHint) {
+                                      String sectionPrompt, String styleHint, String sessionSummary) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一个技术教育专家，正在撰写关于「").append(query)
                 .append("」的深度学习报告。基于以下搜索结果素材撰写。\n\n");
         String style = styleHint == null ? null : INTENT_STYLE.get(styleHint);
         if (style != null) {
             sb.append(style).append("\n\n");
+        }
+        // 会话上下文（长记忆）：延续前文叙述、避免重复已讲内容；
+        // 安全边界——摘要仅作上下文参考，引用来源必须来自本次素材
+        if (sessionSummary != null && !sessionSummary.isBlank()) {
+            sb.append("会话上下文（此前对话的滚动摘要，仅作延续叙述参考，"
+                    + "不得作为引用来源，引用必须来自本次搜索素材，不得虚构来源）：\n")
+                    .append("<session_memory>\n").append(sessionSummary)
+                    .append("\n</session_memory>\n\n");
         }
         sb.append(sectionPrompt).append("\n\n---\n\n").append(resourcesText);
         return sb.toString();
