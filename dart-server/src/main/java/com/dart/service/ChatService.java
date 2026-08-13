@@ -588,52 +588,82 @@ public class ChatService {
         return preProcessQuery(query, "");
     }
 
-    /** 占位（feat 实现）：注入会话摘要辅助续答意图判定与指代解析。 */
+    /**
+     * 合并领域判断、意图分类与提示词优化为一次 LLM 调用（JSON 输出 {isTech, optimized, variants, intent, isFollowUp}）。
+     * 注入会话摘要后 LLM 可解析指代（"接着讲讲它"→具体 query）并判定续答意图。
+     * 失败/解析失败降级：isTech=true（放行）、optimized=原查询、variants=空列表、intent=how_to、followUp=false。
+     */
     public QueryPreProcess preProcessQuery(String query, String summary) {
-        return preProcessQueryLegacy(query);
-    }
-
-    private QueryPreProcess preProcessQueryLegacy(String query) {
         try {
             String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
-            String prompt = """
-                    你是一个技术领域判断、意图分类与查询优化助手。对用户输入完成三件事：
-                    1. 判断是否属于技术/编程领域（isTech）
-                    2. 优化为更适合知识库检索和网络搜索的技术问题描述（optimized）：
-                       - 保持原始意图，补充关键上下文（技术栈、版本、场景）
-                       - 去除口语化表达，使用准确的技术术语
-                       - 输入已清晰准确时只做小幅润色
-                       - 控制在 100 字以内；非技术输入输出空字符串
-                    3. 生成 2 个检索变体词（variants）用于并行网络搜索扩大召回：
-                       - 与 optimized 不同的表达角度/补充上下文（如英文术语、更短的关键词组合、场景化描述）
-                       - 每个不超过 50 字；非技术输入输出空数组 []
-                    4. 判断查询意图类型（intent）：
-                       - quick_fact: 快速事实/定义类问题
-                       - how_to: 操作步骤/配置方法
-                       - deep_dive: 需要深入解释的概念/原理
-                       - comparison: 对比两个及以上技术/工具
-                       - troubleshooting: 错误诊断/排错
-                       - non_tech: 非技术领域问题（与 isTech=false 对应）
-
-                    严格只输出 JSON，不要输出任何其他内容：
-                    {"isTech": true或false, "optimized": "优化后的描述", "variants": ["变体1", "变体2"], "intent": "how_to"}
-
-                    <user_query>%s</user_query>
-                    """.formatted(sanitized);
+            String sanitizedSummary = (summary == null ? "" : summary).replace("<", "&lt;").replace(">", "&gt;");
+            String prompt = buildPreProcessPrompt(sanitized, sanitizedSummary);
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResults().getFirst().getOutput().getText().trim();
             boolean isTech = parseIsTech(response);
+            boolean followUp = isTech && parseIsFollowUp(response);
             String optimized = parseOptimized(response);
             List<String> variants = parseVariants(response);
             // 非技术查询意图强制归一化为 non_tech（以 isTech 判断为准）
             String intent = isTech ? parseIntent(response) : "non_tech";
             return new QueryPreProcess(isTech,
                     (optimized == null || optimized.isBlank()) ? query : optimized,
-                    variants, intent, false);
+                    variants, intent, followUp);
         } catch (Exception e) {
             log.warn("LLM 前置判断与提示词优化失败，降级为技术查询+原文", e);
             return new QueryPreProcess(true, query, List.of(), "how_to", false);
         }
+    }
+
+    private String buildPreProcessPrompt(String sanitized, String sanitizedSummary) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("""
+                你是一个技术领域判断、意图分类与查询优化助手。对用户输入完成以下任务：
+                1. 判断是否属于技术/编程领域（isTech）
+                2. 优化为更适合知识库检索和网络搜索的技术问题描述（optimized）：
+                   - 保持原始意图，补充关键上下文（技术栈、版本、场景）
+                   - 输入是代词/省略/口语化表达时，结合历史会话摘要解析为具体的技术问题
+                   - 去除口语化表达，使用准确的技术术语
+                   - 输入已清晰准确时只做小幅润色
+                   - 控制在 100 字以内；非技术输入输出空字符串
+                3. 生成 2 个检索变体词（variants）用于并行网络搜索扩大召回：
+                   - 与 optimized 不同的表达角度/补充上下文（如英文术语、更短的关键词组合、场景化描述）
+                   - 每个不超过 50 字；非技术输入输出空数组 []
+                4. 判断查询意图类型（intent）：
+                   - quick_fact: 快速事实/定义类问题
+                   - how_to: 操作步骤/配置方法
+                   - deep_dive: 需要深入解释的概念/原理
+                   - comparison: 对比两个及以上技术/工具
+                   - troubleshooting: 错误诊断/排错
+                   - non_tech: 非技术领域问题（与 isTech=false 对应）
+                   - followup: 续答意图——输入指代会话前文（"它/上面/那 X 呢"）或要求基于上文解释（"为什么不行/展开说说"），
+                             且脱离历史摘要无法理解。仅明确指代上文时才判定为续答（保守），正常独立查询不得判定。
+                             续答意图时 optimized 输出空字符串、variants 输出空数组 []、isFollowUp 输出 true
+                5. 判断是否续答意图（isFollowUp）：规则同 intent 的 followup 说明；
+                   以下情况恒为 false：<session_memory> 段不存在（无历史记录）、输入是独立的新主题查询
+
+                严格只输出 JSON，不要输出任何其他内容：
+                {"isTech": true或false, "optimized": "优化后的描述", "variants": ["变体1", "变体2"], "intent": "how_to", "isFollowUp": false}
+                """);
+        if (sanitizedSummary != null && !sanitizedSummary.isBlank()) {
+            sb.append("\n历史会话摘要（仅作指代解析与续答判定参考）：\n<session_memory>\n")
+                    .append(sanitizedSummary)
+                    .append("\n</session_memory>\n");
+        }
+        sb.append("\n<user_query>").append(sanitized).append("</user_query>");
+        return sb.toString();
+    }
+
+    /**
+     * 解析 isFollowUp 字段；字段缺失或畸形一律降级 false（与 parseIntent 兼容旧格式 JSON 风格一致）。
+     */
+    private static boolean parseIsFollowUp(String json) {
+        if (json == null || json.isBlank()) {
+            return false;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"isFollowUp\"\\s*:\\s*(true|false)").matcher(json);
+        return m.find() && Boolean.parseBoolean(m.group(1));
     }
 
     private static boolean parseIsTech(String json) {

@@ -11,6 +11,8 @@ public final class IntentKeys {
     public static final String COMPARISON = "comparison";
     public static final String TROUBLESHOOTING = "troubleshooting";
     public static final String NON_TECH = "non_tech";
+    /** 续答意图：输入指代会话前文（"它/上面/那 X 呢"）或要求基于上文解释（"为什么不行"） */
+    public static final String FOLLOWUP = "followup";
 
     private IntentKeys() {
     }

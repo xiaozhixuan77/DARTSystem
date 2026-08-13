@@ -387,8 +387,8 @@ class ChatServiceTest {
                 ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
         verify(chatModel).call(captor.capture());
         String promptText = captor.getValue().getInstructions().getFirst().getText();
-        // 会话摘要以 <session_memory> 块注入前置调用 prompt
-        assertThat(promptText).contains("<session_memory>");
+        // 会话摘要以 <session_memory> 块注入前置调用 prompt（闭合标签只在注入时出现）
+        assertThat(promptText).contains("</session_memory>");
         assertThat(promptText).contains("主题：Spring IoC\n已讨论：三级缓存");
     }
 
@@ -405,8 +405,8 @@ class ChatServiceTest {
                 ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
         verify(chatModel).call(captor.capture());
         String promptText = captor.getValue().getInstructions().getFirst().getText();
-        // 无摘要时不注入 memory 段（省 token）
-        assertThat(promptText).doesNotContain("<session_memory>");
+        // 无摘要时不注入 memory 段（省 token）；闭合标签只在注入时出现
+        assertThat(promptText).doesNotContain("</session_memory>");
     }
 
     @Test
