@@ -466,6 +466,28 @@ class ChatServiceTest {
         assertThat(promptText).contains("无历史");
     }
 
+    @Test
+    void preProcessQuery_promptRequiresConciseSearchKeywords() {
+        // 长问句 query 必须被优化为简洁搜索词（Bing 对长 query 分词崩坏，实测搜出"当前"词典/时钟结果）
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"AI Agent 知识库 架构 选型\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":false}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.preProcessQuery("当前构建AI Agent知识库的主流技术架构有哪些？包括RAG流程、向量数据库、Embedding模型等技术选型", "");
+
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        String promptText = captor.getValue().getInstructions().getFirst().getText();
+        // 必须输出"简洁搜索关键词组合"而非"技术问题描述"（长问句句式会击穿 Bing 中文分词）
+        assertThat(promptText).contains("搜索关键词");
+        assertThat(promptText).contains("删除问句");
+        assertThat(promptText).contains("去除口语化");
+        // 移除"输入已清晰准确时只做小幅润色"豁免——该豁免是长问句原样输出的元凶
+        assertThat(promptText).doesNotContain("小幅润色");
+    }
+
     // === executeSearchAndCurate ===
 
     // === 续答路径（模糊输入 → 会话记忆回答，不搜索）===
