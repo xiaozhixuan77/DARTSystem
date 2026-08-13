@@ -69,6 +69,7 @@ public class ChatService {
     private final SearchTraceMapper searchTraceMapper;
     private final RelationExtractionService relationExtractionService;
     private final KnowledgeService knowledgeService;
+    private final ConversationSummaryService conversationSummaryService;
 
     /** 未识别意图的默认沉淀标签（与 how_to 标签一致） */
     private static final String DEFAULT_SEDIMENT_TAG = "操作指南";
@@ -101,7 +102,8 @@ public class ChatService {
                        MessageMapper messageMapper, StringRedisTemplate redisTemplate,
                        KnowledgeItemMapper knowledgeItemMapper, SearchTraceMapper searchTraceMapper,
                        RelationExtractionService relationExtractionService,
-                       KnowledgeService knowledgeService) {
+                       KnowledgeService knowledgeService,
+                       ConversationSummaryService conversationSummaryService) {
         this.chatModel = chatModel;
         this.searchAgent = searchAgent;
         this.curatorAgent = curatorAgent;
@@ -113,16 +115,22 @@ public class ChatService {
         this.searchTraceMapper = searchTraceMapper;
         this.relationExtractionService = relationExtractionService;
         this.knowledgeService = knowledgeService;
+        this.conversationSummaryService = conversationSummaryService;
     }
 
     public record SearchResult(RagService.RagResult ragAnswer,
-                               CuratedReport curatedReport, List<ScoredResource> searchResults) {
+                               CuratedReport curatedReport, List<ScoredResource> searchResults,
+                               String followUpAnswer) {
         public boolean isRagHit() { return ragAnswer != null; }
+        public boolean isFollowUpHit() { return followUpAnswer != null; }
         public static SearchResult ragHit(RagService.RagResult answer) {
-            return new SearchResult(answer, null, List.of());
+            return new SearchResult(answer, null, List.of(), null);
         }
         public static SearchResult searchResult(CuratedReport report, List<ScoredResource> resources) {
-            return new SearchResult(null, report, resources);
+            return new SearchResult(null, report, resources, null);
+        }
+        public static SearchResult followUpAnswer(String answer) {
+            return new SearchResult(null, null, List.of(), answer);
         }
     }
 
@@ -455,6 +463,9 @@ public class ChatService {
                 assistantMsg.setContent(result.ragAnswer().answer());
                 assistantMsg.setMetadata("{\"type\":\"rag\"," +
                         "\"sources\":" + toJsonArray(result.ragAnswer().sourceUrls()) + "}");
+            } else if (result.isFollowUpHit()) {
+                assistantMsg.setContent(result.followUpAnswer());
+                assistantMsg.setMetadata("{\"type\":\"followup\"}");
             } else if (result.curatedReport() != null) {
                 assistantMsg.setContent(result.curatedReport().markdown());
                 assistantMsg.setMetadata("{\"type\":\"search\"," +

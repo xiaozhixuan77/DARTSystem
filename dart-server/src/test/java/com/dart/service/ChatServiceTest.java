@@ -65,6 +65,8 @@ class ChatServiceTest {
     private RelationExtractionService relationExtractionService;
     @Mock
     private KnowledgeService knowledgeService;
+    @Mock
+    private ConversationSummaryService summaryService;
 
     private ChatService chatService;
     private SseEmitter emitter;
@@ -74,7 +76,7 @@ class ChatServiceTest {
     void setUp() {
         chatService = new ChatService(chatModel, searchAgent, curatorAgent, ragService,
                 embeddingService, messageMapper, redisTemplate, knowledgeItemMapper,
-                searchTraceMapper, relationExtractionService, knowledgeService);
+                searchTraceMapper, relationExtractionService, knowledgeService, summaryService);
         emitter = spy(new SseEmitter(60_000L));
         // lenient：仅缓存相关用例使用，避免其他用例报 UnnecessaryStubbing
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -465,6 +467,104 @@ class ChatServiceTest {
     }
 
     // === executeSearchAndCurate ===
+
+    // === 续答路径（模糊输入 → 会话记忆回答，不搜索）===
+
+    @Test
+    void executeSearchAndCurate_followUpIntent_answersFromMemory() {
+        when(valueOps.get(anyString())).thenReturn(null); // 缓存未命中
+        when(summaryService.getSummary(1L, 100L)).thenReturn("主题：Spring IoC\n关键结论：三级缓存解决循环依赖");
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenAnswer(inv -> {
+            org.springframework.ai.chat.prompt.Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("<session_memory>")) {
+                // 前置调用：判定续答意图
+                return new ChatResponse(List.of(new Generation(new AssistantMessage(
+                        "{\"isTech\":true,\"optimized\":\"\",\"variants\":[],\"intent\":\"followup\",\"isFollowUp\":true}"))));
+            }
+            // 会话记忆回答
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(
+                    "三级缓存是 Spring 解决单例 Bean 循环依赖的机制：\n1. singletonObjects 存放完整 Bean..."))));
+        });
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("为什么不行", 1L, 100L, emitter);
+
+        assertThat(result.isFollowUpHit()).isTrue();
+        assertThat(result.followUpAnswer()).contains("三级缓存");
+        // 续答不触发搜索/RAG/Curator
+        verify(searchAgent, never()).execute(anyList(), anyInt(), any());
+        verify(ragService, never()).retrieve(anyString(), anyLong());
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any());
+        // 回答持久化 type=followup（user + assistant 两次 insert）
+        ArgumentCaptor<Message> msgCaptor = ArgumentCaptor.forClass(Message.class);
+        verify(messageMapper, times(2)).insert(msgCaptor.capture());
+        Message assistantMsg = msgCaptor.getAllValues().get(1);
+        assertThat(assistantMsg.getRole()).isEqualTo("assistant");
+        assertThat(assistantMsg.getMetadata()).contains("\"type\":\"followup\"");
+        // 链路追踪标记 followup
+        ArgumentCaptor<SearchTrace> traceCaptor = ArgumentCaptor.forClass(SearchTrace.class);
+        verify(searchTraceMapper).insert(traceCaptor.capture());
+        assertThat(traceCaptor.getValue().getCurationType()).isEqualTo("followup");
+        assertThat(traceCaptor.getValue().getIntent()).isEqualTo("followup");
+        // 本轮问答也更新会话摘要
+        verify(summaryService).updateSummary(eq(1L), eq(100L), eq("为什么不行"), contains("三级缓存"));
+    }
+
+    @Test
+    void executeSearchAndCurate_followUpLlmFails_fallsBackToSearch() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(summaryService.getSummary(1L, 100L)).thenReturn("主题：Spring IoC");
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenAnswer(inv -> {
+            org.springframework.ai.chat.prompt.Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("<session_memory>")) {
+                return new ChatResponse(List.of(new Generation(new AssistantMessage(
+                        "{\"isTech\":true,\"optimized\":\"\",\"variants\":[],\"intent\":\"followup\",\"isFollowUp\":true}"))));
+            }
+            throw new RuntimeException("memory answer failure"); // 追问也失败（降级）
+        });
+        // 回退正常搜索流程
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("为什么不行", 1L, 100L, emitter);
+
+        // fail-open：续答失败回退搜索，报告正常产出
+        assertThat(result.isFollowUpHit()).isFalse();
+        assertThat(result.curatedReport().markdown()).contains("# Report");
+        verify(searchAgent).execute(anyList(), anyInt(), any());
+    }
+
+    @Test
+    void executeSearchAndCurate_normalQuery_noFollowUpPath() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenAnswer(inv -> {
+            org.springframework.ai.chat.prompt.Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("<session_memory>")) {
+                // 独立新查询：isFollowUp=false
+                return new ChatResponse(List.of(new Generation(new AssistantMessage(
+                        "{\"isTech\":true,\"optimized\":\"Spring 三级缓存原理\",\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":false}"))));
+            }
+            throw new RuntimeException("timeout");
+        });
+
+        chatService.executeSearchAndCurate("Spring 三级缓存", 1L, 100L, emitter);
+
+        // 正常查询走完整搜索流程，不走续答
+        verify(searchAgent).execute(anyList(), anyInt(), any());
+        verify(summaryService, never()).updateSummary(any(), any(), any(), any());
+    }
 
     @Test
     void executeSearchAndCurate_optimizedQueryUsedInAllStages() {
