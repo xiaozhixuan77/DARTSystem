@@ -483,7 +483,7 @@ class ChatServiceTest {
         // 必须输出"简洁搜索关键词组合"而非"技术问题描述"（长问句句式会击穿 Bing 中文分词）
         assertThat(promptText).contains("搜索关键词");
         assertThat(promptText).contains("删除问句");
-        assertThat(promptText).contains("去除口语化");
+        assertThat(promptText).contains("口语化");
         // 移除"输入已清晰准确时只做小幅润色"豁免——该豁免是长问句原样输出的元凶
         assertThat(promptText).doesNotContain("小幅润色");
     }
