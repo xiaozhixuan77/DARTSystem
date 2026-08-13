@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS `conversation` (
     `user_id`       BIGINT       NOT NULL,
     `title`         VARCHAR(200) NOT NULL DEFAULT '新对话',
     `tags`          VARCHAR(500) DEFAULT NULL,
+    `summary`       TEXT DEFAULT NULL,
     `is_deleted`    TINYINT      NOT NULL DEFAULT 0,
     `created_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,

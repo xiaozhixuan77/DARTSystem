@@ -17,6 +17,7 @@ public class Conversation {
     private Long userId;
     private String title;
     private String tags;
+    private String summary;
     private Integer isDeleted;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

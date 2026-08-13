@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS `conversation` (
     `user_id`       BIGINT       NOT NULL,
     `title`         VARCHAR(200) NOT NULL DEFAULT '新对话',
     `tags`          VARCHAR(500) DEFAULT NULL COMMENT 'JSON数组',
+    `summary`       TEXT DEFAULT NULL COMMENT '会话滚动摘要',
     `is_deleted`    TINYINT      NOT NULL DEFAULT 0 COMMENT '0=正常, 1=已删除',
     `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
