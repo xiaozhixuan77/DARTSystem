@@ -477,7 +477,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenAnswer(inv -> {
             org.springframework.ai.chat.prompt.Prompt p = inv.getArgument(0);
             String text = p.getInstructions().getFirst().getText();
-            if (text.contains("<session_memory>")) {
+            if (text.startsWith("你是一个技术领域判断")) {
                 // 前置调用：判定续答意图
                 return new ChatResponse(List.of(new Generation(new AssistantMessage(
                         "{\"isTech\":true,\"optimized\":\"\",\"variants\":[],\"intent\":\"followup\",\"isFollowUp\":true}"))));
@@ -517,11 +517,11 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenAnswer(inv -> {
             org.springframework.ai.chat.prompt.Prompt p = inv.getArgument(0);
             String text = p.getInstructions().getFirst().getText();
-            if (text.contains("<session_memory>")) {
+            if (text.startsWith("你是一个技术领域判断")) {
                 return new ChatResponse(List.of(new Generation(new AssistantMessage(
                         "{\"isTech\":true,\"optimized\":\"\",\"variants\":[],\"intent\":\"followup\",\"isFollowUp\":true}"))));
             }
-            throw new RuntimeException("memory answer failure"); // 追问也失败（降级）
+            throw new RuntimeException("memory answer failure"); // 记忆回答与追问均失败（降级）
         });
         // 回退正常搜索流程
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
@@ -551,7 +551,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenAnswer(inv -> {
             org.springframework.ai.chat.prompt.Prompt p = inv.getArgument(0);
             String text = p.getInstructions().getFirst().getText();
-            if (text.contains("<session_memory>")) {
+            if (text.startsWith("你是一个技术领域判断")) {
                 // 独立新查询：isFollowUp=false
                 return new ChatResponse(List.of(new Generation(new AssistantMessage(
                         "{\"isTech\":true,\"optimized\":\"Spring 三级缓存原理\",\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":false}"))));

@@ -173,6 +173,25 @@ public class ChatService {
         // 优化后的查询用于 RAG/搜索/整理；用户消息持久化仍存原文
         String effectiveQuery = pre.optimized();
 
+        // 2.5 续答路由：LLM 判定为续答意图（指代上文/要求基于上文解释）→ 基于会话记忆回答，不搜索
+        if (pre.followUp()) {
+            Optional<String> answer = generateMemoryAnswer(conversationId, userId, query);
+            if (answer.isPresent()) {
+                SseUtils.sendStatus(emitter, "curating", "正在基于会话记忆回答...");
+                SseUtils.sendEvent(emitter, SseEvents.CONTENT, answer.get());
+                SearchResult result = SearchResult.followUpAnswer(answer.get());
+                persistAssistantMessage(conversationId, result);
+                recordTrace(userId, conversationId, userMsg.getId(), query, IntentKeys.FOLLOWUP,
+                        false, null, null, List.of(), "followup", null, startNanos);
+                // 本轮问答也进入会话摘要（异步，不阻塞）
+                conversationSummaryService.updateSummary(userId, conversationId, query, answer.get());
+                log.info("续答路径命中，基于会话记忆回答: conversationId={}", conversationId);
+                return result;
+            }
+            log.warn("续答回答生成失败，回退正常搜索流程: query={}", query);
+            // 不 return，继续下方正常流程（fail-open）
+        }
+
         // 3+4. RAG 检查与 Search Agent 并行启动；RAG 命中则短路，未命中等搜索完成。
         //     RAG 命中时不等慢搜索任务（shutdownNow 中断，虚拟线程后台收尾）
         SseUtils.sendStatus(emitter, "rag_check", "正在检索知识库...");
@@ -411,6 +430,65 @@ public class ChatService {
         }
         return new CuratedReport(query, sb.toString(),
                 resources.stream().map(ScoredResource::getUrl).toList(), Instant.now());
+    }
+
+    // ─── 续答回答（会话记忆路径）────────────────────────────────
+
+    @Value("${agent.memory.recent-reports:2}")
+    private int memoryRecentReports;
+
+    @Value("${agent.memory.report-chars-per-round:3000}")
+    private int memoryReportCharsPerRound;
+
+    /**
+     * 基于会话记忆回答模糊输入：会话摘要 + 最近 N 轮 assistant 报告 → LLM 单次调用。
+     * 失败返回 Optional.empty()，调用方回退正常搜索流程（fail-open）。
+     */
+    private Optional<String> generateMemoryAnswer(Long conversationId, Long userId, String query) {
+        try {
+            String summary = conversationSummaryService.getSummary(userId, conversationId);
+            List<Message> recent = messageMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Message>()
+                            .eq(Message::getConversationId, conversationId)
+                            .eq(Message::getRole, "assistant")
+                            .orderByDesc(Message::getCreatedAt)
+                            .last("LIMIT " + memoryRecentReports));
+            StringBuilder reports = new StringBuilder();
+            for (Message m : recent) {
+                String content = m.getContent();
+                if (content != null && content.length() > memoryReportCharsPerRound) {
+                    content = content.substring(0, memoryReportCharsPerRound);
+                }
+                reports.append("<report>\n").append(content).append("\n</report>\n\n");
+            }
+            String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
+            String prompt = """
+                    你是会话记忆问答助手。用户在当前会话语境中提出了模糊/指代性问题，
+                    请结合历史报告回答，不要假设存在未提供的信息。
+
+                    历史会话摘要：<session_memory>
+                    %s
+                    </session_memory>
+
+                    最近报告：
+                    %s
+                    用户问题：<user_query>%s</user_query>
+
+                    要求：
+                    - 直接回答问题；历史报告不足以回答时，如实说明缺少哪部分信息
+                    - 引用必须来自历史报告，不得虚构来源
+                    - 简洁、准确的中文回答
+                    """.formatted(
+                    summary == null || summary.isBlank() ? "（无）" : summary,
+                    reports.isEmpty() ? "（无历史报告）" : reports,
+                    sanitized);
+            String response = chatModel.call(new Prompt(new UserMessage(prompt)))
+                    .getResults().getFirst().getOutput().getText().trim();
+            return response.isBlank() ? Optional.empty() : Optional.of(response);
+        } catch (Exception e) {
+            log.warn("续答回答生成失败: query={}", query, e);
+            return Optional.empty();
+        }
     }
 
     // ─── 追问生成 ────────────────────────────────────────────
