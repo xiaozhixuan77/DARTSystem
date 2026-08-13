@@ -11,6 +11,7 @@ import org.mockito.MockedStatic;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -41,6 +42,7 @@ class CuratorToolsTest {
 
     private CuratorTools curatorTools;
     private boolean streamBlankFirst;
+    private boolean section2LengthTruncatedOnce;
 
     private static final String SECTION_CONCEPT = """
             ## 📖 核心概念
@@ -343,12 +345,12 @@ class CuratorToolsTest {
         verify(chatModel, times(2)).call(captor.capture());
         for (Prompt p : captor.getAllValues()) {
             assertThat(p.getOptions()).isNotNull();
-            assertThat(p.getOptions().getMaxTokens()).isEqualTo(2048);
+            assertThat(p.getOptions().getMaxTokens()).isEqualTo(4096);
         }
         ArgumentCaptor<Prompt> streamCaptor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel).stream(streamCaptor.capture());
         assertThat(streamCaptor.getValue().getOptions()).isNotNull();
-        assertThat(streamCaptor.getValue().getOptions().getMaxTokens()).isEqualTo(2048);
+        assertThat(streamCaptor.getValue().getOptions().getMaxTokens()).isEqualTo(4096);
     }
 
     @Test
@@ -705,5 +707,157 @@ class CuratorToolsTest {
         assertThat(report.markdown()).contains("Title A");
         assertThat(report.markdown()).contains("Title B");
         assertThat(report.sources()).contains("https://a.com", "https://b.com");
+    }
+
+    // === 截断检测与代码块闭合兜底 ===
+
+    /** 与实现统计口径一致：行首 ``` 即视为 fence（不要求整行，允许 ```java 语言标记）。 */
+    private static int countFenceLines(String md) {
+        return (int) md.lines().filter(l -> l.startsWith("```")).count();
+    }
+
+    @Test
+    void generateReport_retriesWhenSectionTruncatedByFinishReasonLength() {
+        // 节 2（call）第 1 次返回 finish_reason="length" 的截断文本（不抛异常、非空白）
+        // → 必须重试而非静默接受；第 2 次成功
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("关键原理")) {
+                if (!section2LengthTruncatedOnce) {
+                    section2LengthTruncatedOnce = true;
+                    return new ChatResponse(List.of(new Generation(
+                            new AssistantMessage("## 🔬 关键原理\n\n（截断）"),
+                            ChatGenerationMetadata.builder().finishReason("length").build())));
+                }
+                return new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_PRINCIPLE_CODE))));
+            }
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
+        });
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
+                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
+
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        // 节 2 重试 2 次 + 节 3 1 次 = call 共 3 次
+        verify(chatModel, times(3)).call(any(Prompt.class));
+        // 截断文本被丢弃，报告含完整节 2 内容
+        assertThat(report.markdown()).contains("JVM 内存模型");
+        assertThat(report.markdown()).doesNotContain("（截断）");
+    }
+
+    @Test
+    void generateReport_sectionTruncatedThreeTimes_usesResourceDigest() {
+        // 节 2 连续 3 次截断（finish_reason="length"）→ 该节转资源摘要兜底，报告不缺节
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            if (text.contains("关键原理")) {
+                return new ChatResponse(List.of(new Generation(
+                        new AssistantMessage("## 🔬 关键原理\n\n（截断）"),
+                        ChatGenerationMetadata.builder().finishReason("length").build())));
+            }
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_FAQ_ADVANCE))));
+        });
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
+                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
+
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        // 节 2 重试 3 次 + 节 3 1 次 = call 共 4 次；截断文本不出现，节 2 位置为资源摘要
+        verify(chatModel, times(4)).call(any(Prompt.class));
+        assertThat(report.markdown()).doesNotContain("（截断）");
+        assertThat(report.markdown()).contains("Resource A");
+        assertThat(report.markdown()).contains("📚");
+    }
+
+    @Test
+    void generateReport_faqSectionNotSwallowedByUnclosedCodeBlock() {
+        // 偶发 bug 复现：节 2 输出在代码块内被截断（闭合 ``` 未输出），且 finishReason 未检测到截断
+        // （spring-ai 未映射 finish_reason 的最坏情况）→ 代码块平衡兜底须在节内闭合，FAQ 不被吞
+        String truncatedSection2 = """
+                ## 🔬 关键原理
+
+                ### 1. Bean 生命周期
+                容器管理 Bean 的实例化、属性填充、初始化与销毁。
+
+                ## 💻 代码示例
+
+                ### 示例1：注解驱动的 IoC 与 DI
+
+                ```java
+                public class UserService {
+                    @""";
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            String section = text.contains("关键原理")
+                    ? truncatedSection2 : SECTION_FAQ_ADVANCE;
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
+        });
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(
+                new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
+
+        CuratedReport report = curatorTools.generateReport("Spring IoC", fourResources(), new SseEmitter(0L));
+
+        String md = report.markdown();
+        // 节 3 标题之前的 fence 数为偶数 → 节 2 的代码块已在节内闭合，FAQ 未被渲染进代码区域
+        String beforeFaq = md.substring(0, md.indexOf("## ⚠️ 常见误区与 FAQ"));
+        assertThat(countFenceLines(beforeFaq)).isEven();
+        assertThat(md).contains("## 🚀 进阶学习方向");
+        assertThat(md).contains("参考文献");
+    }
+
+    @Test
+    void streamSection_truncatedByLength_noRetry_butCodeBlockClosed() {
+        // 节 1 流式截断（finish_reason="length"）：token 已推送无法回滚 → 不重试；
+        // 未闭合代码块由节级平衡兜底闭合，后续节不被吞
+        when(chatModel.call(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            String section = text.contains("关键原理")
+                    ? SECTION_PRINCIPLE_CODE : SECTION_FAQ_ADVANCE;
+            return new ChatResponse(List.of(new Generation(new AssistantMessage(section))));
+        });
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.just(new ChatResponse(
+                List.of(new Generation(
+                        new AssistantMessage("## 📖 核心概念\n\n```java\npublic class X {\n    @"),
+                        ChatGenerationMetadata.builder().finishReason("length").build())))));
+
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+
+        verify(chatModel, times(1)).stream(any(Prompt.class));
+        String md = report.markdown();
+        String beforeFaq = md.substring(0, md.indexOf("## ⚠️ 常见误区与 FAQ"));
+        assertThat(countFenceLines(beforeFaq)).isEven();
+        assertThat(md).contains("## 📖 核心概念");
+    }
+
+    @Test
+    void ensureClosedCodeBlocks_unclosedSingleFence_appendsCloser() {
+        String md = "## 💻 代码示例\n\n### 示例1\n```java\npublic class A {\n    @";
+        String fixed = curatorTools.ensureClosedCodeBlocks(md);
+        assertThat(countFenceLines(fixed)).isEven();
+        assertThat(fixed.endsWith("```")).isTrue();
+    }
+
+    @Test
+    void ensureClosedCodeBlocks_closedBlocks_unchanged() {
+        String md = "```java\ncode\n```\n\ntext\n\n```python\ncode2\n```";
+        assertThat(curatorTools.ensureClosedCodeBlocks(md)).isEqualTo(md);
+    }
+
+    @Test
+    void ensureClosedCodeBlocks_noFence_unchanged() {
+        String md = "## 标题\n\n普通文本";
+        assertThat(curatorTools.ensureClosedCodeBlocks(md)).isEqualTo(md);
+    }
+
+    @Test
+    void ensureClosedCodeBlocks_multipleFences_closesLastUnclosed() {
+        String md = "```java\ncode1\n```\n\n```python\ncode2";
+        String fixed = curatorTools.ensureClosedCodeBlocks(md);
+        assertThat(countFenceLines(fixed)).isEven();
+        assertThat(fixed.endsWith("```")).isTrue();
     }
 }

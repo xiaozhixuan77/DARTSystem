@@ -481,6 +481,11 @@ public class CuratorTools {
         return result;
     }
 
+    /** 代码块平衡兜底（占位，feat 实现）：行首 ``` 数量为奇数时在末尾追加闭合。 */
+    String ensureClosedCodeBlocks(String markdown) {
+        return markdown;
+    }
+
     private String cleanSection(String markdown) {
         String cleaned = markdown.trim();
         // 移除以"根据搜索结果"等开头的行
