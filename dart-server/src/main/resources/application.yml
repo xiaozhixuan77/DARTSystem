@@ -136,11 +136,11 @@ agent:
     # 报告生成精读资源数：Top N 携带完整内容，其余仅摘要（控制 LLM 输入长度）
     deep-read-count: 4
   rag:
-    similarity-threshold: 0.80
+    similarity-threshold: 0.60
     top-k: 5
   graph:
     # 知识条目跨条目关联的向量相似度阈值（标题子串通道不依赖此阈值）
-    link-similarity-threshold: 0.75
+    link-similarity-threshold: 0.55
 
 # Knife4j
 springdoc:

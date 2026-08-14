@@ -415,10 +415,12 @@ public class KnowledgeService {
             return false;
         }
         String source;
-        // 标题互相包含（排除同名）+ 向量余弦 ≥ 阈值，双通道并集
+        // 三通道并集：标题完整包含（排除同名）→ 标题关键词共享（疑问词/标点剔除后 ≥1 共享词）→ 向量余弦 ≥ 阈值
         if (TextUtils.containsIgnoreCase(a.getTitle(), b.getTitle())
                 && !a.getTitle().equalsIgnoreCase(b.getTitle())) {
             source = "TITLE_MATCH@item_id=" + a.getId();
+        } else if (!a.getTitle().equalsIgnoreCase(b.getTitle()) && shareTitleKeyword(a, b)) {
+            source = "TITLE_KEYWORD@item_id=" + a.getId();
         } else if (vecA != null && vecB != null
                 && VectorUtils.cosineSimilarity(vecA, vecB) >= linkSimilarityThreshold) {
             source = "VECTOR_SIMILARITY@item_id=" + a.getId();
@@ -437,6 +439,18 @@ public class KnowledgeService {
         r.setCreatedAt(LocalDateTime.now());
         relationMapper.insert(r);
         return true;
+    }
+
+    /**
+     * 标题关键词共享判定：两标题提取关键词后共享 ≥1 个（疑问词/标点已剔除）。
+     */
+    private static boolean shareTitleKeyword(KnowledgeItem a, KnowledgeItem b) {
+        List<String> kwA = TextUtils.extractKeywords(a.getTitle());
+        List<String> kwB = TextUtils.extractKeywords(b.getTitle());
+        if (kwA.isEmpty() || kwB.isEmpty()) {
+            return false;
+        }
+        return kwA.stream().anyMatch(kwB::contains);
     }
 
     private boolean relationExists(Long idA, Long idB) {

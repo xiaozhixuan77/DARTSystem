@@ -63,7 +63,7 @@ agent:
     overlap: 50
     min-length: 20
   rag:
-    similarity-threshold: 0.80
+    similarity-threshold: 0.60
     top-k: 5
 
 mybatis-plus:

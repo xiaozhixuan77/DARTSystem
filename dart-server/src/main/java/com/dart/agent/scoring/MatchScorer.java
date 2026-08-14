@@ -1,27 +1,21 @@
 package com.dart.agent.scoring;
 
+import com.dart.util.TextUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 语义匹配评分：基于关键词命中率评估查询与页面内容的匹配度（1-5）。
  * 不使用 LLM，速度极快（每页 < 1ms），适合对搜索结果的实时评分场景。
  *
- * 分词策略：英文/数字 token（≥2 字符）+ 中文按停用词切分的片段（≥2 字符）。
- * 中文查询（如 LLM 优化后的无标点长句）不再整句作为一个关键词。
+ * 分词策略：英文/数字 token（≥2 字符）+ 中文按停用词切分的片段（≥2 字符），
+ * 关键词提取共用 TextUtils.extractKeywords（与跨条目标题关联一致）。
  */
 public class MatchScorer {
 
     private static final Logger log = LoggerFactory.getLogger(MatchScorer.class);
-
-    private static final Pattern EN_TOKEN = Pattern.compile("[a-z0-9]{2,}");
-    private static final Pattern STOP_WORDS = Pattern.compile(
-            "(的|和|与|中|是|为|对|在|用|或|及|并|而|之|其|于|有|这|那|什么|怎么|如何|可以|进行|以及|相关)+");
 
     public MatchScorer() {
         // 无 LLM 依赖，纯轻量计算
@@ -58,26 +52,7 @@ public class MatchScorer {
         return 1;
     }
 
-    /**
-     * 关键词提取：英文/数字 token（≥2 字符，大小写不敏感）+ 中文按停用词切分的片段（≥2 字符）。
-     */
     private static List<String> extractKeywords(String query) {
-        String lower = query.toLowerCase();
-        List<String> keywords = new ArrayList<>();
-        Matcher en = EN_TOKEN.matcher(lower);
-        while (en.find()) {
-            String tok = en.group();
-            if (!keywords.contains(tok)) {
-                keywords.add(tok);
-            }
-        }
-        String chinesePart = lower.replaceAll("[a-z0-9\\s]+", "");
-        for (String seg : STOP_WORDS.split(chinesePart)) {
-            String s = seg.trim();
-            if (s.length() >= 2 && !keywords.contains(s)) {
-                keywords.add(s);
-            }
-        }
-        return keywords;
+        return TextUtils.extractKeywords(query);
     }
 }

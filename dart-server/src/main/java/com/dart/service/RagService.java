@@ -70,9 +70,10 @@ public class RagService {
                 return Optional.empty();
             }
 
+            // 全量拉取用户 chunk（无 SQL 截断）：无排序 LIMIT 会漏掉后沉淀条目的相似块；
+            // 量级 ~600 块内存余弦毫秒级，匹配结果在内存排序后按 topK 截断
             QueryWrapper<KnowledgeChunk> wrapper = new QueryWrapper<>();
             wrapper.in("knowledge_item_id", userItemIds);
-            wrapper.last("LIMIT " + topK);
             List<KnowledgeChunk> chunks = knowledgeChunkMapper.selectList(wrapper);
 
             if (chunks.isEmpty()) {
@@ -112,8 +113,11 @@ public class RagService {
                 return Optional.empty();
             }
 
-            // 按相似度降序排列
+            // 按相似度降序排列，最多采用 topK 个匹配块生成回答
             matched.sort(Comparator.comparingDouble(RagChunk::similarity).reversed());
+            if (matched.size() > topK) {
+                matched = matched.subList(0, topK);
+            }
 
             // 1-hop 知识图谱扩展：命中条目的关联知识拼入生成上下文
             List<String> relatedContext = loadRelatedContexts(itemMap);

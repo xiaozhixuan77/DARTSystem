@@ -477,9 +477,9 @@ class KnowledgeServiceTest {
 
         int created = knowledgeService.rebuildLinks(1L);
 
-        // (Spring,Spring Boot) 与 (Spring,Spring Cloud) 子串命中；(Spring Boot,Spring Cloud) 无
-        assertThat(created).isEqualTo(2);
-        verify(relationMapper, times(2)).insert(any(KnowledgeRelation.class));
+        // (Spring,Spring Boot)/(Spring,Spring Cloud) 子串命中；(Spring Boot,Spring Cloud) 关键词共享 spring 命中
+        assertThat(created).isEqualTo(3);
+        verify(relationMapper, times(3)).insert(any(KnowledgeRelation.class));
     }
 
     @Test
