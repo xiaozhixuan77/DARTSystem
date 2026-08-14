@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import KnowledgeEditDialog from '../KnowledgeEditDialog.vue'
+import { ElMessageBox } from 'element-plus'
+
+vi.mock('element-plus', () => ({
+  ElMessageBox: { confirm: vi.fn() }
+}))
 
 vi.mock('echarts/core', () => ({
   init: vi.fn(() => ({ setOption: vi.fn(), dispose: vi.fn() })),
@@ -11,10 +16,15 @@ vi.mock('echarts/charts', () => ({ GraphChart: {} }))
 vi.mock('echarts/components', () => ({ TooltipComponent: {} }))
 vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
 
+vi.mock('@/composables/useMarkdownExport', () => ({
+  buildMarkdownExport: vi.fn(() => '# mock md'),
+  downloadMarkdown: vi.fn()
+}))
+
 vi.mock('@/api/knowledge', () => ({
   listKnowledge: vi.fn(),
   getKnowledgeDetail: vi.fn(),
-  deleteKnowledge: vi.fn(),
+  deleteKnowledge: vi.fn(() => Promise.resolve({ code: 200, message: 'ok', suggestion: null, data: null })),
   getKnowledgeGraph: vi.fn(() => Promise.resolve({
     code: 200, message: 'ok', suggestion: null,
     data: {
@@ -26,6 +36,8 @@ vi.mock('@/api/knowledge', () => ({
     }
   }))
 }))
+
+import { downloadMarkdown } from '@/composables/useMarkdownExport'
 
 describe('KnowledgeEditDialog.vue', () => {
   beforeEach(() => {
@@ -171,5 +183,72 @@ describe('KnowledgeEditDialog.vue', () => {
     await wrapper.setProps({ visible: false })
     await wrapper.setProps({ visible: true, item: mockDetail })
     expect(wrapper.find('.content-tab').exists()).toBe(true)
+  })
+
+  it('编辑 tab 渲染正文 textarea', async () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+    await wrapper.find('.tab-detail').trigger('click')
+
+    const contentInput = wrapper.find('#edit-content')
+    expect(contentInput.exists()).toBe(true)
+    expect((contentInput.element as HTMLTextAreaElement).value).toBe('# 内容')
+  })
+
+  it('保存载荷携带正文', async () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+    await wrapper.find('.tab-detail').trigger('click')
+    await wrapper.find('#edit-content').setValue('# 修改后正文')
+    await wrapper.find('.save-btn').trigger('click')
+
+    const emitted = wrapper.emitted('save')!
+    expect(emitted[0][0]).toMatchObject({ content: '# 修改后正文', title: 'Go 并发' })
+  })
+
+  it('initialTab=graph 时默认显示关系图 tab', async () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail, initialTab: 'graph' }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.graph-tab').exists()).toBe(true)
+  })
+
+  it('点击导出按钮触发下载', async () => {
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+    await wrapper.find('.export-btn').trigger('click')
+
+    expect(downloadMarkdown).toHaveBeenCalledTimes(1)
+    expect(downloadMarkdown).toHaveBeenCalledWith('Go 并发', expect.any(String))
+  })
+
+  it('点击删除按钮确认后删除并关闭弹窗', async () => {
+    vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as any)
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+
+    await wrapper.find('.delete-btn').trigger('click')
+    await flushPromises()
+
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
+    expect(wrapper.emitted('close')).toBeTruthy()
+  })
+
+  it('取消删除确认时保留弹窗', async () => {
+    vi.mocked(ElMessageBox.confirm).mockRejectedValue('cancel')
+    const wrapper = mount(KnowledgeEditDialog, {
+      props: { visible: true, item: mockDetail }
+    })
+
+    await wrapper.find('.delete-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('close')).toBeFalsy()
   })
 })
