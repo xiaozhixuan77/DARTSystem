@@ -79,7 +79,7 @@ class KnowledgeControllerTest {
 
     @Test
     void listKnowledge_returnsList() throws Exception {
-        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), any()))
+        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new PageResult<>(List.of(createItem(1L, "Spring Guide")), 1));
 
         mockMvc.perform(get("/api/knowledge")
@@ -90,13 +90,24 @@ class KnowledgeControllerTest {
 
     @Test
     void listKnowledge_withTag_forwardsTag() throws Exception {
-        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), eq("Go")))
+        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), eq("Go"), any()))
                 .thenReturn(new PageResult<>(List.of(createItem(1L, "Go Guide")), 1));
 
         mockMvc.perform(get("/api/knowledge").param("tag", "Go")
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.records[0].title").value("Go Guide"));
+    }
+
+    @Test
+    void listKnowledge_withKeyword_forwardsKeyword() throws Exception {
+        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), any(), eq("Spring")))
+                .thenReturn(new PageResult<>(List.of(createItem(1L, "Spring Guide")), 1));
+
+        mockMvc.perform(get("/api/knowledge").param("keyword", "Spring")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[0].title").value("Spring Guide"));
     }
 
     @Test

@@ -79,7 +79,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        var result = knowledgeService.listUserKnowledge(1L, 1, 10, null);
+        var result = knowledgeService.listUserKnowledge(1L, 1, 10, null, null);
         assertThat(result.getRecords()).hasSize(1);
         assertThat(result.getRecords().get(0).getTitle()).isEqualTo("Spring Guide");
         assertThat(result.getTotal()).isEqualTo(0L);
@@ -92,7 +92,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        knowledgeService.listUserKnowledge(1L, 1, 10, "Go");
+        knowledgeService.listUserKnowledge(1L, 1, 10, "Go", null);
 
         ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
@@ -106,11 +106,58 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        knowledgeService.listUserKnowledge(1L, 1, 10, null);
+        knowledgeService.listUserKnowledge(1L, 1, 10, null, null);
 
         ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
         assertThat(captor.getValue().getCustomSqlSegment()).doesNotContain("FIND_IN_SET");
+    }
+
+    @Test
+    void listUserKnowledge_withKeyword_appliesLikeAndExists() {
+        Page<KnowledgeItem> mockPage = new Page<>(1, 10);
+        mockPage.setRecords(List.of(createItem(1L, 1L, "Spring Guide")));
+        when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
+                .thenReturn(mockPage);
+
+        knowledgeService.listUserKnowledge(1L, 1, 10, null, "Spring");
+
+        ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
+        assertThat(captor.getValue().getCustomSqlSegment()).contains("title LIKE");
+        assertThat(captor.getValue().getCustomSqlSegment()).contains("EXISTS");
+        assertThat(captor.getValue().getCustomSqlSegment()).contains("knowledge_chunk");
+    }
+
+    @Test
+    void listUserKnowledge_withKeywordAndTag_combinesConditions() {
+        Page<KnowledgeItem> mockPage = new Page<>(1, 10);
+        mockPage.setRecords(List.of(createItem(1L, 1L, "Spring Guide")));
+        when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
+                .thenReturn(mockPage);
+
+        knowledgeService.listUserKnowledge(1L, 1, 10, "Go", "Spring");
+
+        ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
+        assertThat(captor.getValue().getCustomSqlSegment()).contains("FIND_IN_SET");
+        assertThat(captor.getValue().getCustomSqlSegment()).contains("title LIKE");
+        assertThat(captor.getValue().getCustomSqlSegment()).contains("EXISTS");
+    }
+
+    @Test
+    void listUserKnowledge_blankKeyword_noKeywordCondition() {
+        Page<KnowledgeItem> mockPage = new Page<>(1, 10);
+        mockPage.setRecords(List.of(createItem(1L, 1L, "Spring Guide")));
+        when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
+                .thenReturn(mockPage);
+
+        knowledgeService.listUserKnowledge(1L, 1, 10, null, "   ");
+
+        ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
+        assertThat(captor.getValue().getCustomSqlSegment()).doesNotContain("LIKE");
+        assertThat(captor.getValue().getCustomSqlSegment()).doesNotContain("EXISTS");
     }
 
     @Test
