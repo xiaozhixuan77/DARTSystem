@@ -39,6 +39,12 @@ describe('Router', () => {
           name: 'Chat',
           component: { template: '<div>Chat</div>' },
           meta: { requiresAuth: true }
+        },
+        {
+          path: '/knowledge',
+          name: 'Knowledge',
+          component: { template: '<div>Knowledge</div>' },
+          meta: { requiresAuth: true }
         }
       ]
     })
@@ -110,6 +116,19 @@ describe('Router', () => {
     const r = await createTestRouter()
     await r.push('/login')
     expect(r.currentRoute.value.name).toBe('Login')
+  })
+
+  it('未登录访问 /knowledge 重定向到 /login', async () => {
+    const r = await createTestRouter()
+    await r.push('/knowledge')
+    expect(r.currentRoute.value.name).toBe('Login')
+  })
+
+  it('已登录访问 /knowledge 放行', async () => {
+    localStorage.setItem('accessToken', 'valid-token')
+    const r = await createTestRouter()
+    await r.push('/knowledge')
+    expect(r.currentRoute.value.name).toBe('Knowledge')
   })
 
   it('配置了 4 条路由定义', async () => {

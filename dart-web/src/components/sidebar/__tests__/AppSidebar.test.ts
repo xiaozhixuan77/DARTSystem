@@ -26,11 +26,6 @@ vi.mock('@/api/client', () => ({
   clearTokens: vi.fn(),
   getAccessToken: vi.fn()
 }))
-vi.mock('@/api/knowledge', () => ({
-  listKnowledge: vi.fn(),
-  getKnowledgeDetail: vi.fn(),
-  deleteKnowledge: vi.fn()
-}))
 
 // 需要 stub 路由
 const mockPush = vi.fn()
@@ -113,6 +108,13 @@ describe('AppSidebar.vue', () => {
     await wrapper.find('.logout-btn').trigger('click')
 
     expect(mockPush).toHaveBeenCalledWith('/login')
+  })
+
+  it('点击知识库按钮跳转 /knowledge', async () => {
+    const wrapper = mount(AppSidebar)
+    await wrapper.find('.panel-toggle').trigger('click')
+
+    expect(mockPush).toHaveBeenCalledWith('/knowledge')
   })
 
   // === 会话删除 ===
