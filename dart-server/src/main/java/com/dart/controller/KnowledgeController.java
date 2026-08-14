@@ -36,6 +36,12 @@ public class KnowledgeController {
         return ApiResponse.ok(knowledgeService.aggregateTags(userId));
     }
 
+    @GetMapping("/graph")
+    public ApiResponse<KnowledgeGraphDTO> globalGraph() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        return ApiResponse.ok(knowledgeService.getGlobalGraph(userId));
+    }
+
     @PutMapping("/{id}")
     public ApiResponse<Void> update(@PathVariable Long id,
                                     @RequestBody KnowledgeUpdateRequest request) {

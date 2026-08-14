@@ -33,6 +33,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -253,6 +254,33 @@ public class KnowledgeService {
                     ensureExternalNode(nodes, r.getObjectLabel());
                 }
             }
+        }
+        return new KnowledgeGraphDTO(new ArrayList<>(nodes.values()), new ArrayList<>(edges.values()));
+    }
+
+    /**
+     * 全局知识图谱：全部条目为节点，条目间关联为边（外部概念 object_id=null 不进入，
+     * 避免节点爆炸；单条目下钻图仍可见）。
+     */
+    public KnowledgeGraphDTO getGlobalGraph(Long userId) {
+        List<KnowledgeItem> items = loadItems(userId);
+        if (items.isEmpty()) {
+            return new KnowledgeGraphDTO(List.of(), List.of());
+        }
+        Set<Long> itemIds = items.stream().map(KnowledgeItem::getId).collect(Collectors.toSet());
+        Map<String, KnowledgeGraphDTO.GraphNode> nodes = new LinkedHashMap<>();
+        Map<String, KnowledgeGraphDTO.GraphEdge> edges = new LinkedHashMap<>();
+        for (KnowledgeItem item : items) {
+            nodes.put(nodeId(item.getId()),
+                    new KnowledgeGraphDTO.GraphNode(nodeId(item.getId()), item.getTitle(), "knowledge"));
+        }
+        QueryWrapper<KnowledgeRelation> wrapper = new QueryWrapper<>();
+        wrapper.in("subject_id", itemIds);
+        for (KnowledgeRelation r : relationMapper.selectList(wrapper)) {
+            if (r.getObjectId() == null || !itemIds.contains(r.getObjectId())) {
+                continue;
+            }
+            addEdge(nodes, edges, r);
         }
         return new KnowledgeGraphDTO(new ArrayList<>(nodes.values()), new ArrayList<>(edges.values()));
     }
