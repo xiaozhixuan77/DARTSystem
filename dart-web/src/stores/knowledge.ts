@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, getKnowledgeTags, updateKnowledge } from '@/api/knowledge'
+import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, getGlobalKnowledgeGraph, getKnowledgeTags, updateKnowledge } from '@/api/knowledge'
 import type { KnowledgeItemVO, KnowledgeItemDetail, GraphData } from '@/types/knowledge'
 
 export const ALL_TAG = '全部'
@@ -12,16 +12,18 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   const size = ref(12)
   const selectedItem = ref<KnowledgeItemDetail | null>(null)
   const filter = ref<string>('全部')
+  const keyword = ref('')
   const loading = ref(false)
-  const panelOpen = ref(false)
   const graphData = ref<GraphData | null>(null)
   const graphLoading = ref(false)
+  const globalGraph = ref<GraphData | null>(null)
+  const globalGraphLoading = ref(false)
   const tags = ref<string[]>([])
 
   async function loadItems() {
     loading.value = true
     try {
-      const res = await listKnowledge(page.value, size.value, filter.value === ALL_TAG ? undefined : filter.value)
+      const res = await listKnowledge(page.value, size.value, filter.value === ALL_TAG ? undefined : filter.value, keyword.value || undefined)
       if (res.code === 200) {
         items.value = res.data.records
         total.value = res.data.total
@@ -37,7 +39,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     } catch { /* ignore */ }
   }
 
-  async function saveItem(id: number, data: { title: string; tags: string; notes: string }) {
+  async function saveItem(id: number, data: { title: string; tags: string; notes: string; content: string }) {
     const res = await updateKnowledge(id, data)
     if (res.code !== 200) throw new Error(res.message || '保存失败')
     const item = items.value.find((i) => i.id === id)
@@ -49,6 +51,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
       selectedItem.value.title = data.title
       selectedItem.value.tags = data.tags || ''
       selectedItem.value.notes = data.notes
+      selectedItem.value.content = data.content
     }
   }
 
@@ -69,8 +72,10 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     loadItems()
   }
 
-  function togglePanel() {
-    panelOpen.value = !panelOpen.value
+  function setKeyword(kw: string) {
+    keyword.value = kw
+    page.value = 1
+    loadItems()
   }
 
   async function loadGraph(id: number) {
@@ -86,10 +91,23 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     }
   }
 
+  async function loadGlobalGraph() {
+    globalGraphLoading.value = true
+    try {
+      const res = await getGlobalKnowledgeGraph()
+      if (res.code === 200) globalGraph.value = res.data
+    } catch {
+      globalGraph.value = null
+    }
+    finally {
+      globalGraphLoading.value = false
+    }
+  }
+
   return {
-    items, total, page, size, selectedItem, filter,
-    loading, panelOpen, graphData, graphLoading, tags,
-    loadItems, loadTags, loadDetail, removeItem, loadGraph, saveItem,
-    setFilter, togglePanel
+    items, total, page, size, selectedItem, filter, keyword,
+    loading, graphData, graphLoading, globalGraph, globalGraphLoading, tags,
+    loadItems, loadTags, loadDetail, removeItem, loadGraph, loadGlobalGraph, saveItem,
+    setFilter, setKeyword
   }
 })
