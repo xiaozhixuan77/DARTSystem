@@ -8,10 +8,11 @@ vi.mock('@/api/knowledge', () => ({
   deleteKnowledge: vi.fn(),
   getKnowledgeGraph: vi.fn(),
   updateKnowledge: vi.fn(),
-  getKnowledgeTags: vi.fn()
+  getKnowledgeTags: vi.fn(),
+  getGlobalKnowledgeGraph: vi.fn()
 }))
 
-import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, updateKnowledge, getKnowledgeTags } from '@/api/knowledge'
+import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, updateKnowledge, getKnowledgeTags, getGlobalKnowledgeGraph } from '@/api/knowledge'
 
 function mockKnowledgeItem(overrides: Record<string, unknown> = {}) {
   return {
@@ -26,13 +27,13 @@ describe('useKnowledgeStore', () => {
     vi.clearAllMocks()
   })
 
-  it('初始状态下列表为空且面板关闭', () => {
+  it('初始状态下列表为空', () => {
     const store = useKnowledgeStore()
     expect(store.items).toEqual([])
     expect(store.total).toBe(0)
     expect(store.page).toBe(1)
     expect(store.loading).toBe(false)
-    expect(store.panelOpen).toBe(false)
+    expect(store.keyword).toBe('')
     expect(store.selectedItem).toBeNull()
   })
 
@@ -133,7 +134,7 @@ describe('useKnowledgeStore', () => {
 
     expect(store.filter).toBe('Go')
     expect(store.page).toBe(1)
-    expect(listKnowledge).toHaveBeenCalledWith(1, 12, 'Go')
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, 'Go', undefined)
   })
 
   it('全部标签不携带过滤参数', async () => {
@@ -145,7 +146,34 @@ describe('useKnowledgeStore', () => {
     const store = useKnowledgeStore()
     store.setFilter('全部')
 
-    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined)
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, undefined)
+  })
+
+  it('设置搜索关键词重置分页并携带 keyword 加载', async () => {
+    vi.mocked(listKnowledge).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: { records: [], total: 0 }
+    })
+
+    const store = useKnowledgeStore()
+    store.page = 5
+    store.setKeyword('Spring')
+
+    expect(store.keyword).toBe('Spring')
+    expect(store.page).toBe(1)
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, 'Spring')
+  })
+
+  it('空搜索关键词不携带 keyword 参数', async () => {
+    vi.mocked(listKnowledge).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: { records: [], total: 0 }
+    })
+
+    const store = useKnowledgeStore()
+    store.setKeyword('')
+
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, undefined)
   })
 
   it('加载标签填充 tags', async () => {
@@ -189,12 +217,13 @@ describe('useKnowledgeStore', () => {
     const store = useKnowledgeStore()
     await store.loadItems()
     await store.loadDetail(1)
-    await store.saveItem(1, { title: '新标题', tags: 'Go,并发', notes: '笔记' })
+    await store.saveItem(1, { title: '新标题', tags: 'Go,并发', notes: '笔记', content: '# 新正文' })
 
-    expect(updateKnowledge).toHaveBeenCalledWith(1, { title: '新标题', tags: 'Go,并发', notes: '笔记' })
+    expect(updateKnowledge).toHaveBeenCalledWith(1, { title: '新标题', tags: 'Go,并发', notes: '笔记', content: '# 新正文' })
     expect(store.items[0].title).toBe('新标题')
     expect(store.items[0].tags).toBe('Go,并发')
     expect(store.selectedItem!.title).toBe('新标题')
+    expect(store.selectedItem!.content).toBe('# 新正文')
   })
 
   it('保存失败时抛出异常', async () => {
@@ -203,19 +232,8 @@ describe('useKnowledgeStore', () => {
     })
 
     const store = useKnowledgeStore()
-    await expect(store.saveItem(1, { title: '', tags: '', notes: '' }))
+    await expect(store.saveItem(1, { title: '', tags: '', notes: '', content: '' }))
       .rejects.toBeTruthy()
-  })
-
-  it('面板开关切换状态', () => {
-    const store = useKnowledgeStore()
-    expect(store.panelOpen).toBe(false)
-
-    store.togglePanel()
-    expect(store.panelOpen).toBe(true)
-
-    store.togglePanel()
-    expect(store.panelOpen).toBe(false)
   })
 
   it('加载图谱填充 graphData', async () => {
@@ -247,5 +265,36 @@ describe('useKnowledgeStore', () => {
 
     expect(store.graphData).toBeNull()
     expect(store.graphLoading).toBe(false)
+  })
+
+  it('加载全局图谱填充 globalGraph', async () => {
+    vi.mocked(getGlobalKnowledgeGraph).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: {
+        nodes: [
+          { id: 'item:1', label: 'Spring', category: 'knowledge' },
+          { id: 'item:2', label: 'Spring Boot', category: 'knowledge' }
+        ],
+        edges: [{ source: 'item:1', target: 'item:2', label: 'related_to' }]
+      }
+    })
+
+    const store = useKnowledgeStore()
+    await store.loadGlobalGraph()
+
+    expect(store.globalGraph).not.toBeNull()
+    expect(store.globalGraph!.nodes).toHaveLength(2)
+    expect(store.globalGraph!.edges[0].label).toBe('related_to')
+    expect(store.globalGraphLoading).toBe(false)
+  })
+
+  it('加载全局图谱失败时清空 globalGraph', async () => {
+    vi.mocked(getGlobalKnowledgeGraph).mockRejectedValue(new Error('Network error'))
+
+    const store = useKnowledgeStore()
+    await store.loadGlobalGraph()
+
+    expect(store.globalGraph).toBeNull()
+    expect(store.globalGraphLoading).toBe(false)
   })
 })
