@@ -44,8 +44,8 @@ class PageFetcherTest {
 
         PageContent page = fetcher.fetch("https://go.dev/doc/");
 
-        assertThat(page.url()).isEqualTo("https://go.dev/doc/");
-        assertThat(page.title()).isEqualTo("Go 官方文档");
+        assertThat(page.getUrl()).isEqualTo("https://go.dev/doc/");
+        assertThat(page.getTitle()).isEqualTo("Go 官方文档");
         assertThat(fetcher.getCalls()).isEqualTo(2);
     }
 
