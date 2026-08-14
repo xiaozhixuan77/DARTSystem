@@ -516,6 +516,65 @@ class KnowledgeServiceTest {
     }
 
     @Test
+    void getGlobalGraph_returnsAllItemsAndItemLinks() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(
+                        createItem(1L, 1L, "Spring"),
+                        createItem(2L, 1L, "Spring Boot"),
+                        createItem(3L, 1L, "Go")));
+        KnowledgeRelation r1 = relation(1L, "related_to", 2L, null);
+        KnowledgeRelation r2 = relation(1L, "related_to", 3L, null);
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(r1, r2));
+
+        KnowledgeGraphDTO graph = knowledgeService.getGlobalGraph(1L);
+
+        assertThat(graph.nodes()).extracting(KnowledgeGraphDTO.GraphNode::id)
+                .containsExactly("item:1", "item:2", "item:3");
+        assertThat(graph.edges()).hasSize(2);
+        assertThat(graph.edges()).extracting(KnowledgeGraphDTO.GraphEdge::label)
+                .containsExactly("related_to", "related_to");
+    }
+
+    @Test
+    void getGlobalGraph_excludesExternalConcepts() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(1L, 1L, "Spring Boot")));
+        KnowledgeRelation external = relation(1L, "depends_on", null, "JVM");
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(external));
+
+        KnowledgeGraphDTO graph = knowledgeService.getGlobalGraph(1L);
+
+        assertThat(graph.nodes()).extracting(KnowledgeGraphDTO.GraphNode::id)
+                .containsExactly("item:1");
+        assertThat(graph.nodes()).extracting(KnowledgeGraphDTO.GraphNode::category)
+                .doesNotContain("external");
+        assertThat(graph.edges()).isEmpty();
+    }
+
+    @Test
+    void getGlobalGraph_filtersEdgesToUnknownItems() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(1L, 1L, "Spring Boot")));
+        KnowledgeRelation toUnknown = relation(1L, "related_to", 99L, null);
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(toUnknown));
+
+        KnowledgeGraphDTO graph = knowledgeService.getGlobalGraph(1L);
+
+        assertThat(graph.nodes()).hasSize(1);
+        assertThat(graph.edges()).isEmpty();
+    }
+
+    @Test
+    void getGlobalGraph_emptyItems_returnsEmptyGraph() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+
+        KnowledgeGraphDTO graph = knowledgeService.getGlobalGraph(1L);
+
+        assertThat(graph.nodes()).isEmpty();
+        assertThat(graph.edges()).isEmpty();
+    }
+
+    @Test
     void getGraphData_otherUsersItem_throwsForbidden() {
         when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 2L, "Others"));
         assertThatThrownBy(() -> knowledgeService.getGraphData(1L, 1L))

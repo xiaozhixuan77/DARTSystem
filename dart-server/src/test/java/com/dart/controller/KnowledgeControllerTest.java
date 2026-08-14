@@ -205,4 +205,20 @@ class KnowledgeControllerTest {
                 .andExpect(jsonPath("$.data.nodes[1].category").value("external"))
                 .andExpect(jsonPath("$.data.edges[0].label").value("depends_on"));
     }
+
+    @Test
+    void getGlobalGraph_returnsAllItemNodes() throws Exception {
+        KnowledgeGraphDTO dto = new KnowledgeGraphDTO(
+                List.of(new KnowledgeGraphDTO.GraphNode("item:1", "Spring", "knowledge"),
+                        new KnowledgeGraphDTO.GraphNode("item:2", "Spring Boot", "knowledge")),
+                List.of(new KnowledgeGraphDTO.GraphEdge("item:1", "item:2", "related_to")));
+        when(knowledgeService.getGlobalGraph(1L)).thenReturn(dto);
+
+        mockMvc.perform(get("/api/knowledge/graph")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.nodes.length()").value(2))
+                .andExpect(jsonPath("$.data.edges[0].label").value("related_to"));
+        verify(knowledgeService).getGlobalGraph(1L);
+    }
 }
