@@ -4,14 +4,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
-import { useKnowledgeStore } from '@/stores/knowledge'
 import SessionContextMenu from '@/components/common/SessionContextMenu.vue'
 import type { ConversationVO } from '@/types/chat'
 
 const chatStore = useChatStore()
 const authStore = useAuthStore()
 const router = useRouter()
-const knowledgeStore = useKnowledgeStore()
 
 const menuVisible = ref(false)
 const menuX = ref(0)
@@ -139,7 +137,7 @@ function handleLogout() {
     />
 
     <div class="sidebar-footer">
-      <button class="panel-toggle" @click="knowledgeStore.togglePanel">
+      <button class="panel-toggle" @click="router.push('/knowledge')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           width="18" height="18" style="margin-right:6px">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 4v15.5A2.5 2.5 0 0 1 6.5 22H20V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2z"/>

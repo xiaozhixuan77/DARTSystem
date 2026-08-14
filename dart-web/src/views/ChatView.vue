@@ -8,7 +8,6 @@ import ChatMessage from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import WelcomeScreen from '@/components/chat/WelcomeScreen.vue'
 import StreamingStatus from '@/components/chat/StreamingStatus.vue'
-import KnowledgePanel from '@/components/knowledge/KnowledgePanel.vue'
 
 const route = useRoute()
 const chatStore = useChatStore()
@@ -85,8 +84,6 @@ function handleSend(message: string) {
 
       <ChatInput @send="handleSend" :disabled="chatStore.isStreaming" />
     </main>
-
-    <KnowledgePanel />
   </div>
 </template>
 
