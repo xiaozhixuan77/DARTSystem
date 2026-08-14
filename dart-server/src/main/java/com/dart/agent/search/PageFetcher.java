@@ -55,6 +55,10 @@ public class PageFetcher {
                 return connectOnce(url);
             } catch (RuntimeException e) {
                 last = e;
+                // 连接层失败（域名不可达/连接被拒/TLS 失败）：已尝试 https→http 降级，不再重试浪费等待
+                if (isConnectLayerFailure(e)) {
+                    break;
+                }
                 if (attempt < MAX_ATTEMPTS) {
                     try {
                         Thread.sleep(RETRY_DELAY_MS);
@@ -70,17 +74,56 @@ public class PageFetcher {
     }
 
     /**
-     * 单次连接（重试循环的原子单位，测试可覆写模拟失败/成功）。
+     * 单次连接尝试（含 https→http 降级；重试循环的原子单位，测试可覆写模拟失败/成功）。
+     * 官网直连不可达是常态（如 go.dev），https 连接层失败时降级尝试 http 版本（短超时）。
      */
     protected Document connectOnce(String url) {
         try {
+            return connectRaw(url, timeoutMs);
+        } catch (RuntimeException e) {
+            if (url.startsWith("https://") && isConnectLayerFailure(e)) {
+                String httpUrl = "http://" + url.substring("https://".length());
+                try {
+                    return connectRaw(httpUrl, timeoutMs / 2);
+                } catch (RuntimeException httpE) {
+                    e.addSuppressed(httpE);
+                }
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * 单次 HTTP 连接（降级链与重试的原子单位，测试可覆写）。
+     */
+    protected Document connectRaw(String url, int connectTimeoutMs) {
+        try {
             return Jsoup.connect(url)
-                    .timeout(timeoutMs)
+                    .timeout(connectTimeoutMs)
                     .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) DART/1.0")
                     .get();
         } catch (java.io.IOException e) {
             throw new RuntimeException("连接失败: " + url, e);
         }
+    }
+
+    /**
+     * 连接层失败判定：连接超时/被拒/无路由/TLS 握手失败（区别于已建连后的读超时）。
+     */
+    private static boolean isConnectLayerFailure(Throwable t) {
+        while (t != null) {
+            String msg = t.getMessage() == null ? "" : t.getMessage();
+            if (t instanceof java.net.ConnectException
+                    || t instanceof java.net.NoRouteToHostException
+                    || t instanceof javax.net.ssl.SSLException
+                    || msg.contains("Connect timed out")
+                    || msg.contains("Connection refused")
+                    || msg.contains("Unable to connect")) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 
     private void validateUrl(String url) {
