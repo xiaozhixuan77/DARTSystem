@@ -379,6 +379,52 @@ class KnowledgeServiceTest {
     }
 
     @Test
+    void linkRelatedItems_sharedTitleKeyword_createsRelation() {
+        when(knowledgeItemMapper.selectById(1L))
+                .thenReturn(createItem(1L, 1L, "Spring Boot 自动配置原理是什么？"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "Spring Cloud 与 Spring Boot 有什么区别？")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(relationMapper.selectCount(any())).thenReturn(0L);
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        ArgumentCaptor<KnowledgeRelation> captor = ArgumentCaptor.forClass(KnowledgeRelation.class);
+        verify(relationMapper).insert(captor.capture());
+        assertThat(captor.getValue().getSource()).contains("TITLE_KEYWORD");
+        assertThat(captor.getValue().getPredicate()).isEqualTo("related_to");
+    }
+
+    @Test
+    void linkRelatedItems_noSharedKeyword_skips() {
+        when(knowledgeItemMapper.selectById(1L))
+                .thenReturn(createItem(1L, 1L, "Spring Boot 自动配置原理是什么？"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "Go 语言的 goroutine 和 channel 如何使用？")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
+    }
+
+    @Test
+    void linkRelatedItems_punctuationDifference_stillSharesKeyword() {
+        when(knowledgeItemMapper.selectById(1L))
+                .thenReturn(createItem(1L, 1L, "自动配置原理？"));
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "自动配置原理！")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(relationMapper.selectCount(any())).thenReturn(0L);
+
+        knowledgeService.linkRelatedItems(1L, 1L);
+
+        ArgumentCaptor<KnowledgeRelation> captor = ArgumentCaptor.forClass(KnowledgeRelation.class);
+        verify(relationMapper).insert(captor.capture());
+        assertThat(captor.getValue().getSource()).contains("TITLE_KEYWORD");
+    }
+
+    @Test
     void linkRelatedItems_vectorSimilarity_createsRelation() {
         when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "Kubernetes"));
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))

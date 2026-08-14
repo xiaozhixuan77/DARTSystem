@@ -142,6 +142,79 @@ class RagServiceTest {
         assertThat(answer).contains("综合回答");
     }
 
+    @Test
+    void retrieve_chunkQueryWithoutSqlLimit_loadsAllChunks() {
+        // 回归防护：SQL 层不得无排序 LIMIT 截断（否则后沉淀条目的相似块永远轮不到比较）
+        float[] emb = new float[1024];
+        java.util.Arrays.fill(emb, 1.0f);
+        lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("Spring Boot Guide");
+        item.setSourceUrl("https://spring.io");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("Spring Boot 教程内容");
+        chunk.setChunkIndex(0);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(emb)));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        ragService.retrieve("Spring Boot", 1L);
+
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
+        verify(knowledgeChunkMapper).selectList(captor.capture());
+        assertThat(captor.getValue().getLastSqlSegment()).doesNotContain("LIMIT");
+    }
+
+    @Test
+    void retrieve_matchedMoreThanTopK_keepsHighestOnly() {
+        float[] emb = new float[1024];
+        java.util.Arrays.fill(emb, 1.0f);
+        lenient().when(embeddingService.embed(anyString())).thenReturn(emb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("Spring Boot Guide");
+        item.setSourceUrl("https://spring.io");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+
+        java.util.List<KnowledgeChunk> six = new java.util.ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            KnowledgeChunk c = new KnowledgeChunk();
+            c.setKnowledgeItemId(1L);
+            c.setChunkText("chunk-" + i);
+            c.setChunkIndex(i);
+            c.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                    com.dart.util.VectorUtils.floatArrayToBytes(emb)));
+            six.add(c);
+        }
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(six);
+
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("回答"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ragService.retrieve("Spring Boot", 1L);
+
+        // 6 个命中块但 topK=5 → 生成 prompt 只含 5 个 <source>
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        String prompt = captor.getValue().getInstructions().getFirst().getText();
+        assertThat(prompt).contains("<source>").doesNotContain("chunk-5");
+    }
+
     // === 1-hop 知识图谱增强 ===
 
     @Test
