@@ -1,4 +1,4 @@
 package com.dart.dto.request;
 
-public record KnowledgeUpdateRequest(String title, String tags, String notes) {
+public record KnowledgeUpdateRequest(String title, String tags, String notes, String content) {
 }

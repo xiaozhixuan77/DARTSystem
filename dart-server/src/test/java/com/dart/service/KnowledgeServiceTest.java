@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -267,7 +268,6 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
         when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        when(relationMapper.selectCount(any())).thenReturn(0L);
 
         knowledgeService.updateKnowledge(1L, 1L,
                 new KnowledgeUpdateRequest("Spring", "Go", "笔记", "新内容"));

@@ -3,6 +3,7 @@ package com.dart.service;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.splitter.ChunkResult;
 import com.dart.agent.splitter.MarkdownSplitter;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
 import com.dart.mapper.KnowledgeChunkMapper;
@@ -141,6 +142,90 @@ public class EmbeddingService {
         }
 
         return List.of(knowledgeItemId);
+    }
+
+    /**
+     * 正文编辑后重建条目分块与向量：删除旧 chunk，新内容分块向量化并插入 MySQL，
+     * afterCommit 先删旧 Redis key 再写新向量（失败则都不执行，MySQL/Redis 保持一致）。
+     */
+    @Transactional
+    public void rebuildChunksForItem(Long knowledgeItemId, String content) {
+        QueryWrapper<KnowledgeChunk> wrapper = new QueryWrapper<>();
+        wrapper.eq("knowledge_item_id", knowledgeItemId);
+        List<KnowledgeChunk> oldChunks = knowledgeChunkMapper.selectList(wrapper);
+        List<String> oldEmbeddingIds = oldChunks.stream()
+                .map(KnowledgeChunk::getEmbeddingId)
+                .filter(id -> id != null && !id.isBlank())
+                .toList();
+        knowledgeChunkMapper.delete(wrapper);
+
+        if (content == null || content.isBlank()) {
+            runAfterCommit(() -> deleteRedisKeys(oldEmbeddingIds));
+            return;
+        }
+
+        List<ChunkResult> chunks = splitter.split(content);
+        List<float[]> embeddings = new ArrayList<>();
+        List<String> embeddingIds = new ArrayList<>();
+        for (ChunkResult chunk : chunks) {
+            try {
+                float[] vec = embed(chunk.chunkText());
+                embeddings.add(vec);
+                embeddingIds.add("chunk:" + knowledgeItemId + ":" + chunk.chunkIndex());
+            } catch (Exception e) {
+                log.error("Embedding 失败: itemId={}, chunkIndex={}",
+                        knowledgeItemId, chunk.chunkIndex(), e);
+                throw new RuntimeException("Embedding API 调用失败", e);
+            }
+        }
+        for (int i = 0; i < chunks.size(); i++) {
+            KnowledgeChunk kc = new KnowledgeChunk();
+            kc.setKnowledgeItemId(knowledgeItemId);
+            kc.setChunkIndex(chunks.get(i).chunkIndex());
+            kc.setChunkText(chunks.get(i).chunkText());
+            kc.setEmbeddingId(embeddingIds.get(i));
+            kc.setEmbedding(Base64.getEncoder().encodeToString(
+                    com.dart.util.VectorUtils.floatArrayToBytes(embeddings.get(i))));
+            kc.setCreatedAt(LocalDateTime.now());
+            knowledgeChunkMapper.insert(kc);
+        }
+
+        List<String> finalOldIds = List.copyOf(oldEmbeddingIds);
+        List<String> finalNewIds = List.copyOf(embeddingIds);
+        List<float[]> finalNewVectors = List.copyOf(embeddings);
+        runAfterCommit(() -> {
+            deleteRedisKeys(finalOldIds);
+            writeChunkVectorsToRedis(redisTemplate, finalNewIds, finalNewVectors);
+        });
+    }
+
+    private void runAfterCommit(Runnable action) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager
+                .isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                    .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            action.run();
+                        }
+                    });
+        } else {
+            action.run();
+        }
+    }
+
+    private void deleteRedisKeys(List<String> embeddingIds) {
+        if (embeddingIds.isEmpty()) {
+            return;
+        }
+        try {
+            List<String> keys = embeddingIds.stream()
+                    .map(id -> RedisKeyConstants.DART_PREFIX + id)
+                    .toList();
+            redisTemplate.delete(keys);
+        } catch (Exception e) {
+            log.warn("删除旧 Redis 向量失败（残留无害）: {} 条", embeddingIds.size(), e);
+        }
     }
 
     public float[] embed(String text) {

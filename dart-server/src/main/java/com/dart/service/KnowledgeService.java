@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -39,10 +40,12 @@ import java.util.Set;
 public class KnowledgeService {
 
     private static final String PREDICATE_RELATED = "related_to";
+    private static final int MAX_CONTENT_LENGTH = 200_000;
 
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final KnowledgeRelationMapper relationMapper;
+    private final EmbeddingService embeddingService;
 
     @Value("${agent.graph.link-similarity-threshold:0.75}")
     private double linkSimilarityThreshold = 0.75;
@@ -100,6 +103,7 @@ public class KnowledgeService {
         knowledgeItemMapper.deleteById(item.getId());
     }
 
+    @Transactional
     public void updateKnowledge(Long userId, Long knowledgeId, KnowledgeUpdateRequest req) {
         KnowledgeItem item = knowledgeItemMapper.selectById(knowledgeId);
         if (item == null) {
@@ -116,11 +120,58 @@ public class KnowledgeService {
         if (tags.length() > 500) {
             throw new BusinessException(ErrorCode.BAD_REQUEST);
         }
+        if (req.content() != null && req.content().length() > MAX_CONTENT_LENGTH) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST);
+        }
+        boolean contentChanged = req.content() != null && !req.content().equals(item.getContent());
+        boolean titleChanged = !title.equals(item.getTitle());
+        if (contentChanged) {
+            item.setContent(req.content());
+        }
         item.setTitle(title);
         item.setTags(tags);
         item.setNotes(req.notes());
         item.setUpdatedAt(LocalDateTime.now());
         knowledgeItemMapper.updateById(item);
+        if (contentChanged) {
+            // 同步删除旧 chunk（事务内）：旧向量立即失效，RAG 不再命中旧内容
+            QueryWrapper<KnowledgeChunk> wrapper = new QueryWrapper<>();
+            wrapper.eq("knowledge_item_id", knowledgeId);
+            knowledgeChunkMapper.delete(wrapper);
+            // 异步重建：embedding 远程调用不阻塞保存响应
+            String newContent = req.content();
+            runAfterCommit(() -> Thread.startVirtualThread(() -> {
+                try {
+                    embeddingService.rebuildChunksForItem(knowledgeId, newContent);
+                } catch (Exception e) {
+                    log.warn("正文重建失败: itemId={}", knowledgeId, e);
+                }
+            }));
+        }
+        if (contentChanged || titleChanged) {
+            runAfterCommit(() -> Thread.startVirtualThread(() -> {
+                try {
+                    rebuildLinks(userId);
+                } catch (Exception e) {
+                    log.warn("编辑后关联重算失败: userId={}", userId, e);
+                }
+            }));
+        }
+    }
+
+    private void runAfterCommit(Runnable action) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager
+                .isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                    .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            action.run();
+                        }
+                    });
+        } else {
+            action.run();
+        }
     }
 
     /**
