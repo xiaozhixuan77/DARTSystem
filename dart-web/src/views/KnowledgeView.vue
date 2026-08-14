@@ -28,12 +28,9 @@ async function openDetail(id: number) {
   dialogVisible.value = true
 }
 
-async function handleSave(data: { title: string; tags: string; notes: string }) {
+async function handleSave(data: { title: string; tags: string; notes: string; content: string }) {
   if (!store.selectedItem) return
-  await store.saveItem(store.selectedItem.id, {
-    ...data,
-    content: store.selectedItem.content || ''
-  })
+  await store.saveItem(store.selectedItem.id, data)
   dialogVisible.value = false
   await store.loadItems()
   await store.loadTags()

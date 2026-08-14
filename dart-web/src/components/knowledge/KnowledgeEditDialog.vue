@@ -5,15 +5,21 @@ import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { EChartsType } from 'echarts/core'
+import { ElMessageBox } from 'element-plus'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useMarkdown } from '@/composables/useMarkdown'
+import { buildMarkdownExport, downloadMarkdown } from '@/composables/useMarkdownExport'
 import type { KnowledgeItemDetail, GraphData } from '@/types/knowledge'
 
 echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
-const props = defineProps<{ visible: boolean; item: KnowledgeItemDetail | null }>()
+const props = withDefaults(defineProps<{
+  visible: boolean
+  item: KnowledgeItemDetail | null
+  initialTab?: 'content' | 'detail' | 'graph'
+}>(), { initialTab: 'content' })
 const emit = defineEmits<{
-  save: [data: { title: string; tags: string; notes: string }]
+  save: [data: { title: string; tags: string; notes: string; content: string }]
   close: []
 }>()
 
@@ -23,6 +29,7 @@ const { render, renderMermaidDiagrams } = useMarkdown()
 const title = ref('')
 const notes = ref('')
 const tagInput = ref('')
+const content = ref('')
 const activeTab = ref<'content' | 'detail' | 'graph'>('content')
 const contentEl = ref<HTMLElement | null>(null)
 const graphEl = ref<HTMLDivElement | null>(null)
@@ -36,7 +43,8 @@ watch(() => props.item, (val) => {
     title.value = val.title
     notes.value = val.notes || ''
     tagInput.value = val.tags || ''
-    activeTab.value = 'content'
+    content.value = val.content || ''
+    activeTab.value = props.initialTab
     disposeChart()
   }
 }, { immediate: true })
@@ -48,6 +56,24 @@ watch(() => props.visible, (val) => {
   }
 })
 
+function handleExport() {
+  if (!props.item) return
+  downloadMarkdown(props.item.title, buildMarkdownExport(props.item))
+}
+
+async function handleDelete() {
+  if (!props.item) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除知识条目「${props.item.title}」吗？删除后不可恢复。`,
+      '删除条目',
+      { confirmButtonText: '删除', type: 'warning' }
+    )
+    await store.removeItem(props.item.id)
+    emit('close')
+  } catch { /* 取消删除 */ }
+}
+
 const canSave = computed(() => !!props.item && title.value.trim().length > 0)
 
 function handleSave() {
@@ -55,7 +81,8 @@ function handleSave() {
   emit('save', {
     title: title.value.trim(),
     notes: notes.value.trim(),
-    tags: tagInput.value
+    tags: tagInput.value,
+    content: content.value
   })
 }
 
@@ -160,6 +187,12 @@ function disposeChart() {
           <label for="edit-notes">备注</label>
           <textarea id="edit-notes" v-model="notes" rows="4" placeholder="添加备注..." />
         </div>
+
+        <div class="dialog-field">
+          <label for="edit-content">正文（Markdown）</label>
+          <textarea id="edit-content" v-model="content" rows="12" class="content-editor"
+                    placeholder="编辑正文内容..." />
+        </div>
       </div>
 
       <div v-else class="graph-tab">
@@ -171,6 +204,9 @@ function disposeChart() {
       </div>
 
       <div class="dialog-actions">
+        <button class="export-btn" @click="handleExport">导出 Markdown</button>
+        <button class="delete-btn" @click="handleDelete">删除</button>
+        <div class="action-spacer"></div>
         <button class="cancel-btn" @click="emit('close')">取消</button>
         <button class="save-btn" :disabled="!canSave" @click="handleSave">保存</button>
       </div>
@@ -258,10 +294,28 @@ function disposeChart() {
   display: flex; gap: 12px; justify-content: flex-end;
   margin-top: 8px;
 }
-.cancel-btn, .save-btn {
+.content-editor {
+  font-family: monospace;
+  line-height: 1.6;
+}
+.action-spacer {
+  flex: 1;
+}
+.export-btn, .delete-btn, .cancel-btn, .save-btn {
   padding: 8px 20px;
   border-radius: $radius;
   font-size: 14px; cursor: pointer;
+}
+.export-btn {
+  border: 1px solid $color-border;
+  background: $color-surface;
+  &:hover { background: $color-bg; }
+}
+.delete-btn {
+  border: 1px solid #e74c3c;
+  color: #e74c3c;
+  background: $color-surface;
+  &:hover { background: #fdecea; }
 }
 .cancel-btn {
   border: 1px solid $color-border;
