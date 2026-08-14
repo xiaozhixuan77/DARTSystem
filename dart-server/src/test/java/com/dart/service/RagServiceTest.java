@@ -171,7 +171,7 @@ class RagServiceTest {
         ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
                 ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
         verify(knowledgeChunkMapper).selectList(captor.capture());
-        assertThat(captor.getValue().getLastSqlSegment()).doesNotContain("LIMIT");
+        assertThat(captor.getValue().getSqlSegment()).doesNotContain("LIMIT");
     }
 
     @Test
