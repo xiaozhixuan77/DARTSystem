@@ -47,7 +47,8 @@ public class KnowledgeService {
     @Value("${agent.graph.link-similarity-threshold:0.75}")
     private double linkSimilarityThreshold = 0.75;
 
-    public PageResult<KnowledgeItemVO> listUserKnowledge(Long userId, int page, int size, String tag) {
+    public PageResult<KnowledgeItemVO> listUserKnowledge(Long userId, int page, int size,
+                                                         String tag, String keyword) {
         Page<KnowledgeItem> p = new Page<>(page, size);
         QueryWrapper<KnowledgeItem> query = new QueryWrapper<>();
         query.eq("user_id", userId)
@@ -55,6 +56,15 @@ public class KnowledgeService {
                 .orderByDesc("created_at");
         if (tag != null && !tag.isBlank()) {
             query.apply("FIND_IN_SET({0}, tags)", tag.trim());
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String kw = keyword.trim();
+            query.and(q -> q.like("title", kw)
+                    .or().like("tags", kw)
+                    .or().like("notes", kw)
+                    .or().apply("EXISTS (SELECT 1 FROM knowledge_chunk kc "
+                            + "WHERE kc.knowledge_item_id = knowledge_item.id "
+                            + "AND kc.chunk_text LIKE {0})", "%" + kw + "%"));
         }
         p = knowledgeItemMapper.selectPage(p, query);
         List<KnowledgeItemVO> records = p.getRecords().stream()

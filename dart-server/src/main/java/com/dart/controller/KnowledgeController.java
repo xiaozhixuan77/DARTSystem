@@ -24,9 +24,10 @@ public class KnowledgeController {
     public ApiResponse<PageResult<KnowledgeItemVO>> list(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String tag) {
+            @RequestParam(required = false) String tag,
+            @RequestParam(required = false) String keyword) {
         Long userId = SecurityUtils.getCurrentUserId();
-        return ApiResponse.ok(knowledgeService.listUserKnowledge(userId, page, size, tag));
+        return ApiResponse.ok(knowledgeService.listUserKnowledge(userId, page, size, tag, keyword));
     }
 
     @GetMapping("/tags")
