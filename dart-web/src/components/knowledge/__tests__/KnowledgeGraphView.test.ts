@@ -1,17 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { useKnowledgeStore } from '@/stores/knowledge'
 import KnowledgeGraphView from '../KnowledgeGraphView.vue'
 
-let clickHandler: ((params: any) => void) | null = null
-const setOptionMock = vi.fn()
-const initMock = vi.fn(() => ({
-  setOption: setOptionMock,
-  dispose: vi.fn(),
-  on: vi.fn((_event: string, handler: (params: any) => void) => { clickHandler = handler }),
-  off: vi.fn()
-}))
+const { initMock, setOptionMock, clickHandlerRef } = vi.hoisted(() => {
+  const clickHandlerRef: { current: ((params: any) => void) | null } = { current: null }
+  const setOptionMock = vi.fn()
+  const initMock = vi.fn(() => ({
+    setOption: setOptionMock,
+    dispose: vi.fn(),
+    on: vi.fn((_event: string, handler: (params: any) => void) => { clickHandlerRef.current = handler }),
+    off: vi.fn()
+  }))
+  return { initMock, setOptionMock, clickHandlerRef }
+})
 
 vi.mock('echarts/core', () => ({
   init: initMock,
@@ -44,7 +46,7 @@ describe('KnowledgeGraphView.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
-    clickHandler = null
+    clickHandlerRef.current = null
     mockGraph()
   })
 
@@ -91,7 +93,7 @@ describe('KnowledgeGraphView.vue', () => {
     })
     await flushPromises()
 
-    clickHandler!({ data: { id: 'item:2' } })
+    clickHandlerRef.current!({ data: { id: 'item:2' } })
 
     expect(wrapper.emitted('select-item')).toBeTruthy()
     expect(wrapper.emitted('select-item')![0][0]).toBe(2)
@@ -104,7 +106,7 @@ describe('KnowledgeGraphView.vue', () => {
     })
     await flushPromises()
 
-    clickHandler!({ data: { id: 'ext:JVM' } })
+    clickHandlerRef.current!({ data: { id: 'ext:JVM' } })
 
     expect(wrapper.emitted('select-item')).toBeFalsy()
     wrapper.unmount()

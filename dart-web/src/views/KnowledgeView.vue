@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useKnowledgeStore, ALL_TAG } from '@/stores/knowledge'
 import { useDebounce } from '@/composables/useDebounce'
 import KnowledgeCard from '@/components/knowledge/KnowledgeCard.vue'
+import KnowledgeGraphView from '@/components/knowledge/KnowledgeGraphView.vue'
 import KnowledgeEditDialog from '@/components/knowledge/KnowledgeEditDialog.vue'
 
 const router = useRouter()
@@ -13,6 +14,7 @@ const searchText = ref('')
 const searchDebounced = useDebounce(() => searchText.value, 400)
 const view = ref<'list' | 'graph'>('list')
 const dialogVisible = ref(false)
+const dialogInitialTab = ref<'content' | 'detail' | 'graph'>('content')
 
 const totalPages = computed(() => Math.max(1, Math.ceil(store.total / store.size)))
 
@@ -23,8 +25,9 @@ onMounted(() => {
   store.loadTags()
 })
 
-async function openDetail(id: number) {
+async function openDetail(id: number, initialTab: 'content' | 'detail' | 'graph' = 'content') {
   await store.loadDetail(id)
+  dialogInitialTab.value = initialTab
   dialogVisible.value = true
 }
 
@@ -90,14 +93,13 @@ function nextPage() {
           <button class="pager-btn pager-next" :disabled="store.page >= totalPages" @click="nextPage">下一页</button>
         </div>
       </div>
-      <div v-else class="graph-view">
-        <div class="graph-hint">知识图谱视图</div>
-      </div>
+      <KnowledgeGraphView v-else @select-item="(id: number) => openDetail(id, 'graph')" />
     </main>
 
     <KnowledgeEditDialog
       :visible="dialogVisible"
       :item="store.selectedItem"
+      :initial-tab="dialogInitialTab"
       @save="handleSave"
       @close="dialogVisible = false"
     />
