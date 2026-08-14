@@ -38,12 +38,15 @@ class KnowledgeServiceTest {
     private KnowledgeChunkMapper knowledgeChunkMapper;
     @Mock
     private KnowledgeRelationMapper relationMapper;
+    @Mock
+    private EmbeddingService embeddingService;
 
     private KnowledgeService knowledgeService;
 
     @BeforeEach
     void setUp() {
-        knowledgeService = new KnowledgeService(knowledgeItemMapper, knowledgeChunkMapper, relationMapper);
+        knowledgeService = new KnowledgeService(knowledgeItemMapper, knowledgeChunkMapper,
+                relationMapper, embeddingService);
     }
 
     private static KnowledgeRelation relation(Long subjectId, String predicate, Long objectId, String objectLabel) {
@@ -167,7 +170,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
 
         knowledgeService.updateKnowledge(1L, 1L,
-                new KnowledgeUpdateRequest("新标题", "Go, 并发, , Go,", "笔记"));
+                new KnowledgeUpdateRequest("新标题", "Go, 并发, , Go,", "笔记", null));
 
         ArgumentCaptor<KnowledgeItem> captor = ArgumentCaptor.forClass(KnowledgeItem.class);
         verify(knowledgeItemMapper).updateById(captor.capture());
@@ -180,7 +183,7 @@ class KnowledgeServiceTest {
     void updateKnowledge_notFound_throwsException() {
         when(knowledgeItemMapper.selectById(99L)).thenReturn(null);
         assertThatThrownBy(() -> knowledgeService.updateKnowledge(1L, 99L,
-                new KnowledgeUpdateRequest("新标题", "Go", "n")))
+                new KnowledgeUpdateRequest("新标题", "Go", "n", null)))
                 .hasMessageContaining("不存在");
     }
 
@@ -188,7 +191,7 @@ class KnowledgeServiceTest {
     void updateKnowledge_notOwned_throwsException() {
         when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 2L, "Others"));
         assertThatThrownBy(() -> knowledgeService.updateKnowledge(1L, 1L,
-                new KnowledgeUpdateRequest("新标题", "Go", "n")))
+                new KnowledgeUpdateRequest("新标题", "Go", "n", null)))
                 .hasMessageContaining("无权访问");
     }
 
@@ -196,7 +199,7 @@ class KnowledgeServiceTest {
     void updateKnowledge_blankTitle_throwsException() {
         when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "x"));
         assertThatThrownBy(() -> knowledgeService.updateKnowledge(1L, 1L,
-                new KnowledgeUpdateRequest("   ", "Go", "n")))
+                new KnowledgeUpdateRequest("   ", "Go", "n", null)))
                 .hasMessageContaining("请求参数错误");
     }
 
@@ -205,7 +208,79 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "x"));
         String longTitle = "a".repeat(501);
         assertThatThrownBy(() -> knowledgeService.updateKnowledge(1L, 1L,
-                new KnowledgeUpdateRequest(longTitle, "Go", "n")))
+                new KnowledgeUpdateRequest(longTitle, "Go", "n", null)))
+                .hasMessageContaining("请求参数错误");
+    }
+
+    @Test
+    void updateKnowledge_contentChanged_updatesContentDeletesOldChunksAndRebuilds() {
+        KnowledgeItem item = createItem(1L, 1L, "Spring Guide");
+        item.setContent("旧内容");
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
+
+        knowledgeService.updateKnowledge(1L, 1L,
+                new KnowledgeUpdateRequest("新标题", "Go", "笔记", "新内容"));
+
+        ArgumentCaptor<KnowledgeItem> captor = ArgumentCaptor.forClass(KnowledgeItem.class);
+        verify(knowledgeItemMapper).updateById(captor.capture());
+        assertThat(captor.getValue().getContent()).isEqualTo("新内容");
+        verify(knowledgeChunkMapper).delete(any(QueryWrapper.class));
+        verify(embeddingService, timeout(2000)).rebuildChunksForItem(eq(1L), eq("新内容"));
+    }
+
+    @Test
+    void updateKnowledge_contentNull_skipsContentUpdateAndRebuild() {
+        KnowledgeItem item = createItem(1L, 1L, "Spring Guide");
+        item.setContent("旧内容");
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
+
+        knowledgeService.updateKnowledge(1L, 1L,
+                new KnowledgeUpdateRequest("新标题", "Go", "笔记", null));
+
+        ArgumentCaptor<KnowledgeItem> captor = ArgumentCaptor.forClass(KnowledgeItem.class);
+        verify(knowledgeItemMapper).updateById(captor.capture());
+        assertThat(captor.getValue().getContent()).isEqualTo("旧内容");
+        verify(knowledgeChunkMapper, never()).delete(any(QueryWrapper.class));
+        verify(embeddingService, never()).rebuildChunksForItem(anyLong(), anyString());
+    }
+
+    @Test
+    void updateKnowledge_contentUnchanged_skipsRebuild() {
+        KnowledgeItem item = createItem(1L, 1L, "Spring Guide");
+        item.setContent("相同内容");
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
+
+        knowledgeService.updateKnowledge(1L, 1L,
+                new KnowledgeUpdateRequest("新标题", "Go", "笔记", "相同内容"));
+
+        verify(knowledgeChunkMapper, never()).delete(any(QueryWrapper.class));
+        verify(embeddingService, never()).rebuildChunksForItem(anyLong(), anyString());
+    }
+
+    @Test
+    void updateKnowledge_contentChanged_triggersAsyncRebuildLinks() {
+        KnowledgeItem item = createItem(1L, 1L, "Spring Guide");
+        item.setContent("旧内容");
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(relationMapper.selectCount(any())).thenReturn(0L);
+
+        knowledgeService.updateKnowledge(1L, 1L,
+                new KnowledgeUpdateRequest("Spring", "Go", "笔记", "新内容"));
+
+        verify(knowledgeItemMapper, timeout(2000)).selectList(any(QueryWrapper.class));
+    }
+
+    @Test
+    void updateKnowledge_contentTooLong_throwsException() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "x"));
+        String longContent = "a".repeat(200001);
+        assertThatThrownBy(() -> knowledgeService.updateKnowledge(1L, 1L,
+                new KnowledgeUpdateRequest("标题", "Go", "n", longContent)))
                 .hasMessageContaining("请求参数错误");
     }
 

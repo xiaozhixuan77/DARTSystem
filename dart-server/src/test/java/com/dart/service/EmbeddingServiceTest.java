@@ -152,4 +152,67 @@ class EmbeddingServiceTest {
         verify(knowledgeItemMapper).insert(captor.capture());
         assertThat(captor.getValue().getTags()).isEqualTo("深入原理");
     }
+
+    // === rebuildChunksForItem（正文编辑重建）===
+
+    private static KnowledgeChunk oldChunk(Long itemId, int index) {
+        KnowledgeChunk c = new KnowledgeChunk();
+        c.setId((long) index + 1);
+        c.setKnowledgeItemId(itemId);
+        c.setChunkIndex(index);
+        c.setChunkText("旧分块内容");
+        c.setEmbeddingId("chunk:" + itemId + ":" + index);
+        c.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(new float[1024])));
+        return c;
+    }
+
+    @Test
+    void rebuildChunksForItem_deletesOldChunksInsertsNewAndWritesRedis() {
+        when(knowledgeChunkMapper.selectList(any(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class)))
+                .thenReturn(List.of(oldChunk(1L, 0), oldChunk(1L, 1)));
+        float[] emb = new float[1024];
+        when(embeddingModel.call(any(EmbeddingRequest.class)))
+                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
+                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+
+        String content = "这是正文编辑后用于重建分块的测试内容内容。".repeat(30);
+        embeddingService.rebuildChunksForItem(1L, content);
+
+        verify(knowledgeChunkMapper).delete(any(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class));
+        verify(knowledgeChunkMapper, atLeastOnce()).insert(any(KnowledgeChunk.class));
+        verify(embeddingModel, atLeastOnce()).call(any(EmbeddingRequest.class));
+        // 无事务环境 afterCommit 直接执行 → Redis 写入新向量
+        verify(redisTemplate).executePipelined(any(org.springframework.data.redis.core.RedisCallback.class));
+    }
+
+    @Test
+    void rebuildChunksForItem_blankContent_onlyDeletesChunksAndRedisKeys() {
+        when(knowledgeChunkMapper.selectList(any(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class)))
+                .thenReturn(List.of(oldChunk(1L, 0)));
+
+        embeddingService.rebuildChunksForItem(1L, "   ");
+
+        verify(knowledgeChunkMapper).delete(any(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class));
+        verify(knowledgeChunkMapper, never()).insert(any(KnowledgeChunk.class));
+        verify(embeddingModel, never()).call(any(EmbeddingRequest.class));
+        // 无事务环境 afterCommit 直接执行 → 删除旧 Redis key
+        verify(redisTemplate).delete(any(Collection.class));
+    }
+
+    @Test
+    void rebuildChunksForItem_noOldChunks_stillRebuilds() {
+        when(knowledgeChunkMapper.selectList(any(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class)))
+                .thenReturn(List.of());
+        float[] emb = new float[1024];
+        when(embeddingModel.call(any(EmbeddingRequest.class)))
+                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
+                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+
+        String content = "这是正文编辑后用于重建分块的测试内容内容。".repeat(30);
+        embeddingService.rebuildChunksForItem(1L, content);
+
+        verify(knowledgeChunkMapper, atLeastOnce()).insert(any(KnowledgeChunk.class));
+        verify(redisTemplate).executePipelined(any(org.springframework.data.redis.core.RedisCallback.class));
+    }
 }

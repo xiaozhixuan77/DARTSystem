@@ -15,8 +15,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -118,6 +121,19 @@ class KnowledgeControllerTest {
                 .andExpect(status().isOk());
 
         verify(knowledgeService).updateKnowledge(eq(1L), eq(1L), any(KnowledgeUpdateRequest.class));
+    }
+
+    @Test
+    void updateKnowledge_withContent_deserializesContent() throws Exception {
+        mockMvc.perform(put("/api/knowledge/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"新标题\",\"tags\":\"Go\",\"notes\":\"笔记\","
+                                + "\"content\":\"# 新正文\"}"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<KnowledgeUpdateRequest> captor = ArgumentCaptor.forClass(KnowledgeUpdateRequest.class);
+        verify(knowledgeService).updateKnowledge(eq(1L), eq(1L), captor.capture());
+        assertThat(captor.getValue().content()).isEqualTo("# 新正文");
     }
 
     @Test
