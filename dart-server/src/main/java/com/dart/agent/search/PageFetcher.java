@@ -18,6 +18,9 @@ public class PageFetcher {
 
     private static final Logger log = LoggerFactory.getLogger(PageFetcher.class);
 
+    private static final int MAX_ATTEMPTS = 2;
+    private static final long RETRY_DELAY_MS = 500;
+
     private static final Pattern CODE_FENCE = Pattern.compile("```");
     private static final Pattern DIAGRAM_KEYWORDS = Pattern.compile(
             "\\b(diagram|archite[ck]ture|flowchart|sequence|component|class diagram|时序图|架构图|流程图)\\b",
@@ -46,14 +49,37 @@ public class PageFetcher {
 
     protected Document doConnect(String url) {
         validateUrl(url);
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                return connectOnce(url);
+            } catch (RuntimeException e) {
+                last = e;
+                if (attempt < MAX_ATTEMPTS) {
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+        log.warn("页面抓取失败: {}", url, last);
+        throw new RuntimeException("页面抓取失败: " + url, last);
+    }
+
+    /**
+     * 单次连接（重试循环的原子单位，测试可覆写模拟失败/成功）。
+     */
+    protected Document connectOnce(String url) {
         try {
             return Jsoup.connect(url)
                     .timeout(timeoutMs)
                     .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) DART/1.0")
                     .get();
-        } catch (Exception e) {
-            log.warn("页面抓取失败: {}", url, e);
-            throw new RuntimeException("页面抓取失败: " + url, e);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("连接失败: " + url, e);
         }
     }
 

@@ -52,6 +52,8 @@ public class SearchTools {
             return List.of();
         }
 
+        // 单页最长等待：12s 超时 × 2 次尝试 + 0.5s 重试间隔 ≈ 24.5s，封顶 25s
+        final int fetchGetTimeoutSeconds = 25;
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         try {
             List<CompletableFuture<PageContent>> futures = urls.stream()
@@ -68,7 +70,7 @@ public class SearchTools {
             List<PageContent> results = new ArrayList<>();
             for (CompletableFuture<PageContent> future : futures) {
                 try {
-                    PageContent page = future.get(8, TimeUnit.SECONDS);
+                    PageContent page = future.get(fetchGetTimeoutSeconds, TimeUnit.SECONDS);
                     if (page != null) {
                         results.add(page);
                     }
