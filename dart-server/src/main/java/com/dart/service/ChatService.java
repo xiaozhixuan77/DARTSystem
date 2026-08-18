@@ -258,7 +258,9 @@ public class ChatService {
                     ErrorCode.NO_QUALITY_RESULTS.getMessage());
             SearchResult emptyResult = SearchResult.searchResult(
                     new CuratedReport(effectiveQuery,
-                            "# " + effectiveQuery + "\n\n未找到高质量资源，请尝试更换关键词。",
+                            "# " + effectiveQuery
+                                    + "\n\n未找到高质量资源。建议补充具体技术名词（如 Kubernetes、Docker、"
+                                    + "Spring Cloud、微服务框架）后重试。",
                             List.of(), Instant.now()),
                     List.of());
             persistAssistantMessage(conversationId, emptyResult);
@@ -758,6 +760,10 @@ public class ChatService {
                    - 查询主题涉及"架构/框架/选型/对比/主流方案"时，检索词必须附带 2-3 个该领域主流系统名作锚点
                      （例：AI Agent 编排→LangGraph、AutoGen、CrewAI、OpenAI Agents；大模型→ChatGPT、Claude、Gemini；
                      Web 后端→Spring Boot、Node.js、FastAPI），仅写抽象概念词（如"主流AI Agent系统"）会让搜索只返回入门科普
+                   - 抽象概念词（云原生、微服务、容器化、技术栈、架构、开发、实践、选型、对比、原理）单独作为
+                     检索词会命中无关内容（实测"云原生 技术栈"返回云游戏站），必须与 2-3 个具体技术名词组合
+                     （例：云原生→Kubernetes、Docker、Istio、Helm、Spring Cloud；微服务→Spring Cloud、gRPC、Service Mesh、
+                     Nacos、Sentinel），严禁输出不含具体技术名词的检索词
                 3. 生成 2 个检索变体词（variants）用于并行网络搜索扩大召回：
                    - 与 optimized 不同的表达角度/补充上下文（如英文术语、更短的关键词组合、场景化描述）
                    - 每个不超过 50 字；非技术输入输出空数组 []
