@@ -215,6 +215,40 @@ class RagServiceTest {
         assertThat(prompt).contains("<source>").doesNotContain("chunk-5");
     }
 
+    @Test
+    void generateAnswer_weakSimilarity_injectsInsufficientMarkerInstruction() {
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("回答"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        // 最高相似度 0.61（弱相关擦线命中）→ prompt 注入"仅输出 RAG_INSUFFICIENT"指令
+        RagService.RagChunk chunk = new RagService.RagChunk("内容", "标题", "https://x.com", 0.61);
+        ragService.generateAnswer("query", List.of(chunk));
+
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        assertThat(captor.getValue().getInstructions().getFirst().getText())
+                .contains(RagService.RAG_INSUFFICIENT_MARKER);
+    }
+
+    @Test
+    void generateAnswer_strongSimilarity_noMarkerInstruction() {
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("回答"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        // 最高相似度 0.9（强相关）→ 正常 prompt，不含标记指令
+        RagService.RagChunk chunk = new RagService.RagChunk("内容", "标题", "https://x.com", 0.9);
+        ragService.generateAnswer("query", List.of(chunk));
+
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        assertThat(captor.getValue().getInstructions().getFirst().getText())
+                .doesNotContain(RagService.RAG_INSUFFICIENT_MARKER);
+    }
+
     // === 1-hop 知识图谱增强 ===
 
     @Test

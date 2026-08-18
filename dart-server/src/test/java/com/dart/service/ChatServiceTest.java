@@ -642,6 +642,40 @@ class ChatServiceTest {
     }
 
     @Test
+    void executeSearchAndCurate_ragAnswerInsufficient_fallsBackToSearch() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        RagResult ragAnswer = new RagResult(RagService.RAG_INSUFFICIENT_MARKER,
+                List.of("https://a.com"), 0.61);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        // RAG 回答不足 → 降级使用并行搜索结果（不短路）
+        assertThat(result.curatedReport()).isNotNull();
+        assertThat(result.ragAnswer()).isNull();
+        verify(searchAgent).execute(anyList(), anyInt(), any());
+    }
+
+    @Test
+    void executeSearchAndCurate_ragAnswerInsufficient_searchFails_returnsError() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        RagResult ragAnswer = new RagResult(RagService.RAG_INSUFFICIENT_MARKER,
+                List.of("https://a.com"), 0.61);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenThrow(new RuntimeException("search down"));
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        assertThat(result.curatedReport()).isNotNull();
+        assertThat(result.curatedReport().markdown()).contains("占位");
+    }
+
+    @Test
     void executeSearchAndCurate_followUpPromptIncludesSessionSummary() {
         when(valueOps.get(anyString())).thenReturn(null);
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
