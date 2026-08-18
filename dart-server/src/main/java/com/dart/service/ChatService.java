@@ -196,6 +196,7 @@ public class ChatService {
         //     RAG 命中时不等慢搜索任务（shutdownNow 中断，虚拟线程后台收尾）
         SseUtils.sendStatus(emitter, "rag_check", "正在检索知识库...");
         List<ScoredResource> searchResults;
+        boolean ragDegraded = false;
         ExecutorService parallelExecutor = Executors.newVirtualThreadPerTaskExecutor();
         try {
             Future<Optional<RagService.RagResult>> ragFuture = parallelExecutor.submit(() ->
@@ -215,7 +216,8 @@ public class ChatService {
                 log.warn("RAG 检索异常，继续搜索流程", e);
                 ragResult = Optional.empty();
             }
-            if (ragResult.isPresent()) {
+            if (ragResult.isPresent()
+                    && !ragResult.get().answer().contains(RagService.RAG_INSUFFICIENT_MARKER)) {
                 SearchResult result = SearchResult.ragHit(ragResult.get());
                 SseUtils.sendEvent(emitter, SseEvents.CONTENT, result.ragAnswer().answer());
                 persistAssistantMessage(conversationId, result);
@@ -226,6 +228,12 @@ public class ChatService {
                 conversationSummaryService.updateSummary(userId, conversationId,
                         query, result.ragAnswer().answer());
                 return result;
+            }
+            if (ragResult.isPresent()) {
+                // RAG 命中但回答标记材料不足（弱相关擦线命中）→ 降级用并行搜索的结果，不短路
+                ragDegraded = true;
+                log.info("RAG 回答材料不足，降级搜索: query={}, maxSimilarity={}",
+                        effectiveQuery, ragResult.get().maxSimilarity());
             }
 
             try {
@@ -278,9 +286,13 @@ public class ChatService {
         // 6. 报告先落库；追问在事务提交后生成（afterCommit 更新消息，避免与原事务
         //    写锁冲突——Lock wait timeout），SSE 追加推送；done 自然延后到追问完成。
         SearchResult result = SearchResult.searchResult(report, searchResults);
+        String fallbackReason = resolveFallbackReason(report.markdown());
+        if (ragDegraded) {
+            fallbackReason = "rag_insufficient" + (fallbackReason == null ? "" : "," + fallbackReason);
+        }
         recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
                 false, null, effectiveQuery, searchResults, "search",
-                resolveFallbackReason(report.markdown()), startNanos);
+                fallbackReason, startNanos);
         Message assistantMessage = persistAssistantMessage(conversationId, result);
         if (assistantMessage != null) {
             final Message msg = assistantMessage;

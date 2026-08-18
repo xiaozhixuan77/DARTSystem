@@ -53,6 +53,12 @@ public class RagService {
     }
     public record RagChunk(String content, String title, String sourceUrl, double similarity) {}
 
+    /** 弱相关命中时 LLM 被指示输出的"材料不足"标记；ChatService 检测到即降级搜索。 */
+    public static final String RAG_INSUFFICIENT_MARKER = "RAG_INSUFFICIENT";
+
+    /** 强相关判定阈值：最高相似度低于此值时命中视为弱相关，要求 LLM 用标记报告材料不足。 */
+    private static final double STRONG_MATCH_THRESHOLD = 0.75;
+
     /**
      * RAG 检索：向量化查询 → 查本地知识库 → 命中则 LLM 生成回答。
      */
@@ -152,16 +158,23 @@ public class RagService {
             context.append("</related>\n\n");
         }
 
+        double maxSimilarity = chunks.stream()
+                .mapToDouble(RagChunk::similarity).max().orElse(0.0);
+        String insufficiencyInstruction = maxSimilarity < STRONG_MATCH_THRESHOLD
+                ? "如果参考材料不足以完整回答用户问题，请只输出 " + RAG_INSUFFICIENT_MARKER
+                + "（不要输出其他任何内容）。"
+                : "如果参考材料不足以回答问题，请如实说明。";
         String prompt = """
                 你是一个技术问答助手。请基于以下参考材料回答用户问题。
-                如果参考材料不足以回答问题，请如实说明。若存在关联知识补充上下文（related 标签块），可作为额外参考。
+                %s 若存在关联知识补充上下文（related 标签块），可作为额外参考。
 
                 用户问题：%s
 
                 参考材料：
                 %s
 
-                请生成简洁、准确的中文回答。""".formatted(query.replace("<", "&lt;"), context);
+                请生成简洁、准确的中文回答。""".formatted(insufficiencyInstruction,
+                query.replace("<", "&lt;"), context);
 
         try {
             return chatModel.call(new Prompt(new UserMessage(prompt)))

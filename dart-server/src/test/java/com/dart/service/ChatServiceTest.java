@@ -672,7 +672,7 @@ class ChatServiceTest {
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
         assertThat(result.curatedReport()).isNotNull();
-        assertThat(result.curatedReport().markdown()).contains("占位");
+        assertThat(result.curatedReport().markdown()).contains("搜索服务暂时不可用");
     }
 
     @Test
