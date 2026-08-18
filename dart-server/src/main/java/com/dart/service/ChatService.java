@@ -787,13 +787,57 @@ public class ChatService {
             List<String> variants = parseVariants(response);
             // 非技术查询意图强制归一化为 non_tech（以 isTech 判断为准）
             String intent = isTech ? parseIntent(response) : "non_tech";
-            return new QueryPreProcess(isTech,
-                    (optimized == null || optimized.isBlank()) ? query : optimized,
-                    variants, intent, followUp);
+            // 服务端锚点兜底：LLM 未遵守锚点指令时（抽象词/歧义词无具体技术名），自动补充主流锚点
+            String finalOptimized = (optimized == null || optimized.isBlank()) ? query : optimized;
+            if (isTech && !followUp) {
+                finalOptimized = applyTechAnchors(finalOptimized);
+            }
+            return new QueryPreProcess(isTech, finalOptimized, variants, intent, followUp);
         } catch (Exception e) {
             log.warn("LLM 前置判断与提示词优化失败，降级为技术查询+原文", e);
             return new QueryPreProcess(true, query, List.of(), "how_to", false);
         }
+    }
+
+    /**
+     * 抽象概念词 / 高频歧义词 → 主流技术锚点映射（服务端兜底）。
+     * LLM 有时不遵守 prompt 的锚点指令（实测"缓存"未带 Redis），
+     * 检测到抽象词且结果中无对应锚点时自动追加，防 Bing 命中无关内容。
+     */
+    private static final Map<String, List<String>> TECH_ANCHOR_MAP = Map.ofEntries(
+            Map.entry("缓存", List.of("Redis", "Memcached")),
+            Map.entry("云原生", List.of("Kubernetes", "Docker")),
+            Map.entry("容器", List.of("Docker", "Kubernetes")),
+            Map.entry("微服务", List.of("Spring Cloud", "gRPC")),
+            Map.entry("网关", List.of("Spring Cloud Gateway", "Kong")),
+            Map.entry("消息队列", List.of("Kafka", "RabbitMQ")),
+            Map.entry("数据库", List.of("MySQL", "PostgreSQL")),
+            Map.entry("搜索引擎", List.of("Elasticsearch")),
+            Map.entry("前端", List.of("Vue", "React")),
+            Map.entry("大模型", List.of("ChatGPT", "Claude")),
+            Map.entry("三级缓存", List.of("Spring", "循环依赖")),
+            Map.entry("AOP", List.of("Spring AOP")),
+            Map.entry("自动配置", List.of("Spring Boot"))
+    );
+
+    static String applyTechAnchors(String optimized) {
+        if (optimized == null || optimized.isBlank()) {
+            return optimized;
+        }
+        StringBuilder sb = new StringBuilder(optimized);
+        for (Map.Entry<String, List<String>> entry : TECH_ANCHOR_MAP.entrySet()) {
+            if (!optimized.contains(entry.getKey())) {
+                continue;
+            }
+            boolean hasAnyAnchor = entry.getValue().stream()
+                    .anyMatch(optimized::contains);
+            if (!hasAnyAnchor) {
+                for (String anchor : entry.getValue()) {
+                    sb.append(' ').append(anchor);
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private String buildPreProcessPrompt(String sanitized, String sanitizedSummary) {
