@@ -580,10 +580,12 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(a));
         when(knowledgeChunkMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(chunkOf(1L, fullVector(0.5f))));
+        when(embeddingService.embed(anyString())).thenReturn(fullVector(0.5f));
 
-        // 新内容与条目首块向量余弦 1.0 ≥ 0.85 → 命中
+        // 新内容与条目首块向量余弦 1.0 ≥ 0.85 → 命中（标题无关）
         var result = knowledgeService.findSimilarItem(1L, "全新标题", "Spring 自动配置原理内容");
         assertThat(result).isPresent();
+        assertThat(result.get().getId()).isEqualTo(1L);
     }
 
     @Test
@@ -591,10 +593,22 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(createItem(1L, 1L, "Go 语言 goroutine")));
         when(knowledgeChunkMapper.selectList(any(QueryWrapper.class)))
-                .thenReturn(List.of(chunkOf(1L, fullVector(0.0f))));
+                .thenReturn(List.of(chunkOf(1L, fullVector(0.5f))));
+        when(embeddingService.embed(anyString())).thenReturn(fullVector(0.0f));
 
         var result = knowledgeService.findSimilarItem(1L, "Spring Boot 自动配置原理是什么？", "# 报告");
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    void findSimilarItem_embedFails_titleChannelStillWorks() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(1L, 1L, "Go 语言 goroutine")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(embeddingService.embed(anyString())).thenThrow(new RuntimeException("embedding down"));
+
+        var result = knowledgeService.findSimilarItem(1L, "Go 语言 goroutine 如何使用", "# 报告");
+        assertThat(result).isPresent();
     }
 
     @Test
