@@ -392,6 +392,23 @@ class ChatServiceTest {
                 .contains("LangGraph").contains("AutoGen").contains("CrewAI");
     }
 
+    @Test
+    void preProcessQuery_abstractTechTerms_mustAttachConcreteAnchors() {
+        // 云原生/微服务/技术栈 等抽象词必须带具体技术名锚点（否则 Bing 返回云游戏等无关结果）
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"Kubernetes Docker 云原生\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.preProcessQuery("云原生与微服务开发", "");
+
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        String promptText = captor.getValue().getInstructions().getFirst().getText();
+        assertThat(promptText).contains("云原生").contains("Kubernetes").contains("抽象概念词");
+    }
+
     // === 会话记忆注入与续答意图判定 ===
 
     @Test
@@ -1101,6 +1118,8 @@ class ChatServiceTest {
         assertThat(result.ragAnswer()).isNull();
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).contains("未找到");
+        // 空结果提示应引导用户补充具体技术名词重试
+        assertThat(result.curatedReport().markdown()).contains("具体技术名词");
         verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any());
     }
 
