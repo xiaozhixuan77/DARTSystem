@@ -340,7 +340,7 @@ public class ChatService {
             log.warn("追问生成失败", e);
         } finally {
             writeCache(query, markdown, report.sources());
-            sedimentReport(userId, query, markdown, report.sources(), intent);
+            sedimentReport(userId, report.title(), query, markdown, report.sources(), intent);
             // 摘要更新必须传原始报告（不含追问段），追问段会污染摘要
             if (assistantMessage.getConversationId() != null) {
                 conversationSummaryService.updateSummary(userId,
@@ -354,8 +354,8 @@ public class ChatService {
      * 后续相似查询直接 RAG 命中。Embedding 分块向量化较慢（约 10-30s），异步执行不阻塞主流程。
      * 沉淀条目标签取意图对应的受控类别标签（每条目恰好 1 个，防止标签爆炸）。
      */
-    private void sedimentReport(Long userId, String query, String markdown, List<String> sources,
-                                String intent) {
+    private void sedimentReport(Long userId, String title, String query, String markdown,
+                                List<String> sources, String intent) {
         if (!sedimentEnabled || markdown == null || markdown.isBlank()) {
             return;
         }
@@ -370,14 +370,30 @@ public class ChatService {
                 log.debug("知识库已达上限 {} 条，跳过沉淀: userId={}", sedimentMaxItemsPerUser, userId);
                 return;
             }
-            String sourceUrl = sources.isEmpty() ? "" : sources.getFirst();
-            ScoredResource defaultScores =
-                    new ScoredResource(sourceUrl, query, markdown, 4, 4, 4, 4, 4.0);
+            String sourceUrl = pickMainSource(sources);
+            ScoredResource scores = computeSedimentScores(sourceUrl, markdown);
             String tag = INTENT_TAG.getOrDefault(intent, DEFAULT_SEDIMENT_TAG);
+            String finalTitle = title == null || title.isBlank() ? query : title;
             Thread.startVirtualThread(() -> {
                 try {
+                    // 相似条目合并：近似重复（关键词全等/向量 ≥0.85）更新旧条目而非新增，防知识库膨胀
+                    Optional<KnowledgeItem> similar = knowledgeService.findSimilarItem(
+                            userId, finalTitle, markdown);
+                    if (similar.isPresent()) {
+                        Long itemId = similar.get().getId();
+                        knowledgeService.mergeItem(userId, itemId, finalTitle, markdown);
+                        embeddingService.rebuildChunksForItem(itemId, markdown);
+                        relationExtractionService.extractAndPersist(userId, itemId, markdown);
+                        try {
+                            knowledgeService.linkRelatedItems(userId, itemId);
+                        } catch (Exception e) {
+                            log.warn("合并后跨条目关联失败，跳过: itemId={}", itemId, e);
+                        }
+                        log.info("相似条目已合并更新: userId={}, itemId={}, query={}", userId, itemId, query);
+                        return;
+                    }
                     List<Long> itemIds =
-                            embeddingService.embedAndPersist(userId, query, markdown, sourceUrl, defaultScores, tag);
+                            embeddingService.embedAndPersist(userId, finalTitle, markdown, sourceUrl, scores, tag);
                     // 沉淀成功 → 异步抽取知识关系（单次 LLM 调用，失败仅告警）
                     if (itemIds != null && !itemIds.isEmpty()) {
                         Long itemId = itemIds.getFirst();
@@ -397,6 +413,42 @@ public class ChatService {
         } catch (Exception e) {
             log.warn("报告沉淀前置检查失败: query={}", query, e);
         }
+    }
+
+    /**
+     * 主要来源选取：报告多来源聚合，取权威度最高者（非盲目取第一个）。
+     */
+    private static String pickMainSource(List<String> sources) {
+        if (sources == null || sources.isEmpty()) {
+            return "";
+        }
+        com.dart.agent.scoring.AuthorityScorer authority = new com.dart.agent.scoring.AuthorityScorer();
+        return sources.stream()
+                .max(java.util.Comparator.comparingInt(authority::score))
+                .orElse(sources.getFirst());
+    }
+
+    /**
+     * 沉淀评分（替代硬编码 4,4,4,4）：T=4（实时搜索）、A=域名权威、D=报告深度、M=4（量身生成）。
+     */
+    private static ScoredResource computeSedimentScores(String sourceUrl, String markdown) {
+        int scoreT = 4;
+        int scoreA = sourceUrl.isBlank() ? 1 : new com.dart.agent.scoring.AuthorityScorer().score(sourceUrl);
+        int scoreD;
+        int len = markdown == null ? 0 : markdown.length();
+        if (len >= 8000) {
+            scoreD = 5;
+        } else if (len >= 5000) {
+            scoreD = 4;
+        } else if (len >= 3000) {
+            scoreD = 3;
+        } else {
+            scoreD = 2;
+        }
+        int scoreM = 4;
+        double weighted = 0.15 * scoreT + 0.30 * scoreA + 0.20 * scoreD + 0.35 * scoreM;
+        return new ScoredResource(sourceUrl, "", markdown, scoreT, scoreA, scoreD, scoreM,
+                Math.round(weighted * 100.0) / 100.0);
     }
 
     /**

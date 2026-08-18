@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -42,6 +43,9 @@ public class KnowledgeService {
 
     private static final String PREDICATE_RELATED = "related_to";
     private static final int MAX_CONTENT_LENGTH = 200_000;
+
+    /** 沉淀合并相似度阈值：新报告与现有条目首块向量余弦 ≥ 此值视为近似重复，合并更新而非新增。 */
+    private static final double SEDIMENT_MERGE_SIMILARITY = 0.85;
 
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
@@ -173,6 +177,59 @@ public class KnowledgeService {
         } else {
             action.run();
         }
+    }
+
+    /**
+     * 沉淀合并判定：新报告与现有条目是否存在近似重复（标题关键词完全相等 或 首块向量余弦 ≥ 0.85）。
+     * 同主题不同内容（0.55-0.65）不合并——知识库保留内容多样性。
+     */
+    public Optional<KnowledgeItem> findSimilarItem(Long userId, String title, String content) {
+        List<KnowledgeItem> items = loadItems(userId);
+        if (items.isEmpty()) {
+            return Optional.empty();
+        }
+        List<String> titleKeywords = TextUtils.extractKeywords(title);
+        Map<Long, float[]> vectors = loadFirstChunkVectors(
+                items.stream().map(KnowledgeItem::getId).toList());
+        // 新内容向量化（远程调用，失败则仅标题通道）
+        float[] contentVec = null;
+        if (content != null && !content.isBlank()) {
+            try {
+                contentVec = embeddingService.embed(content);
+            } catch (Exception e) {
+                log.warn("沉淀合并向量化失败，仅标题通道: userId={}", userId, e);
+            }
+        }
+        for (KnowledgeItem item : items) {
+            if (!titleKeywords.isEmpty()
+                    && titleKeywords.equals(TextUtils.extractKeywords(item.getTitle()))) {
+                return Optional.of(item);
+            }
+            float[] vec = vectors.get(item.getId());
+            if (contentVec != null && vec != null
+                    && VectorUtils.cosineSimilarity(contentVec, vec) >= SEDIMENT_MERGE_SIMILARITY) {
+                return Optional.of(item);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * 沉淀合并：更新既有条目的标题与正文（保留用户可能编辑过的 tags/source_url），由调用方重建 chunk。
+     */
+    @Transactional
+    public void mergeItem(Long userId, Long itemId, String newTitle, String newContent) {
+        KnowledgeItem item = knowledgeItemMapper.selectById(itemId);
+        if (item == null) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_NOT_FOUND);
+        }
+        if (!item.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        item.setTitle(newTitle);
+        item.setContent(newContent);
+        item.setUpdatedAt(LocalDateTime.now());
+        knowledgeItemMapper.updateById(item);
     }
 
     /**
