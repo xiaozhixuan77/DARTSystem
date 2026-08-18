@@ -475,6 +475,20 @@ class ChatServiceTest {
     }
 
     @Test
+    void preProcessQuery_longKeyOverridesSubstringKey_noAnchorStacking() {
+        // "三级缓存"同时含"缓存"子串：长键优先补 Spring，不得再叠 Redis Memcached 污染搜索词
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"三级缓存\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("三级缓存", "");
+        assertThat(pre.optimized()).contains("Spring");
+        assertThat(pre.optimized()).doesNotContain("Redis");
+        assertThat(pre.optimized()).doesNotContain("Memcached");
+    }
+
+    @Test
     void preProcessQuery_existingAnchor_notDuplicated() {
         // 已含锚点（Redis Memcached）→ 不重复追加
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(

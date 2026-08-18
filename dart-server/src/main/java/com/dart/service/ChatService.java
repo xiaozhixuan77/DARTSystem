@@ -825,10 +825,20 @@ public class ChatService {
             return optimized;
         }
         StringBuilder sb = new StringBuilder(optimized);
-        for (Map.Entry<String, List<String>> entry : TECH_ANCHOR_MAP.entrySet()) {
+        // 长键优先匹配：已匹配长键（如"三级缓存"）时跳过其子串短键（如"缓存"），防锚点堆叠污染
+        List<Map.Entry<String, List<String>>> byLengthDesc = TECH_ANCHOR_MAP.entrySet().stream()
+                .sorted(java.util.Comparator.comparingInt(e -> -e.getKey().length()))
+                .toList();
+        List<String> matchedKeys = new ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : byLengthDesc) {
             if (!optimized.contains(entry.getKey())) {
                 continue;
             }
+            boolean coveredByLongerKey = matchedKeys.stream().anyMatch(k -> k.contains(entry.getKey()));
+            if (coveredByLongerKey) {
+                continue;
+            }
+            matchedKeys.add(entry.getKey());
             boolean hasAnyAnchor = entry.getValue().stream()
                     .anyMatch(optimized::contains);
             if (!hasAnyAnchor) {
