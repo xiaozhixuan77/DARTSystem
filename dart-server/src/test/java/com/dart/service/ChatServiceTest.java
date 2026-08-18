@@ -450,6 +450,43 @@ class ChatServiceTest {
     }
 
     @Test
+    void preProcessQuery_abstractWordWithoutAnchor_appendsTechAnchor() {
+        // LLM 未遵守锚点指令（输出纯抽象词）→ 服务端兜底补充主流技术锚点
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"缓存 配置 实现 方法 示例\","
+                        + "\"variants\":[],\"intent\":\"how_to\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("那个缓存怎么搞", "");
+        assertThat(pre.optimized()).contains("Redis");
+        assertThat(pre.optimized()).contains("Memcached");
+    }
+
+    @Test
+    void preProcessQuery_ambiguousWord_appendsContextAnchor() {
+        // "三级缓存"歧义（CPU vs Spring）→ 服务端默认编程语境锚点
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"三级缓存\","
+                        + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("三级缓存", "");
+        assertThat(pre.optimized()).contains("Spring");
+    }
+
+    @Test
+    void preProcessQuery_existingAnchor_notDuplicated() {
+        // 已含锚点（Redis Memcached）→ 不重复追加
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"Redis Memcached 缓存选型 对比\","
+                        + "\"variants\":[],\"intent\":\"comparison\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Redis 和 Memcached 怎么选", "");
+        assertThat(pre.optimized()).isEqualTo("Redis Memcached 缓存选型 对比");
+    }
+
+    @Test
     void preProcessQuery_abstractTechTerms_mustAttachConcreteAnchors() {
         // 云原生/微服务/技术栈 等抽象词必须带具体技术名锚点（否则 Bing 返回云游戏等无关结果）
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
