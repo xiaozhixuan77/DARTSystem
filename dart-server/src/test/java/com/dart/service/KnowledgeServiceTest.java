@@ -562,6 +562,65 @@ class KnowledgeServiceTest {
     }
 
     @Test
+    void findSimilarItem_titleKeywordsEqual_found() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(2L, 1L, "Spring Boot 自动配置原理")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+
+        // 标题关键词集合完全相等（"是什么"被疑问词剔除）→ 命中
+        var result = knowledgeService.findSimilarItem(1L, "Spring Boot 自动配置原理是什么？", "# 报告");
+        assertThat(result).isPresent();
+        assertThat(result.get().getId()).isEqualTo(2L);
+    }
+
+    @Test
+    void findSimilarItem_vectorAboveThreshold_found() {
+        KnowledgeItem a = createItem(1L, 1L, "Spring Boot 自动配置原理");
+        a.setContent("内容");
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(a));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(chunkOf(1L, fullVector(0.5f))));
+
+        // 新内容与条目首块向量余弦 1.0 ≥ 0.85 → 命中
+        var result = knowledgeService.findSimilarItem(1L, "全新标题", "Spring 自动配置原理内容");
+        assertThat(result).isPresent();
+    }
+
+    @Test
+    void findSimilarItem_noMatch_empty() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(1L, 1L, "Go 语言 goroutine")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(chunkOf(1L, fullVector(0.0f))));
+
+        var result = knowledgeService.findSimilarItem(1L, "Spring Boot 自动配置原理是什么？", "# 报告");
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void mergeItem_updatesTitleContentAndTimestamp() {
+        KnowledgeItem item = createItem(1L, 1L, "旧标题");
+        item.setContent("旧内容");
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.updateById(any(KnowledgeItem.class))).thenReturn(1);
+
+        knowledgeService.mergeItem(1L, 1L, "Spring 三级缓存原理", "# 新内容");
+
+        ArgumentCaptor<KnowledgeItem> captor = ArgumentCaptor.forClass(KnowledgeItem.class);
+        verify(knowledgeItemMapper).updateById(captor.capture());
+        assertThat(captor.getValue().getTitle()).isEqualTo("Spring 三级缓存原理");
+        assertThat(captor.getValue().getContent()).isEqualTo("# 新内容");
+        assertThat(captor.getValue().getUpdatedAt()).isNotNull();
+    }
+
+    @Test
+    void mergeItem_notOwned_throwsForbidden() {
+        when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 2L, "Others"));
+        assertThatThrownBy(() -> knowledgeService.mergeItem(1L, 1L, "新标题", "内容"))
+                .hasMessageContaining("无权访问");
+    }
+
+    @Test
     void getGlobalGraph_returnsAllItemsAndItemLinks() {
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(

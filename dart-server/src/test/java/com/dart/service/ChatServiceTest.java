@@ -85,6 +85,9 @@ class ChatServiceTest {
         org.springframework.test.util.ReflectionTestUtils.setField(chatService, "sedimentEnabled", true);
         org.springframework.test.util.ReflectionTestUtils.setField(chatService, "sedimentMaxItemsPerUser", 50);
         org.springframework.test.util.ReflectionTestUtils.setField(chatService, "cacheTtlHours", 24L);
+        // 沉淀默认走新增路径（防 Mockito 返回 null 导致虚拟线程 NPE）
+        lenient().when(knowledgeService.findSimilarItem(anyLong(), anyString(), anyString()))
+                .thenReturn(Optional.empty());
     }
 
     // === 查询缓存 ===
@@ -168,13 +171,67 @@ class ChatServiceTest {
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
         assertThat(result.isRagHit()).isFalse();
-        // 报告无占位节 → 异步沉淀到知识库
+        // 报告无占位节 → 异步沉淀到知识库（标题用 report.title 而非查询原文）
+        ArgumentCaptor<ScoredResource> scoresCaptor = ArgumentCaptor.forClass(ScoredResource.class);
         verify(embeddingService, timeout(3000))
-                .embedAndPersist(eq(1L), eq("Spring Boot"), contains("# Report"),
-                        eq("https://a.com"), any(), eq("操作指南"));
+                .embedAndPersist(eq(1L), eq("query"), contains("# Report"),
+                        eq("https://a.com"), scoresCaptor.capture(), eq("操作指南"));
+        // 评分修正：T=4、M=4，A/D 按规则（https://a.com 域名权威 + 报告长度 400+ 字符）
+        ScoredResource scores = scoresCaptor.getValue();
+        assertThat(scores.getScoreT()).isEqualTo(4);
+        assertThat(scores.getScoreM()).isEqualTo(4);
+        assertThat(scores.getScoreA()).isGreaterThanOrEqualTo(1);
+        assertThat(scores.getScoreD()).isGreaterThanOrEqualTo(2);
         // 中间断言：走到 persist 与 writeCache（finally）
         verify(messageMapper, times(2)).insert(any(Message.class));
         verify(valueOps).set(anyString(), contains("# Report"), any(java.time.Duration.class));
+    }
+
+    @Test
+    void executeSearchAndCurate_similarItemExists_mergesInsteadOfInsert() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("Spring 三级缓存原理", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+        KnowledgeItem existing = new KnowledgeItem();
+        existing.setId(99L);
+        when(knowledgeService.findSimilarItem(eq(1L), eq("Spring 三级缓存原理"), contains("# Report")))
+                .thenReturn(Optional.of(existing));
+
+        chatService.executeSearchAndCurate("三级缓存", 1L, 100L, emitter);
+
+        // 相似条目存在 → 合并更新而非新增
+        verify(knowledgeService, timeout(3000)).mergeItem(eq(1L), eq(99L),
+                eq("Spring 三级缓存原理"), contains("# Report"));
+        verify(embeddingService, timeout(3000)).rebuildChunksForItem(eq(99L), contains("# Report"));
+        verify(embeddingService, never()).embedAndPersist(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void executeSearchAndCurate_sedimentSourceUrl_highestAuthority() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        // 多个来源：docs.spring.io（权威 5）应被选为主要来源而非第一个 blog
+        CuratedReport report = new CuratedReport("query",
+                "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://blog.example.com/post", "https://docs.spring.io/spring-boot/index.html"),
+                Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+
+        chatService.executeSearchAndCurate("三级缓存", 1L, 100L, emitter);
+
+        verify(embeddingService, timeout(3000))
+                .embedAndPersist(eq(1L), eq("query"), contains("# Report"),
+                        eq("https://docs.spring.io/spring-boot/index.html"), any(), any());
     }
 
     @Test
