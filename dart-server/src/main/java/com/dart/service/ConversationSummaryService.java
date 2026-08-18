@@ -74,9 +74,14 @@ public class ConversationSummaryService {
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
                     .getResults().getFirst().getOutput().getText();
             String summary = response == null ? "" : response.trim();
-            if (summary.isBlank() || summary.length() > summaryMaxChars * 3) {
-                log.warn("摘要生成异常（空白或超长），保留旧摘要: conversationId={}", conversationId);
+            if (summary.isBlank()) {
+                log.warn("摘要生成空白，保留旧摘要: conversationId={}", conversationId);
                 return;
+            }
+            if (summary.length() > summaryMaxChars) {
+                // 超长截断存储而非丢弃：丢弃会导致后续追问指代失去上下文（歧义误判）
+                summary = summary.substring(0, summaryMaxChars);
+                log.info("摘要超长截断: conversationId={}, 保留 {} 字符", conversationId, summaryMaxChars);
             }
             Conversation update = new Conversation();
             update.setId(conversationId);
@@ -109,7 +114,8 @@ public class ConversationSummaryService {
                         + "（含小节标题中的术语，宁多勿少，逗号分隔）——后续对话会用这些术语解析指代，"
                         + "缺词会导致歧义误判\n")
                 .append("- 新内容并入对应字段，重复内容不赘述；旧摘要中已被取代的结论可替换\n")
-                .append("- 总字数不超过 ").append(summaryMaxChars).append(" 字\n")
+                .append("- 总字数必须严格控制在 ").append(summaryMaxChars)
+                .append(" 字以内（超出部分会被系统截断丢失，请勿超长输出）\n")
                 .append("- 只输出摘要正文，不要输出其他内容");
         return sb.toString();
     }
