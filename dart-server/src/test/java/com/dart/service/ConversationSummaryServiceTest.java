@@ -162,6 +162,22 @@ class ConversationSummaryServiceTest {
     }
 
     @Test
+    void updateSummary_overLengthSummary_truncatedAndPersisted() {
+        // LLM 输出超出 summaryMaxChars（400）→ 截断存储而非丢弃（否则追问指代失去上下文）
+        when(conversationMapper.selectById(1L)).thenReturn(conversation(1L, 10L, null));
+        String longSummary = "主题：Spring 自动配置\n已讨论：Bean 生命周期 自动装配 条件注解 ".repeat(40);
+        when(chatModel.call(any(Prompt.class))).thenReturn(new ChatResponse(
+                List.of(new Generation(new AssistantMessage(longSummary)))));
+
+        summaryService.updateSummary(10L, 1L, "Spring Boot 自动配置原理", "# 报告");
+
+        ArgumentCaptor<Conversation> convCaptor = ArgumentCaptor.forClass(Conversation.class);
+        verify(conversationMapper, timeout(3000)).updateById(convCaptor.capture());
+        assertThat(convCaptor.getValue().getSummary().length()).isLessThanOrEqualTo(400);
+        assertThat(convCaptor.getValue().getSummary()).startsWith("主题：Spring 自动配置");
+    }
+
+    @Test
     void updateSummary_notOwned_throwsForbiddenAndSkipsLlm() {
         when(conversationMapper.selectById(1L)).thenReturn(conversation(1L, 10L, null));
 
