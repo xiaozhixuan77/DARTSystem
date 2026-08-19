@@ -531,6 +531,52 @@ class ChatServiceTest {
         assertThat(queries.get(2)).contains("Spring Cloud 微服务教程");
     }
 
+    // === S6: 低质兜底报告分支 ===
+
+    @Test
+    void executeSearchAndCurate_degradedResults_marksReportAndSkipsCacheAndSediment() throws Exception {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource degradedSr = new ScoredResource("https://a.com", "A", "snippet", 5, 1, 1, 2, 1.95, true);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(degradedSr));
+        CuratedReport report = new CuratedReport("query", "# 精简报告\n\n要点内容 ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(true))).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout")); // 前置与追问均失败降级
+
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("微服务 学习路线", 1L, 100L, emitter);
+
+        assertThat(result.isRagHit()).isFalse();
+        // 报告头部带标注块
+        assertThat(result.curatedReport().markdown()).startsWith("> 说明：部分资源抓取失败");
+        // degraded 不写缓存、不沉淀（异步 finally 中执行，用 timeout 断言 never）
+        verify(valueOps, timeout(3000).times(0)).set(anyString(), anyString(), any(java.time.Duration.class));
+        verify(embeddingService, timeout(3000).times(0))
+                .embedAndPersist(anyLong(), anyString(), anyString(), anyString(),
+                        any(ScoredResource.class), anyString());
+        // degraded 不生成追问（chatModel.call 只被前置调用消费）
+        verify(chatModel, timeout(3000).times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
+    }
+
+    @Test
+    void executeSearchAndCurate_degradedResults_curatorGetsDegradedFlag() throws Exception {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource degradedSr = new ScoredResource("https://a.com", "A", "snippet", 5, 1, 1, 2, 1.95, true);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(degradedSr));
+        CuratedReport report = new CuratedReport("query", "# 精简报告\n\n要点内容 ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(true))).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+
+        chatService.executeSearchAndCurate("微服务 学习路线", 1L, 100L, emitter);
+
+        verify(curatorAgent).curate(anyString(), anyList(), any(), any(), isNull(), eq(true));
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), isNull());
+    }
+
     @Test
     void preProcessQuery_architectureQuery_promptDemandsFrameworkAnchors() {
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
