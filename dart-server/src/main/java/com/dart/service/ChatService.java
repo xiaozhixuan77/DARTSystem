@@ -58,6 +58,10 @@ public class ChatService {
     private static final int FOLLOW_UP_MAX_REPORT_CHARS = 3000;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    /** 低质兜底报告（抓取失败、摘要级内容）的头部标注块 */
+    private static final String DEGRADED_NOTICE =
+            "> 说明：部分资源抓取失败，以下内容基于搜索结果摘要整理，内容深度有限，建议点击来源链接查看原文。";
+
     private final ChatModel chatModel;
     private final SearchAgent searchAgent;
     private final CuratorAgent curatorAgent;
@@ -278,6 +282,8 @@ public class ChatService {
 
         // 5. Curator Agent（意图透传为报告风格要求；会话摘要注入延续前文叙述）
         CuratedReport report;
+        // 低质兜底结果（抓取失败、摘要级内容）→ Curator 精简约束 + 报告头部标注
+        boolean degraded = !searchResults.isEmpty() && searchResults.getFirst().isDegraded();
         try {
             // 摘要读取失败不降级报告生成（fail-open）
             String sessionSummary = null;
@@ -286,7 +292,16 @@ public class ChatService {
             } catch (Exception e) {
                 log.warn("会话摘要读取失败，报告生成不带历史上下文: conversationId={}", conversationId, e);
             }
-            report = curatorAgent.curate(effectiveQuery, searchResults, emitter, pre.intent(), sessionSummary);
+            report = degraded
+                    ? curatorAgent.curate(effectiveQuery, searchResults, emitter,
+                            pre.intent(), sessionSummary, true)
+                    : curatorAgent.curate(effectiveQuery, searchResults, emitter,
+                            pre.intent(), sessionSummary);
+            if (degraded) {
+                report = new CuratedReport(report.title(),
+                        DEGRADED_NOTICE + "\n\n" + report.markdown(),
+                        report.sources(), report.generatedAt());
+            }
         } catch (Exception e) {
             log.error("Curator Agent 异常", e);
             report = buildFallbackReport(effectiveQuery, searchResults);
@@ -299,6 +314,9 @@ public class ChatService {
         if (ragDegraded) {
             fallbackReason = "rag_insufficient" + (fallbackReason == null ? "" : "," + fallbackReason);
         }
+        if (degraded) {
+            fallbackReason = "low_quality_fallback" + (ragDegraded ? ",rag_insufficient" : "");
+        }
         recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
                 false, null, effectiveQuery, searchResults, "search",
                 fallbackReason, startNanos);
@@ -307,8 +325,9 @@ public class ChatService {
             final Message msg = assistantMessage;
             final CuratedReport finalReport = report;
             final Long finalUserId = userId;
+            final boolean finalDegraded = degraded;
             Runnable followUpAndCache = () -> generateFollowUpAndUpdate(
-                    msg, finalReport, query, emitter, finalUserId, pre.intent());
+                    msg, finalReport, query, emitter, finalUserId, pre.intent(), finalDegraded);
             if (TransactionSynchronizationManager.isSynchronizationActive()) {
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
@@ -325,29 +344,34 @@ public class ChatService {
 
     /**
      * 生成追问 → SSE 追加 → 更新消息；随后（无论追问成败）写入缓存并沉淀知识库。
-     * 整体失败仅告警，不影响报告主流程。
+     * 整体失败仅告警，不影响报告主流程。degraded（低质兜底）时跳过追问/缓存/沉淀：
+     * 低质内容上生成追问=双重低质；低质报告污染知识库与 24h 缓存。
      */
     private void generateFollowUpAndUpdate(Message assistantMessage, CuratedReport report,
                                            String query, SseEmitter emitter, Long userId,
-                                           String intent) {
+                                           String intent, boolean degraded) {
         String markdown = report.markdown();
         try {
-            String followUp = generateFollowUp(query, markdown,
-                    assistantMessage.getConversationId(), userId);
-            if (followUp != null && !followUp.isBlank()) {
-                SseUtils.sendStatus(emitter, "curating", "正在生成追问建议...");
-                SseUtils.sendEvent(emitter, SseEvents.CONTENT,
-                        "\n\n---\n\n## 进一步探索\n\n" + followUp);
-                CuratedReport withFollowUp = appendFollowUp(report, followUp);
-                assistantMessage.setContent(withFollowUp.markdown());
-                messageMapper.updateById(assistantMessage);
-                markdown = withFollowUp.markdown();
+            if (!degraded) {
+                String followUp = generateFollowUp(query, markdown,
+                        assistantMessage.getConversationId(), userId);
+                if (followUp != null && !followUp.isBlank()) {
+                    SseUtils.sendStatus(emitter, "curating", "正在生成追问建议...");
+                    SseUtils.sendEvent(emitter, SseEvents.CONTENT,
+                            "\n\n---\n\n## 进一步探索\n\n" + followUp);
+                    CuratedReport withFollowUp = appendFollowUp(report, followUp);
+                    assistantMessage.setContent(withFollowUp.markdown());
+                    messageMapper.updateById(assistantMessage);
+                    markdown = withFollowUp.markdown();
+                }
             }
         } catch (Exception e) {
             log.warn("追问生成失败", e);
         } finally {
-            writeCache(query, markdown, report.sources());
-            sedimentReport(userId, report.title(), query, markdown, report.sources(), intent);
+            if (!degraded) {
+                writeCache(query, markdown, report.sources());
+                sedimentReport(userId, report.title(), query, markdown, report.sources(), intent);
+            }
             // 摘要更新必须传原始报告（不含追问段），追问段会污染摘要
             if (assistantMessage.getConversationId() != null) {
                 conversationSummaryService.updateSummary(userId,
