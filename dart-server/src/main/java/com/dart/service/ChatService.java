@@ -201,10 +201,17 @@ public class ChatService {
         try {
             Future<Optional<RagService.RagResult>> ragFuture = parallelExecutor.submit(() ->
                     ragService.retrieve(effectiveQuery, userId));
-            // 主词 + 变体词并行网络搜索扩大召回（RAG 仅用主词，保持检索专注）；
-            // 变体词先经 embedding 主题校验，跑题词（如 LLM 联想跑偏）在搜索前丢弃
+            // 主词 + 英文检索词 + 变体词并行网络搜索扩大召回（RAG 仅用主词，保持检索专注）；
+            // 英文检索词排第 2 位（补足优先级最高）：Bing 对含歧义中文词（如"微服务"）的查询
+            // 会返回随机无关泛化结果，纯英文检索词稳定（实测全正常）；LLM 翻译缺失时词表降级
             List<String> searchQueries = new ArrayList<>();
             searchQueries.add(effectiveQuery);
+            String enQuery = (pre.optimizedEn() != null && !pre.optimizedEn().isBlank())
+                    ? pre.optimizedEn() : buildEnglishQuery(effectiveQuery);
+            if (enQuery != null && !enQuery.isBlank()) {
+                searchQueries.add(enQuery);
+            }
+            // 变体词先经 embedding 主题校验，跑题词（如 LLM 联想跑偏）在搜索前丢弃
             searchQueries.addAll(filterVariants(effectiveQuery, pre.variants()));
             Future<List<ScoredResource>> searchFuture = parallelExecutor.submit(() ->
                     searchAgent.execute(searchQueries, targetResultsFor(pre.intent()), emitter));
@@ -758,7 +765,7 @@ public class ChatService {
     }
 
     public record QueryPreProcess(boolean isTech, String optimized, List<String> variants,
-                                  String intent, boolean followUp) {}
+                                  String intent, boolean followUp, String optimizedEn) {}
 
     /**
      * 合并领域判断、意图分类与提示词优化为一次 LLM 调用（JSON 输出 {isTech, optimized, variants, intent, isFollowUp}）。
@@ -789,13 +796,19 @@ public class ChatService {
             String intent = isTech ? parseIntent(response) : "non_tech";
             // 服务端锚点兜底：LLM 未遵守锚点指令时（抽象词/歧义词无具体技术名），自动补充主流锚点
             String finalOptimized = (optimized == null || optimized.isBlank()) ? query : optimized;
+            String optimizedEn = parseOptimizedEn(response);
             if (isTech && !followUp) {
                 finalOptimized = applyTechAnchors(finalOptimized);
+                // optimizedEn 违规含中文（中英混合实测仍被 Bing 污染）→ 丢弃，走词表降级
+                if (optimizedEn != null && HAN_PATTERN.matcher(optimizedEn).find()) {
+                    log.warn("optimizedEn 含中文字符（违规中英混合），丢弃改用词表降级: {}", optimizedEn);
+                    optimizedEn = null;
+                }
             }
-            return new QueryPreProcess(isTech, finalOptimized, variants, intent, followUp);
+            return new QueryPreProcess(isTech, finalOptimized, variants, intent, followUp, optimizedEn);
         } catch (Exception e) {
             log.warn("LLM 前置判断与提示词优化失败，降级为技术查询+原文", e);
-            return new QueryPreProcess(true, query, List.of(), "how_to", false);
+            return new QueryPreProcess(true, query, List.of(), "how_to", false, null);
         }
     }
 
@@ -819,6 +832,99 @@ public class ChatService {
             Map.entry("AOP", List.of("Spring AOP")),
             Map.entry("自动配置", List.of("Spring Boot"))
     );
+
+    /**
+     * 歧义中文技术词 → 英文检索词（LLM optimizedEn 缺失时的词表降级）。
+     */
+    private static final Map<String, String> EN_ANCHOR_MAP = Map.ofEntries(
+            Map.entry("微服务", "microservices"), Map.entry("云原生", "cloud native"),
+            Map.entry("容器", "container"), Map.entry("网关", "api gateway"),
+            Map.entry("消息队列", "message queue"), Map.entry("缓存", "cache"),
+            Map.entry("数据库", "database"), Map.entry("搜索引擎", "search engine"),
+            Map.entry("前端", "frontend"), Map.entry("大模型", "large language model"),
+            Map.entry("三级缓存", "spring three-level cache"), Map.entry("AOP", "spring aop"),
+            Map.entry("自动配置", "spring boot autoconfiguration"),
+            Map.entry("分布式", "distributed system"), Map.entry("高并发", "high concurrency"),
+            Map.entry("并发", "concurrency"),
+            Map.entry("部署", "deployment"), Map.entry("集群", "cluster"));
+
+    /**
+     * 中文意图词 → 英文短尾（buildEnglishQuery 组合用）。
+     */
+    private static final Map<String, String> INTENT_TAIL_MAP = Map.ofEntries(
+            Map.entry("学习路线", "learning path"), Map.entry("路线", "learning path"),
+            Map.entry("教程", "tutorial"), Map.entry("入门", "tutorial"),
+            Map.entry("对比", "comparison"), Map.entry("选型", "comparison"),
+            Map.entry("原理", "principles"), Map.entry("机制", "principles"),
+            Map.entry("报错", "troubleshooting"), Map.entry("排错", "troubleshooting"),
+            Map.entry("实践", "best practices"), Map.entry("架构", "architecture"),
+            Map.entry("核心概念", "core concepts"), Map.entry("概念", "concepts"),
+            Map.entry("详解", "explained"), Map.entry("介绍", "introduction"),
+            Map.entry("方案", "solutions"), Map.entry("最佳实践", "best practices"));
+
+    private static final java.util.regex.Pattern HAN_PATTERN = java.util.regex.Pattern.compile("\\p{IsHan}");
+    private static final java.util.regex.Pattern EN_TOKEN_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9.]{1,}");
+
+    /**
+     * 词表降级英文检索词生成：检测查询中的歧义中文技术词（长键优先、子串跳过），
+     * 组合为纯英文检索词（英文映射 + 意图短尾 + 原英文 token）。无歧义词命中返回 null。
+     */
+    static String buildEnglishQuery(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        List<Map.Entry<String, String>> byLengthDesc = EN_ANCHOR_MAP.entrySet().stream()
+                .sorted(java.util.Comparator.comparingInt(e -> -e.getKey().length()))
+                .toList();
+        List<String> matchedKeys = new ArrayList<>();
+        boolean hit = false;
+        for (Map.Entry<String, String> entry : byLengthDesc) {
+            if (!query.contains(entry.getKey())) {
+                continue;
+            }
+            boolean covered = matchedKeys.stream().anyMatch(k -> k.contains(entry.getKey()));
+            if (covered) {
+                continue;
+            }
+            matchedKeys.add(entry.getKey());
+            for (String word : entry.getValue().split("\\s+")) {
+                if (!parts.contains(word)) {
+                    parts.add(word);
+                }
+            }
+            hit = true;
+        }
+        if (!hit) {
+            return null;
+        }
+        List<Map.Entry<String, String>> tailsByLen = INTENT_TAIL_MAP.entrySet().stream()
+                .sorted(java.util.Comparator.comparingInt(e -> -e.getKey().length()))
+                .toList();
+        List<String> matchedTails = new ArrayList<>();
+        for (Map.Entry<String, String> entry : tailsByLen) {
+            if (!query.contains(entry.getKey())) {
+                continue;
+            }
+            boolean covered = matchedTails.stream().anyMatch(k -> k.contains(entry.getKey()));
+            if (covered) {
+                continue;
+            }
+            matchedTails.add(entry.getKey());
+            if (!parts.contains(entry.getValue())) {
+                parts.add(entry.getValue());
+            }
+        }
+        java.util.regex.Matcher en = EN_TOKEN_PATTERN.matcher(query);
+        while (en.find()) {
+            String tok = en.group();
+            if (!parts.contains(tok)) {
+                parts.add(tok);
+            }
+        }
+        return String.join(" ", parts);
+    }
 
     static String applyTechAnchors(String optimized) {
         if (optimized == null || optimized.isBlank()) {
@@ -873,6 +979,11 @@ public class ChatService {
                 3. 生成 2 个检索变体词（variants）用于并行网络搜索扩大召回：
                    - 与 optimized 不同的表达角度/补充上下文（如英文术语、更短的关键词组合、场景化描述）
                    - 每个不超过 50 字；非技术输入输出空数组 []
+                3.5 将 optimized 翻译为英文检索关键词组合（optimizedEn）：
+                   - 忠实翻译中文技术概念为英文（微服务→microservices、云原生→cloud native、缓存→cache），
+                     已含英文的技术名词（Spring Cloud、Kubernetes、Docker 等）保留原文
+                   - 输出纯英文 10-25 字的检索关键词组合，严禁中英混合（实测中英混合检索词会被搜索引擎忽略）
+                   - 非技术输入输出空字符串 ""
                 4. 判断查询意图类型（intent）：
                    - quick_fact: 快速事实/定义类问题
                    - how_to: 操作步骤/配置方法
@@ -887,7 +998,7 @@ public class ChatService {
                    以下情况恒为 false：<session_memory> 段不存在（无历史记录）、输入是独立的新主题查询
 
                 严格只输出 JSON，不要输出任何其他内容：
-                {"isTech": true或false, "optimized": "优化后的描述", "variants": ["变体1", "变体2"], "intent": "how_to", "isFollowUp": false}
+                {"isTech": true或false, "optimized": "优化后的描述", "optimizedEn": "英文检索词", "variants": ["变体1", "变体2"], "intent": "how_to", "isFollowUp": false}
                 """);
         if (sanitizedSummary != null && !sanitizedSummary.isBlank()) {
             sb.append("\n历史会话摘要（仅作指代解析与续答判定参考）：\n<session_memory>\n")
@@ -922,6 +1033,12 @@ public class ChatService {
     private static String parseOptimized(String json) {
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\"optimized\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
+        return m.find() ? m.group(1) : null;
+    }
+
+    private static String parseOptimizedEn(String json) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"optimizedEn\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
         return m.find() ? m.group(1) : null;
     }
 
