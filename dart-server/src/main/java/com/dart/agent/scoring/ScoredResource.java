@@ -15,10 +15,17 @@ public class ScoredResource {
     private final int scoreD;
     private final int scoreM;
     private final double weightedScore;
+    private final boolean degraded;
 
     public ScoredResource(String url, String title, String content,
                           int scoreT, int scoreA, int scoreD, int scoreM,
                           double weightedScore) {
+        this(url, title, content, scoreT, scoreA, scoreD, scoreM, weightedScore, false);
+    }
+
+    public ScoredResource(String url, String title, String content,
+                          int scoreT, int scoreA, int scoreD, int scoreM,
+                          double weightedScore, boolean degraded) {
         this.url = url;
         this.title = title;
         this.content = content;
@@ -27,6 +34,7 @@ public class ScoredResource {
         this.scoreD = scoreD;
         this.scoreM = scoreM;
         this.weightedScore = weightedScore;
+        this.degraded = degraded;
     }
 
     public String getUrl() { return url; }
@@ -37,6 +45,7 @@ public class ScoredResource {
     public int getScoreD() { return scoreD; }
     public int getScoreM() { return scoreM; }
     public double getWeightedScore() { return weightedScore; }
+    public boolean isDegraded() { return degraded; }
 
     @Override
     public boolean equals(Object o) {
