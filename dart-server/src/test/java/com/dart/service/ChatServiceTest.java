@@ -431,6 +431,106 @@ class ChatServiceTest {
         assertThat(pre.intent()).isEqualTo("non_tech");
     }
 
+    // === S5: 英文检索词（optimizedEn + 词表降级）===
+
+    @Test
+    void preProcessQuery_parsesOptimizedEn() {
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"微服务 学习路线 Spring Cloud\","
+                        + "\"optimizedEn\":\"microservices learning path Spring Cloud\","
+                        + "\"variants\":[],\"intent\":\"how_to\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("学习微服务");
+        assertThat(pre.optimizedEn()).isEqualTo("microservices learning path Spring Cloud");
+    }
+
+    @Test
+    void preProcessQuery_optimizedEnMissing_returnsNull() {
+        // 旧格式 JSON（无 optimizedEn 字段）→ null，不注入英文检索词
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"Java 多线程 教程\",\"variants\":[]}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Java 多线程");
+        assertThat(pre.optimizedEn()).isNull();
+    }
+
+    @Test
+    void preProcessQuery_optimizedEnWithChinese_discarded() {
+        // LLM 违规中英混合 → 服务端校验丢弃（防 Bing 污染），走词表降级
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"微服务 学习路线\","
+                        + "\"optimizedEn\":\"microservices 学习路线\",\"variants\":[]}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        ChatService.QueryPreProcess pre = chatService.preProcessQuery("学习微服务");
+        assertThat(pre.optimizedEn()).isNull();
+    }
+
+    @Test
+    void buildEnglishQuery_ambiguousWord_returnsEnglishQuery() {
+        String result = ChatService.buildEnglishQuery("微服务 学习路线 Spring Cloud Docker Kubernetes 必备知识");
+        assertThat(result).contains("microservices").contains("learning path")
+                .contains("Spring").contains("Kubernetes");
+    }
+
+    @Test
+    void buildEnglishQuery_noAmbiguousWord_returnsNull() {
+        assertThat(ChatService.buildEnglishQuery("Java 多线程 教程")).isNull();
+    }
+
+    @Test
+    void executeSearchAndCurate_optimizedEnMissing_englishQueryFromWordMap() throws Exception {
+        // LLM 未输出 optimizedEn → searchQueries 用词表降级生成的英文词（index=1）
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"微服务 学习路线\",\"variants\":[]}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.executeSearchAndCurate("学习微服务", 1L, 100L, emitter);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> queriesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(searchAgent).execute(queriesCaptor.capture(), anyInt(), any());
+        assertThat(queriesCaptor.getValue().get(0)).contains("微服务");
+        assertThat(queriesCaptor.getValue().get(1)).contains("microservices").contains("learning path");
+    }
+
+    @Test
+    void executeSearchAndCurate_searchQueriesOrder_mainThenEnglishThenVariants() throws Exception {
+        // 搜索词列表顺序：[主词, optimizedEn, LLM 变体...]
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"微服务 学习路线\","
+                        + "\"optimizedEn\":\"microservices learning path\","
+                        + "\"variants\":[\"Spring Cloud 微服务教程\"]}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.executeSearchAndCurate("学习微服务", 1L, 100L, emitter);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> queriesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(searchAgent).execute(queriesCaptor.capture(), anyInt(), any());
+        List<String> queries = queriesCaptor.getValue();
+        assertThat(queries).hasSize(3);
+        assertThat(queries.get(0)).contains("微服务");
+        assertThat(queries.get(1)).isEqualTo("microservices learning path");
+        assertThat(queries.get(2)).contains("Spring Cloud 微服务教程");
+    }
+
     @Test
     void preProcessQuery_architectureQuery_promptDemandsFrameworkAnchors() {
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
