@@ -138,8 +138,8 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
         // Bing 返回 2 条结果
         when(bingSearchClient.search(anyString(), anyInt()))
                 .thenReturn(List.of(
-                        new SearchResult("http://example.com/a", "Result A", "Snippet A"),
-                        new SearchResult("http://example.com/b", "Result B", "Snippet B")));
+                        new SearchResult("http://example.com/a", "Spring Boot Config A", "spring boot configuration guide"),
+                        new SearchResult("http://example.com/b", "Spring Boot Config B", "spring boot config tips")));
 
         // PageFetcher 返回可评分的内容
         when(pageFetcher.fetch(anyString()))
@@ -186,8 +186,8 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         when(bingSearchClient.search(anyString(), anyInt()))
                 .thenReturn(List.of(
-                        new SearchResult("http://example.com/a", "Resource A", "Snippet A"),
-                        new SearchResult("http://example.com/b", "Resource B", "Snippet B")));
+                        new SearchResult("http://example.com/a", "Spring Boot Resource A", "spring boot configuration"),
+                        new SearchResult("http://example.com/b", "Spring Boot Resource B", "spring boot tutorial")));
 
         when(pageFetcher.fetch(anyString()))
                 .thenReturn(new PageContent("http://example.com/a", "Resource A",
@@ -256,7 +256,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
         when(bingSearchClient.search(anyString(), anyInt()))
                 .thenReturn(List.of(
-                        new SearchResult("http://example.com/a", "Result A", "Snippet A")));
+                        new SearchResult("http://example.com/a", "Spring Boot Config Guide", "spring boot cache configuration")));
         when(pageFetcher.fetch(anyString()))
                 .thenReturn(new PageContent("http://example.com/a", "Result A",
                         "Spring Boot configuration guide with detailed examples and code snippets.",
