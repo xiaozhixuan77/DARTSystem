@@ -39,6 +39,15 @@ public class CuratorAgent {
      */
     public CuratedReport curate(String query, List<ScoredResource> searchResults,
                                 SseEmitter emitter, String intent, String sessionSummary) {
+        return curate(query, searchResults, emitter, intent, sessionSummary, false);
+    }
+
+    /**
+     * @param degraded true = 素材为搜索摘要级（抓取失败兜底），报告精简约束注入
+     */
+    public CuratedReport curate(String query, List<ScoredResource> searchResults,
+                                SseEmitter emitter, String intent, String sessionSummary,
+                                boolean degraded) {
         try {
             SseUtils.sendStatus(emitter, "curating", "正在整理归纳...");
 
@@ -47,7 +56,9 @@ public class CuratorAgent {
                 return curatorTools.fallbackReport(query, searchResults);
             }
 
-            CuratedReport report = curatorTools.generateReport(query, deduped, emitter, intent, sessionSummary);
+            CuratedReport report = degraded
+                    ? curatorTools.generateReport(query, deduped, emitter, intent, sessionSummary, true)
+                    : curatorTools.generateReport(query, deduped, emitter, intent, sessionSummary);
 
             if (!curatorTools.validateReport(report)) {
                 // 单次 LLM 精简重写抢救；重写成功且通过校验则替换，否则降级 fallback（无循环）

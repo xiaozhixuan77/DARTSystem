@@ -122,6 +122,15 @@ public class CuratorTools {
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources,
                                         SseEmitter emitter, String styleHint, String sessionSummary) {
+        return generateReport(query, resources, emitter, styleHint, sessionSummary, false);
+    }
+
+    /**
+     * @param degraded true = 素材为搜索摘要级（抓取失败兜底），各节注入精简约束防虚构
+     */
+    public CuratedReport generateReport(String query, List<ScoredResource> resources,
+                                        SseEmitter emitter, String styleHint, String sessionSummary,
+                                        boolean degraded) {
         if (resources == null || resources.isEmpty()) {
             return emptyReport(query);
         }
@@ -141,11 +150,12 @@ public class CuratorTools {
             Future<String> section2Future = pool.submit(() -> {
                 SseUtils.sendStatus(emitter, "curating", "正在解析原理与代码示例...");
                 return streamSectionToQueue(query, resourcesText,
-                        buildPrincipleCodePrompt(query), "principles_code", styleHint, sessionSummary);
+                        buildPrincipleCodePrompt(query), "principles_code",
+                        styleHint, sessionSummary, degraded);
             });
 
             String section1 = streamSection(query, resourcesText,
-                    buildConceptPrompt(query), "concepts", emitter, styleHint, sessionSummary);
+                    buildConceptPrompt(query), "concepts", emitter, styleHint, sessionSummary, degraded);
             sections.add(section1);
 
             // 节 1 完成后等节 2 生产端完整结束（含截断/空白重试，无竞态可安全重试），
@@ -159,7 +169,7 @@ public class CuratorTools {
             // 阶段 B：节 3 流式直推（与节 2 串行，保持 2 并发峰值）
             SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
             String section3 = streamSection(query, resourcesText,
-                    buildFaqAdvancePrompt(query), "faq_advance", emitter, styleHint, sessionSummary);
+                    buildFaqAdvancePrompt(query), "faq_advance", emitter, styleHint, sessionSummary, degraded);
             sections.add(section3);
         } catch (Exception e) {
             log.warn("并行分节生成异常，追加占位节", e);
@@ -199,9 +209,11 @@ public class CuratorTools {
      * 无消费者竞态，可安全重试；3 次全失败返回占位文本。
      */
     private String streamSectionToQueue(String query, String resourcesText, String sectionPrompt,
-                                        String sectionName, String styleHint, String sessionSummary) {
+                                        String sectionName, String styleHint, String sessionSummary,
+                                        boolean degraded) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
-        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint, sessionSummary);
+        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt,
+                styleHint, sessionSummary, degraded);
         for (int attempt = 1; attempt <= 3; attempt++) {
             AtomicReference<String> finishReason = new AtomicReference<>();
             StringBuilder sb = new StringBuilder();
@@ -257,9 +269,10 @@ public class CuratorTools {
      */
     private String streamSection(String query, String resourcesText, String sectionPrompt,
                                  String sectionName, SseEmitter emitter, String styleHint,
-                                 String sessionSummary) {
+                                 String sessionSummary, boolean degraded) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
-        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt, styleHint, sessionSummary);
+        String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt,
+                styleHint, sessionSummary, degraded);
         for (int attempt = 1; attempt <= 3; attempt++) {
             StringBuilder sb = new StringBuilder();
             try {
@@ -347,13 +360,19 @@ public class CuratorTools {
     }
 
     private String buildSectionPrompt(String query, String resourcesText,
-                                      String sectionPrompt, String styleHint, String sessionSummary) {
+                                      String sectionPrompt, String styleHint, String sessionSummary,
+                                      boolean degraded) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一个技术教育专家，正在撰写关于「").append(query)
                 .append("」的深度学习报告。基于以下搜索结果素材撰写。\n\n");
         String style = styleHint == null ? null : INTENT_STYLE.get(styleHint);
         if (style != null) {
             sb.append(style).append("\n\n");
+        }
+        if (degraded) {
+            sb.append("【材料受限】素材为搜索摘要级内容，信息有限：本节约 250-400 字，"
+                    + "如实总结素材要点，信息不足处标注 [信息不足，建议访问原文]，"
+                    + "严禁虚构素材之外的信息。\n\n");
         }
         // 会话上下文（长记忆）：延续前文叙述、避免重复已讲内容；
         // 安全边界——摘要仅作上下文参考，引用来源必须来自本次素材
