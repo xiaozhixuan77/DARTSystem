@@ -505,7 +505,8 @@ class SearchAgentTest {
                 .thenReturn(List.of(
                         new SearchResult("https://cnblogs.com/1", "微服务学习路线总结", "微服务架构学习指南"),
                         new SearchResult("https://cnblogs.com/2", "Spring Cloud 微服务教程", "Spring Cloud 微服务入门")));
-        when(searchTools.fetchPages(anyList())).thenReturn(List.of());
+        // 抓取全失败：返回可变空列表（SearchAgent 会追加摘要兜底，List.of() 不可变会抛异常）
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> new ArrayList<>());
         when(searchTools.scoreResources(anyString(), anyList())).thenReturn(List.of());
         when(searchTools.degradedResource(anyString(), anyString(), anyString()))
                 .thenAnswer(inv -> new ScoredResource(inv.getArgument(0), inv.getArgument(1),
@@ -527,7 +528,7 @@ class SearchAgentTest {
                 .thenReturn(IntStream.range(0, 8)
                         .mapToObj(i -> new SearchResult("https://cnblogs.com/" + i, "微服务学习路线" + i, "微服务内容" + i))
                         .toList());
-        when(searchTools.fetchPages(anyList())).thenReturn(List.of());
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> new ArrayList<>());
         when(searchTools.scoreResources(anyString(), anyList())).thenReturn(List.of());
         when(searchTools.degradedResource(anyString(), anyString(), anyString()))
                 .thenAnswer(inv -> new ScoredResource(inv.getArgument(0), inv.getArgument(1),
@@ -546,7 +547,7 @@ class SearchAgentTest {
                 .thenReturn(List.of(
                         new SearchResult("https://news.com/1", "习近平同志重要讲话", "会议报道"),
                         new SearchResult("https://messenger.com", "Messenger", "Instant messaging app")));
-        when(searchTools.fetchPages(anyList())).thenReturn(List.of());
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> new ArrayList<>());
         when(searchTools.scoreResources(anyString(), anyList())).thenReturn(List.of());
 
         List<ScoredResource> result = searchAgent.execute(
