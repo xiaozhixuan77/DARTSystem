@@ -160,4 +160,17 @@ class SearchToolsTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).getUrl()).isEqualTo("https://spring.io");
     }
+
+    @Test
+    void degradedResource_marksDegradedWithFixedScores() {
+        // 低质兜底项：degraded=true、M=2、D=1、T=今年、A=域名权威、加权按配置权重公式
+        ScoredResource r = searchTools.degradedResource("https://example.com/a", "Title", "snippet");
+
+        assertThat(r.isDegraded()).isTrue();
+        assertThat(r.getScoreM()).isEqualTo(2);
+        assertThat(r.getScoreD()).isEqualTo(1);
+        assertThat(r.getScoreT()).isEqualTo(5);
+        assertThat(r.getScoreA()).isEqualTo(1);
+        assertThat(r.getWeightedScore()).isEqualTo(1.95);
+    }
 }

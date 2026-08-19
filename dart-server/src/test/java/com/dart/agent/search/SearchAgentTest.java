@@ -495,4 +495,64 @@ class SearchAgentTest {
 
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://microservices.io"))));
     }
+
+    // ─── S3: 低质兜底构造 ─────────────────────────
+
+    @Test
+    void scoreEmpty_butRawRelevant_buildsDegradedResults() {
+        // 中文主词 + 相关 raw 结果；抓取失败全走 snippet 兜底 → 评分过滤为空 → degraded 兜底
+        when(searchTools.searchWeb(anyString(), anyInt()))
+                .thenReturn(List.of(
+                        new SearchResult("https://cnblogs.com/1", "微服务学习路线总结", "微服务架构学习指南"),
+                        new SearchResult("https://cnblogs.com/2", "Spring Cloud 微服务教程", "Spring Cloud 微服务入门")));
+        when(searchTools.fetchPages(anyList())).thenReturn(List.of());
+        when(searchTools.scoreResources(anyString(), anyList())).thenReturn(List.of());
+        when(searchTools.degradedResource(anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> new ScoredResource(inv.getArgument(0), inv.getArgument(1),
+                        inv.getArgument(2), 5, 1, 1, 2, 1.95, true));
+
+        List<ScoredResource> result = searchAgent.execute(
+                List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+
+        assertThat(result).isNotEmpty();
+        assertThat(result).allMatch(ScoredResource::isDegraded);
+        assertThat(result).extracting(ScoredResource::getUrl)
+                .contains("https://cnblogs.com/1", "https://cnblogs.com/2");
+        verify(searchTools, atLeastOnce()).degradedResource(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void scoreEmpty_degradedTruncatedToMaxResults() {
+        when(searchTools.searchWeb(anyString(), anyInt()))
+                .thenReturn(IntStream.range(0, 8)
+                        .mapToObj(i -> new SearchResult("https://cnblogs.com/" + i, "微服务学习路线" + i, "微服务内容" + i))
+                        .toList());
+        when(searchTools.fetchPages(anyList())).thenReturn(List.of());
+        when(searchTools.scoreResources(anyString(), anyList())).thenReturn(List.of());
+        when(searchTools.degradedResource(anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> new ScoredResource(inv.getArgument(0), inv.getArgument(1),
+                        inv.getArgument(2), 5, 1, 1, 2, 1.95, true));
+
+        List<ScoredResource> result = searchAgent.execute(
+                List.of("微服务 学习路线", "microservices learning path"), 3, emitter);
+
+        assertThat(result).hasSize(3);
+    }
+
+    @Test
+    void scoreEmpty_andRawPolluted_returnsEmpty() {
+        // 主词污染被丢弃 → 变体返回的也是无关结果 → 逐条命中筛选无相关条目 → 维持 search_empty
+        when(searchTools.searchWeb(anyString(), anyInt()))
+                .thenReturn(List.of(
+                        new SearchResult("https://news.com/1", "习近平同志重要讲话", "会议报道"),
+                        new SearchResult("https://messenger.com", "Messenger", "Instant messaging app")));
+        when(searchTools.fetchPages(anyList())).thenReturn(List.of());
+        when(searchTools.scoreResources(anyString(), anyList())).thenReturn(List.of());
+
+        List<ScoredResource> result = searchAgent.execute(
+                List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+
+        assertThat(result).isEmpty();
+        verify(searchTools, never()).degradedResource(anyString(), anyString(), anyString());
+    }
 }

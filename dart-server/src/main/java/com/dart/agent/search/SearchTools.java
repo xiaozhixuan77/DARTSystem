@@ -106,6 +106,13 @@ public class SearchTools {
                 .toList();
     }
 
+    /**
+     * 低质兜底结果构造（S3 待实现）：搜索摘要级内容的降级评分项。
+     */
+    public ScoredResource degradedResource(String url, String title, String content) {
+        throw new UnsupportedOperationException("S3 待实现");
+    }
+
     private int scoreMatch(String query, PageContent page) {
         if (matchScorer != null) {
             try {
