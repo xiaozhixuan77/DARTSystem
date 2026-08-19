@@ -139,15 +139,16 @@ class SearchAgentTest {
     @Test
     void execute_multipleQueries_mergesAndDeduplicatesUrls() {
         // 两组词各返回部分结果，其中 b.com 重复
+        // 主词含中文"配置"会启用污染快检 → title/snippet 必须含查询关键词防误判
         when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
             String q = inv.getArgument(0);
             if (q.equals("Spring Boot 配置")) {
-                return List.of(new SearchResult("https://a.com", "A", "s"),
-                        new SearchResult("https://b.com", "B", "s"));
+                return List.of(new SearchResult("https://a.com", "Spring Boot 配置 A", "spring boot config guide"),
+                        new SearchResult("https://b.com", "Spring Boot 配置 B", "spring boot config"));
             }
             if (q.equals("Spring Boot datasource 教程")) {
-                return List.of(new SearchResult("https://b.com", "B", "s"),
-                        new SearchResult("https://c.com", "C", "s"));
+                return List.of(new SearchResult("https://b.com", "Spring Boot datasource B", "spring boot datasource"),
+                        new SearchResult("https://c.com", "Spring Boot datasource C", "spring boot datasource guide"));
             }
             return List.of();
         });
@@ -331,5 +332,167 @@ class SearchAgentTest {
         if (result.size() >= 2) {
             assertThat(result.get(0).getWeightedScore()).isGreaterThanOrEqualTo(result.get(1).getWeightedScore());
         }
+    }
+
+    // ─── S2: 中文主词污染快检与主词兜底 ─────────────────────────
+
+    @Test
+    void primaryResultsPolluted_discardedAndVariantsUsed() {
+        // 中文主词返回全部无关结果（模拟 Bing 污染）→ 丢弃，改用变体词结果
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            if (q.equals("微服务 学习路线")) {
+                return List.of(new SearchResult("https://news.com/1", "习近平同志重要讲话", "会议报道"),
+                        new SearchResult("https://messenger.com", "Messenger", "Instant messaging app"));
+            }
+            // 变体词（英文）返回正常结果
+            return List.of(new SearchResult("https://microservices.io", "What are microservices?", "microservices guide"));
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "microservices content ".repeat(50), 800, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+
+        // 污染主词结果被丢弃，只抓变体词（英文）的结果
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://microservices.io"))));
+    }
+
+    @Test
+    void primaryResultsRelevant_kept() {
+        // 中文主词返回含关键词的正常结果 → 不误判，原样保留
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            if (q.equals("微服务 学习路线")) {
+                return List.of(new SearchResult("https://cnblogs.com/ms", "微服务学习路线总结", "微服务架构学习指南"));
+            }
+            return List.of();
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "microservices ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://cnblogs.com/ms"))));
+    }
+
+    @Test
+    void primaryResultsEmpty_variantsUsed() {
+        // Bing 对主词返回空 → 变体词结果兜底（修复原"主词空直接返回空"）
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            if (q.equals("微服务 学习路线")) {
+                return List.of();
+            }
+            return List.of(new SearchResult("https://microservices.io", "What are microservices?", "microservices guide"));
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "microservices ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        List<ScoredResource> result = searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+
+        assertThat(result).isNotEmpty();
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://microservices.io"))));
+    }
+
+    @Test
+    void isPolluted_englishQuery_skipped() {
+        // 英文主词不启用污染检查——无关结果也原样保留（英文查询 Bing 稳定）
+        when(searchTools.searchWeb(anyString(), anyInt()))
+                .thenReturn(List.of(new SearchResult("https://site.com", "Title", "Snippet")));
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        searchAgent.execute(List.of("Spring Boot"), 5, emitter);
+
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://site.com"))));
+    }
+
+    @Test
+    void isPolluted_chineseLongQuery_notMisjudged() {
+        // 中文长查询（无停用词分隔）正常结果不误判——词集按空白拆分，不粘连
+        String query = "微服务 学习路线 Spring Cloud Docker Kubernetes 必备知识";
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            if (q.equals(query)) {
+                return List.of(new SearchResult("https://cnblogs.com/1", "微服务架构学习路线", "Spring Cloud 微服务教程"),
+                        new SearchResult("https://redhat.com/1", "什么是微服务", "microservices 架构指南"));
+            }
+            return List.of();
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "microservices ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        searchAgent.execute(List.of(query, "microservices learning path"), 5, emitter);
+
+        // 主词结果保留（未被误判污染）：两个 URL 都抓
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of(
+                "https://cnblogs.com/1", "https://redhat.com/1"))));
+    }
+
+    @Test
+    void isPolluted_englishOnlyResults_notMisjudged() {
+        // Bing 返回全英文站结果（title 无中文词）→ 靠英文映射词 microservices 命中，不误判
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            if (q.equals("微服务 学习路线")) {
+                return List.of(new SearchResult("https://microservices.io", "What are microservices?",
+                        "Microservices - a software architecture style"));
+            }
+            return List.of();
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "microservices ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://microservices.io"))));
     }
 }
