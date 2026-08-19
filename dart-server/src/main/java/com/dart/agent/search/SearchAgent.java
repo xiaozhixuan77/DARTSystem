@@ -10,10 +10,12 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * Search Agent — 搜索编排：Bing 搜索 → 并行抓取 → 四维评分 → 筛选 Top-N。
@@ -24,6 +26,21 @@ public class SearchAgent {
 
     // 合并后抓取上限：多组检索词各返回 maxResults 条，防止 URL 数随组数线性膨胀
     private static final int MAX_FETCH_URLS = 12;
+
+    // 歧义中文技术词 → 英文检索词（与 ChatService 的降级映射一致，独立副本避免跨层传参）
+    private static final Map<String, String> EN_ANCHOR_MAP = Map.ofEntries(
+            Map.entry("微服务", "microservices"), Map.entry("云原生", "cloud native"),
+            Map.entry("容器", "container"), Map.entry("网关", "api gateway"),
+            Map.entry("消息队列", "message queue"), Map.entry("缓存", "cache"),
+            Map.entry("数据库", "database"), Map.entry("搜索引擎", "search engine"),
+            Map.entry("前端", "frontend"), Map.entry("大模型", "large language model"),
+            Map.entry("三级缓存", "spring three-level cache"), Map.entry("AOP", "spring aop"),
+            Map.entry("自动配置", "spring boot autoconfiguration"),
+            Map.entry("分布式", "distributed system"), Map.entry("高并发", "high concurrency"),
+            Map.entry("并发", "concurrency"), Map.entry("线程", "multithreading"),
+            Map.entry("部署", "deployment"), Map.entry("集群", "cluster"));
+
+    private static final Pattern HAN_PATTERN = Pattern.compile("\\p{IsHan}");
 
     private final SearchTools searchTools;
 
@@ -129,8 +146,12 @@ public class SearchAgent {
                 }
             }
             List<SearchResult> primaryUnique = uniqueByUrl(primary);
+            if (isPolluted(queries.getFirst(), primary)) {
+                log.warn("主词搜索结果疑似 Bing 污染，丢弃改用变体词: query={}", queries.getFirst());
+                primaryUnique = List.of();
+            }
             if (primaryUnique.isEmpty()) {
-                return List.of();
+                return uniqueByUrl(variants);
             }
             if (primaryUnique.size() >= maxResults) {
                 return primaryUnique;
@@ -159,5 +180,58 @@ public class SearchAgent {
             }
         }
         return unique;
+    }
+
+    /**
+     * Bing 污染快检：cn.bing.com 中文版对含"微服务"等歧义中文词的查询会返回
+     * 随机无关泛化结果（政治新闻/Messenger 等）。对 title+snippet 做关键词命中率检查，
+     * 零命中结果占比 ≥ 80% 判定污染。仅对含中文的主词启用（英文主词 Bing 稳定，实测全正常）。
+     *
+     * 关键词词集：query 按空白拆分的词（≥2 字符，小写）+ EN_ANCHOR_MAP 命中歧义词的英文映射
+     * （防英文站结果 title 无中文词被误杀）。不能用 TextUtils.extractKeywords——中文无停用词
+     * 分隔时整段粘连成一个长关键词，contains 必 0 命中，所有中文查询都会误判污染。
+     */
+    private static boolean isPolluted(String query, List<SearchResult> results) {
+        if (results == null || results.isEmpty()) {
+            return false;
+        }
+        if (query == null || !HAN_PATTERN.matcher(query).find()) {
+            return false;
+        }
+        List<String> keywords = pollutionKeywords(query);
+        if (keywords.isEmpty()) {
+            return false;
+        }
+        long zeroHit = results.stream()
+                .filter(r -> !hitsAnyKeyword(r, keywords))
+                .count();
+        return zeroHit * 10 >= results.size() * 8;
+    }
+
+    private static List<String> pollutionKeywords(String query) {
+        List<String> keywords = new ArrayList<>();
+        for (String tok : query.toLowerCase().split("\\s+")) {
+            if (tok.length() >= 2 && !keywords.contains(tok)) {
+                keywords.add(tok);
+            }
+        }
+        EN_ANCHOR_MAP.entrySet().stream()
+                .sorted(java.util.Comparator.comparingInt(e -> -e.getKey().length()))
+                .forEach(e -> {
+                    if (query.contains(e.getKey())) {
+                        for (String word : e.getValue().split("\\s+")) {
+                            if (!keywords.contains(word)) {
+                                keywords.add(word);
+                            }
+                        }
+                    }
+                });
+        return keywords;
+    }
+
+    private static boolean hitsAnyKeyword(SearchResult r, List<String> keywords) {
+        String text = ((r.title() == null ? "" : r.title()) + " "
+                + (r.snippet() == null ? "" : r.snippet())).toLowerCase();
+        return keywords.stream().anyMatch(text::contains);
     }
 }
