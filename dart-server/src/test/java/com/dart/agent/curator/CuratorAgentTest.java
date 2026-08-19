@@ -195,4 +195,20 @@ class CuratorAgentTest {
         curatorAgent.curate("query", List.of(r1), emitter);
         verify(emitter, atLeast(2)).send(any(SseEmitter.SseEventBuilder.class));
     }
+
+    @Test
+    void curateDegraded_passesDegradedToGenerateReport() throws IOException {
+        ScoredResource r1 = makeResource("https://a.com", "Title A", 4.5);
+        CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
+                List.of("https://a.com"), Instant.now());
+        when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(true)))
+                .thenReturn(expectedReport);
+        when(curatorTools.validateReport(any())).thenReturn(true);
+
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter, "how_to", null, true);
+
+        assertThat(report).isNotNull();
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("how_to"), isNull(), eq(true));
+    }
 }

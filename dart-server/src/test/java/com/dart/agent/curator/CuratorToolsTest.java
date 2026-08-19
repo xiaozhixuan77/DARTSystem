@@ -186,6 +186,20 @@ class CuratorToolsTest {
     }
 
     @Test
+    void generateReport_degraded_injectsConciseConstraintToPrompt() {
+        stubThreeSections();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L), "deep_dive", null, true);
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(3)).stream(captor.capture());
+        for (Prompt p : captor.getAllValues()) {
+            String text = p.getInstructions().getFirst().getText();
+            assertThat(text).contains("搜索摘要").contains("严禁虚构");
+        }
+    }
+
+    @Test
     void generateReport_withoutStyleHint_noStyleRequirementInPrompt() {
         stubThreeSections();
 
