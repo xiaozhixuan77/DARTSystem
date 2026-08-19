@@ -92,6 +92,14 @@ public class SearchAgent {
             SseUtils.sendStatus(emitter, "scoring", "正在评估资源质量...");
             List<ScoredResource> scored = searchTools.scoreResources(queries.getFirst(), pages);
             if (scored.isEmpty()) {
+                // 低质兜底：raw 结果相关（逐条命中）但评分过滤光（多为抓取失败）→ 用摘要构造降级项
+                List<ScoredResource> degraded = buildDegradedResults(
+                        queries.getFirst(), rawResults, maxResults);
+                if (!degraded.isEmpty()) {
+                    SseUtils.sendStatus(emitter, "scoring", "抓取受限，基于搜索结果摘要整理...");
+                    SseUtils.sendEvent(emitter, SseEvents.SEARCH_RESULT, degraded);
+                    return degraded;
+                }
                 SseUtils.sendError(emitter, ErrorCode.NO_QUALITY_RESULTS.getCode(),
                         ErrorCode.NO_QUALITY_RESULTS.getMessage());
                 return List.of();
@@ -233,5 +241,29 @@ public class SearchAgent {
         String text = ((r.title() == null ? "" : r.title()) + " "
                 + (r.snippet() == null ? "" : r.snippet())).toLowerCase();
         return keywords.stream().anyMatch(text::contains);
+    }
+
+    /**
+     * 低质兜底：从 raw 结果中筛选"逐条命中"主词词集的相关条目（污染结果不兜底，防胡编），
+     * 以搜索摘要为内容构造 degraded 评分项，截断到 maxResults。
+     */
+    private List<ScoredResource> buildDegradedResults(String query, List<SearchResult> raw,
+                                                      int maxResults) {
+        if (raw == null || raw.isEmpty()) {
+            return List.of();
+        }
+        List<String> keywords = pollutionKeywords(query);
+        List<ScoredResource> degraded = new ArrayList<>();
+        for (SearchResult r : raw) {
+            if (r.url() == null || r.url().isBlank() || !hitsAnyKeyword(r, keywords)) {
+                continue;
+            }
+            String content = (r.snippet() == null || r.snippet().isBlank()) ? r.title() : r.snippet();
+            if (content == null || content.isBlank()) {
+                continue;
+            }
+            degraded.add(searchTools.degradedResource(r.url(), r.title(), content));
+        }
+        return degraded.size() > maxResults ? degraded.subList(0, maxResults) : degraded;
     }
 }

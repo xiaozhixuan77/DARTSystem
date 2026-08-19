@@ -107,10 +107,14 @@ public class SearchTools {
     }
 
     /**
-     * 低质兜底结果构造（S3 待实现）：搜索摘要级内容的降级评分项。
+     * 低质兜底结果构造：页面抓取失败、仅剩搜索摘要级内容时的降级评分项。
+     * M=2（摘要相关但不完整）、D=1（内容浅）、T=今年、A=域名权威，加权按配置权重。
      */
     public ScoredResource degradedResource(String url, String title, String content) {
-        throw new UnsupportedOperationException("S3 待实现");
+        int t = timelinessScorer.score(java.time.Year.now().getValue());
+        int a = authorityScorer.score(url);
+        return new ScoredResource(url, title, content, t, a, 1, 2,
+                qualityScorer.score(t, a, 1, 2), true);
     }
 
     private int scoreMatch(String query, PageContent page) {
