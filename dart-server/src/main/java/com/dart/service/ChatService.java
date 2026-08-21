@@ -207,11 +207,15 @@ public class ChatService {
                     ragService.retrieve(effectiveQuery, userId));
             // 主词 + 英文检索词 + 变体词并行网络搜索扩大召回（RAG 仅用主词，保持检索专注）；
             // 英文检索词排第 2 位（补足优先级最高）：Bing 对含歧义中文词（如"微服务"）的查询
-            // 会返回随机无关泛化结果，纯英文检索词稳定（实测全正常）；LLM 翻译缺失时词表降级
+            // 会返回随机无关泛化结果。词表降级优先——词表产出的是验证稳定的短英文技术词
+            // （Bing 对短词稳定，长句查询无论中英实测都易漂移污染）；LLM optimizedEn 兜底词表未覆盖词
             List<String> searchQueries = new ArrayList<>();
             searchQueries.add(effectiveQuery);
-            String enQuery = (pre.optimizedEn() != null && !pre.optimizedEn().isBlank())
-                    ? pre.optimizedEn() : buildEnglishQuery(effectiveQuery);
+            String enQuery = buildEnglishQuery(effectiveQuery);
+            if (enQuery == null) {
+                enQuery = (pre.optimizedEn() != null && !pre.optimizedEn().isBlank())
+                        ? pre.optimizedEn() : null;
+            }
             if (enQuery != null && !enQuery.isBlank()) {
                 searchQueries.add(enQuery);
             }
@@ -872,27 +876,13 @@ public class ChatService {
             Map.entry("并发", "concurrency"),
             Map.entry("部署", "deployment"), Map.entry("集群", "cluster"));
 
-    /**
-     * 中文意图词 → 英文短尾（buildEnglishQuery 组合用）。
-     */
-    private static final Map<String, String> INTENT_TAIL_MAP = Map.ofEntries(
-            Map.entry("学习路线", "learning path"), Map.entry("路线", "learning path"),
-            Map.entry("教程", "tutorial"), Map.entry("入门", "tutorial"),
-            Map.entry("对比", "comparison"), Map.entry("选型", "comparison"),
-            Map.entry("原理", "principles"), Map.entry("机制", "principles"),
-            Map.entry("报错", "troubleshooting"), Map.entry("排错", "troubleshooting"),
-            Map.entry("实践", "best practices"), Map.entry("架构", "architecture"),
-            Map.entry("核心概念", "core concepts"), Map.entry("概念", "concepts"),
-            Map.entry("详解", "explained"), Map.entry("介绍", "introduction"),
-            Map.entry("方案", "solutions"), Map.entry("最佳实践", "best practices"));
-
     private static final java.util.regex.Pattern HAN_PATTERN = java.util.regex.Pattern.compile("\\p{IsHan}");
-    private static final java.util.regex.Pattern EN_TOKEN_PATTERN =
-            java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9.]{1,}");
 
     /**
-     * 词表降级英文检索词生成：检测查询中的歧义中文技术词（长键优先、子串跳过），
-     * 组合为纯英文检索词（英文映射 + 意图短尾 + 原英文 token）。无歧义词命中返回 null。
+     * 词表降级英文检索词生成：仅输出歧义中文技术词的英文映射短词（长键优先、子串跳过）。
+     * 刻意不做意图短尾/原英文 token 组合——Bing 对长句查询（无论中英、含锚点词组合）实测
+     * 易返回随机无关结果（漂移污染），短英文技术词最稳定；上下文由主词/变体词承担。
+     * 无歧义词命中返回 null（由 LLM optimizedEn 翻译兜底）。
      */
     static String buildEnglishQuery(String query) {
         if (query == null || query.isBlank()) {
@@ -903,7 +893,6 @@ public class ChatService {
                 .sorted(java.util.Comparator.comparingInt(e -> -e.getKey().length()))
                 .toList();
         List<String> matchedKeys = new ArrayList<>();
-        boolean hit = false;
         for (Map.Entry<String, String> entry : byLengthDesc) {
             if (!query.contains(entry.getKey())) {
                 continue;
@@ -918,36 +907,8 @@ public class ChatService {
                     parts.add(word);
                 }
             }
-            hit = true;
         }
-        if (!hit) {
-            return null;
-        }
-        List<Map.Entry<String, String>> tailsByLen = INTENT_TAIL_MAP.entrySet().stream()
-                .sorted(java.util.Comparator.comparingInt(e -> -e.getKey().length()))
-                .toList();
-        List<String> matchedTails = new ArrayList<>();
-        for (Map.Entry<String, String> entry : tailsByLen) {
-            if (!query.contains(entry.getKey())) {
-                continue;
-            }
-            boolean covered = matchedTails.stream().anyMatch(k -> k.contains(entry.getKey()));
-            if (covered) {
-                continue;
-            }
-            matchedTails.add(entry.getKey());
-            if (!parts.contains(entry.getValue())) {
-                parts.add(entry.getValue());
-            }
-        }
-        java.util.regex.Matcher en = EN_TOKEN_PATTERN.matcher(query);
-        while (en.find()) {
-            String tok = en.group();
-            if (!parts.contains(tok)) {
-                parts.add(tok);
-            }
-        }
-        return String.join(" ", parts);
+        return parts.isEmpty() ? null : String.join(" ", parts);
     }
 
     static String applyTechAnchors(String optimized) {
