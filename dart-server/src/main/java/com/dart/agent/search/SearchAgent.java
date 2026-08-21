@@ -26,9 +26,10 @@ public class SearchAgent {
     // 合并后抓取上限：多组检索词各返回 maxResults 条，防止 URL 数随组数线性膨胀
     private static final int MAX_FETCH_URLS = 12;
 
-    // 歧义中文技术词 → 英文检索词（与 ChatService 的降级映射一致，独立副本避免跨层传参）
+    // 歧义中文技术词 → 英文检索词（与 ChatService 的降级映射一致，独立副本避免跨层传参；
+    // 值必须实测稳定——microservices 词系在 Bing 双域随机污染，spring cloud 词系稳定）
     private static final Map<String, String> EN_ANCHOR_MAP = Map.ofEntries(
-            Map.entry("微服务", "microservices"), Map.entry("云原生", "cloud native"),
+            Map.entry("微服务", "spring cloud"), Map.entry("云原生", "cloud native"),
             Map.entry("容器", "container"), Map.entry("网关", "api gateway"),
             Map.entry("消息队列", "message queue"), Map.entry("缓存", "cache"),
             Map.entry("数据库", "database"), Map.entry("搜索引擎", "search engine"),

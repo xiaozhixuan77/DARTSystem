@@ -862,10 +862,12 @@ public class ChatService {
     );
 
     /**
-     * 歧义中文技术词 → 英文检索词（LLM optimizedEn 缺失时的词表降级）。
+     * 歧义中文技术词 → 稳定英文锚点（LLM optimizedEn 缺失时的词表降级）。
+     * 值必须实测稳定：Bing 对 "microservices" 词系随机污染（索引故障，cn/www 双域均返回无关
+     * 内容），"spring cloud" 等词系稳定（spring boot/docker/python 实测正常）。
      */
     private static final Map<String, String> EN_ANCHOR_MAP = Map.ofEntries(
-            Map.entry("微服务", "microservices"), Map.entry("云原生", "cloud native"),
+            Map.entry("微服务", "spring cloud"), Map.entry("云原生", "cloud native"),
             Map.entry("容器", "container"), Map.entry("网关", "api gateway"),
             Map.entry("消息队列", "message queue"), Map.entry("缓存", "cache"),
             Map.entry("数据库", "database"), Map.entry("搜索引擎", "search engine"),
@@ -877,12 +879,14 @@ public class ChatService {
             Map.entry("部署", "deployment"), Map.entry("集群", "cluster"));
 
     private static final java.util.regex.Pattern HAN_PATTERN = java.util.regex.Pattern.compile("\\p{IsHan}");
+    private static final java.util.regex.Pattern EN_TOKEN_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9.]{1,}");
 
     /**
-     * 词表降级英文检索词生成：仅输出歧义中文技术词的英文映射短词（长键优先、子串跳过）。
-     * 刻意不做意图短尾/原英文 token 组合——Bing 对长句查询（无论中英、含锚点词组合）实测
-     * 易返回随机无关结果（漂移污染），短英文技术词最稳定；上下文由主词/变体词承担。
-     * 无歧义词命中返回 null（由 LLM optimizedEn 翻译兜底）。
+     * 词表降级英文检索词生成：歧义词稳定英文锚点（长键优先、子串跳过）+ 主词英文 token 组合。
+     * 锚点值必须实测稳定（microservices 词系在 Bing 双域随机污染已排除）；英文 token 组合
+     * 提供上下文锚定（如 Spring Cloud Docker Kubernetes）；不做意图短尾（如 learning path）
+     * 避免拉长查询。无任何输出返回 null（由 LLM optimizedEn 翻译兜底）。
      */
     static String buildEnglishQuery(String query) {
         if (query == null || query.isBlank()) {
@@ -906,6 +910,14 @@ public class ChatService {
                 if (!parts.contains(word)) {
                     parts.add(word);
                 }
+            }
+        }
+        java.util.regex.Matcher en = EN_TOKEN_PATTERN.matcher(query);
+        while (en.find()) {
+            // 转小写与锚点值一致（避免 "Spring" vs "spring" 大小写不同导致重复/不命中）
+            String tok = en.group().toLowerCase();
+            if (!parts.contains(tok)) {
+                parts.add(tok);
             }
         }
         return parts.isEmpty() ? null : String.join(" ", parts);

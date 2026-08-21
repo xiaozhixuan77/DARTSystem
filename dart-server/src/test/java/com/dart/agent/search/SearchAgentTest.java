@@ -514,12 +514,13 @@ class SearchAgentTest {
 
     @Test
     void isPolluted_englishOnlyResults_notMisjudged() {
-        // Bing 返回全英文站结果（title 无中文词）→ 靠英文映射词 microservices 命中，不误判
+        // Bing 返回全英文站结果（title 无中文词）→ 靠英文映射词 spring/cloud 命中，不误判
         when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
             String q = inv.getArgument(0);
             if (q.equals("微服务 学习路线")) {
-                return List.of(new SearchResult("https://microservices.io", "What are microservices?",
-                        "Microservices - a software architecture style"));
+                return List.of(new SearchResult("https://spring.io/guides",
+                        "Spring Cloud microservices guide",
+                        "Spring Cloud - building microservices architecture"));
             }
             return List.of();
         });
@@ -536,7 +537,7 @@ class SearchAgentTest {
 
         searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
 
-        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://microservices.io"))));
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://spring.io/guides"))));
     }
 
     // ─── S3: 低质兜底构造 ─────────────────────────

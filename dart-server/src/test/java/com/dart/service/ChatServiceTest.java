@@ -469,22 +469,23 @@ class ChatServiceTest {
     }
 
     @Test
-    void buildEnglishQuery_ambiguousWord_returnsShortEnglishQuery() {
-        // 只输出歧义词的稳定英文映射短词——Bing 对长句查询（无论中英、含锚点词组合）实测易漂移污染，
-        // 短英文技术词最稳定；上下文由主词/变体词提供
+    void buildEnglishQuery_ambiguousWord_returnsStableAnchorsWithEnglishTokens() {
+        // 输出稳定锚点词 + 主词英文 token——"microservices" 在 Bing 双域实测随机污染（索引故障），
+        // "spring cloud" 等稳定锚点（spring 词系全稳定）；上下文由主词/变体词提供
         String result = ChatService.buildEnglishQuery("微服务 学习路线 Spring Cloud Docker Kubernetes 必备知识");
-        assertThat(result).isEqualTo("microservices");
+        assertThat(result).isEqualTo("spring cloud docker kubernetes");
     }
 
     @Test
-    void buildEnglishQuery_englishOnlyQuery_returnsNull() {
-        // 无歧义中文技术词（含英文锚点词如 Spring Cloud 的查询也归 LLM optimizedEn 翻译兜底）
-        assertThat(ChatService.buildEnglishQuery("Spring Cloud 学习路线")).isNull();
+    void buildEnglishQuery_englishTokenOnly_returnsEnglishTokens() {
+        // 无歧义中文技术词但有英文 token（Spring Cloud）→ 提取 token 组合（Bing 对英文词稳定）
+        assertThat(ChatService.buildEnglishQuery("Spring Cloud 学习路线")).isEqualTo("spring cloud");
     }
 
     @Test
-    void buildEnglishQuery_noAmbiguousWord_returnsNull() {
-        assertThat(ChatService.buildEnglishQuery("Java 多线程 教程")).isNull();
+    void buildEnglishQuery_noAmbiguousWordNoEnglishToken_returnsNull() {
+        // 纯中文查询（无歧义词映射、无英文 token）→ null，由 LLM optimizedEn 翻译兜底
+        assertThat(ChatService.buildEnglishQuery("排序算法 空间复杂度")).isNull();
     }
 
     @Test
@@ -507,8 +508,8 @@ class ChatServiceTest {
         ArgumentCaptor<List<String>> queriesCaptor = ArgumentCaptor.forClass(List.class);
         verify(searchAgent).execute(queriesCaptor.capture(), anyInt(), any());
         assertThat(queriesCaptor.getValue().get(0)).contains("微服务");
-        // 词表降级产出稳定的短英文词（Bing 对短词稳定，长句无论中英易污染）
-        assertThat(queriesCaptor.getValue().get(1)).isEqualTo("microservices");
+        // 词表降级产出稳定锚点词 + 英文 token（"microservices" 在 Bing 随机污染，spring cloud/grpc 稳定）
+        assertThat(queriesCaptor.getValue().get(1)).isEqualTo("spring cloud grpc");
     }
 
     @Test
@@ -535,8 +536,8 @@ class ChatServiceTest {
         List<String> queries = queriesCaptor.getValue();
         assertThat(queries).hasSize(3);
         assertThat(queries.get(0)).contains("微服务");
-        // 词表命中"微服务"→ 短词优先于 LLM 长翻译（Bing 对长句查询易漂移污染）
-        assertThat(queries.get(1)).isEqualTo("microservices");
+        // 词表命中"微服务"→ 稳定锚点+token 优先于 LLM 翻译（LLM 长翻译含 microservices 必污染）
+        assertThat(queries.get(1)).isEqualTo("spring cloud grpc");
         assertThat(queries.get(2)).contains("Spring Cloud 微服务教程");
     }
 
@@ -1268,7 +1269,8 @@ class ChatServiceTest {
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
         assertThat(result.isRagHit()).isFalse();
-        verify(searchAgent).execute(eq(List.of("Spring Boot")), anyInt(), any());
+        // 降级后主词原文 + 英文 token 提取的 enQuery（spring boot 在 Bing 稳定）
+        verify(searchAgent).execute(eq(List.of("Spring Boot", "spring boot")), anyInt(), any());
     }
 
     @Test
