@@ -27,10 +27,15 @@ vi.mock('@/api/client', () => ({
   getAccessToken: vi.fn()
 }))
 
-// 需要 stub 路由
-const mockPush = vi.fn()
+// 需要 stub 路由；vi.mock factory 被 hoist，共享 mock 用 vi.hoisted 声明
+const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }))
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: mockPush, replace: mockPush })
+}))
+// chat store 会 import '@/router'（真实模块依赖 vue-router.createRouter），此处一并 mock，
+// 避免与上面 vue-router 的局部 mock 冲突
+vi.mock('@/router', () => ({
+  default: { push: mockPush, replace: mockPush }
 }))
 
 describe('AppSidebar.vue', () => {
@@ -215,7 +220,9 @@ describe('AppSidebar.vue', () => {
     await flushPromises()
 
     expect(deleteConversation).toHaveBeenCalledWith(1)
-    expect(mockPush).not.toHaveBeenCalled()
+    // 删除非当前会话不跳转回 /chat（currentId 赋值触发的 URL 同步 replace 仅反映当前会话）
+    expect(mockPush).not.toHaveBeenCalledWith('/chat')
+    expect(store.currentId).toBe(2)
   })
 
   it('点击窗口其他位置关闭菜单', async () => {
