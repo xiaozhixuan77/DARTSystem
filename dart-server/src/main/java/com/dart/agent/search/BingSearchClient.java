@@ -81,6 +81,10 @@ public class BingSearchClient {
                 .data("q", query)
                 .data("first", String.valueOf(first))
                 .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
+                // 缺 Accept-Language/Accept 时 Bing 返回降级/无关结果（实测：仅 UA 时 www 对
+                // microservices 返回百度知道垃圾，带完整 header 返回 GeeksforGeeks 等正常内容）
+                .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .timeout(10000)
                 .get();
 
