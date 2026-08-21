@@ -883,16 +883,27 @@ public class ChatService {
             java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9.]{1,}");
 
     /**
-     * 词表降级英文检索词生成：歧义词稳定英文锚点（长键优先、子串跳过）+ 主词英文 token 组合。
-     * 锚点值必须实测稳定（microservices 词系在 Bing 双域随机污染已排除）；英文 token 组合
-     * 提供上下文锚定（如 Spring Cloud Docker Kubernetes）；不做意图短尾（如 learning path）
-     * 避免拉长查询。无任何输出返回 null（由 LLM optimizedEn 翻译兜底）。
+     * 词表降级英文检索词生成：主词英文 token 组合优先，纯中文查询用歧义词稳定映射兜底。
+     * 英文 token（Spring Cloud Kubernetes 等）实测 Bing 稳定且精确；歧义词映射词如
+     * "distributed system" 会触发词典结果霸榜（M 评分低质混入）、"microservices" 词系随机
+     * 污染，token 存在时一律不混入。无任何输出返回 null（由 LLM optimizedEn 翻译兜底）。
      */
     static String buildEnglishQuery(String query) {
         if (query == null || query.isBlank()) {
             return null;
         }
         List<String> parts = new ArrayList<>();
+        java.util.regex.Matcher en = EN_TOKEN_PATTERN.matcher(query);
+        while (en.find()) {
+            // 转小写统一（避免 "Spring" vs "spring" 大小写不同导致重复/不命中）
+            String tok = en.group().toLowerCase();
+            if (!parts.contains(tok)) {
+                parts.add(tok);
+            }
+        }
+        if (!parts.isEmpty()) {
+            return String.join(" ", parts);
+        }
         List<Map.Entry<String, String>> byLengthDesc = EN_ANCHOR_MAP.entrySet().stream()
                 .sorted(java.util.Comparator.comparingInt(e -> -e.getKey().length()))
                 .toList();
@@ -910,14 +921,6 @@ public class ChatService {
                 if (!parts.contains(word)) {
                     parts.add(word);
                 }
-            }
-        }
-        java.util.regex.Matcher en = EN_TOKEN_PATTERN.matcher(query);
-        while (en.find()) {
-            // 转小写与锚点值一致（避免 "Spring" vs "spring" 大小写不同导致重复/不命中）
-            String tok = en.group().toLowerCase();
-            if (!parts.contains(tok)) {
-                parts.add(tok);
             }
         }
         return parts.isEmpty() ? null : String.join(" ", parts);

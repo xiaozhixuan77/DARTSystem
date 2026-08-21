@@ -483,6 +483,21 @@ class ChatServiceTest {
     }
 
     @Test
+    void buildEnglishQuery_tokenPresent_anchorNotMixedIn() {
+        // 有英文 token 时歧义词映射不混入——"distributed system" 触发 Bing 词典结果霸榜、
+        // microservices 词系随机污染，纯 token 组合（spring cloud kubernetes）实测全相关
+        String result = ChatService.buildEnglishQuery("微服务 学习路线 Spring Cloud Kubernetes 分布式系统");
+        assertThat(result).isEqualTo("spring cloud kubernetes");
+    }
+
+    @Test
+    void buildEnglishQuery_chineseOnlyWithAmbiguousWord_anchorFallback() {
+        // 纯中文歧义词查询（无英文 token）→ 稳定映射兜底
+        assertThat(ChatService.buildEnglishQuery("微服务架构")).isEqualTo("spring cloud");
+        assertThat(ChatService.buildEnglishQuery("缓存 淘汰策略")).isEqualTo("cache");
+    }
+
+    @Test
     void buildEnglishQuery_noAmbiguousWordNoEnglishToken_returnsNull() {
         // 纯中文查询（无歧义词映射、无英文 token）→ null，由 LLM optimizedEn 翻译兜底
         assertThat(ChatService.buildEnglishQuery("排序算法 空间复杂度")).isNull();
