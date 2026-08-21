@@ -469,10 +469,17 @@ class ChatServiceTest {
     }
 
     @Test
-    void buildEnglishQuery_ambiguousWord_returnsEnglishQuery() {
+    void buildEnglishQuery_ambiguousWord_returnsShortEnglishQuery() {
+        // 只输出歧义词的稳定英文映射短词——Bing 对长句查询（无论中英、含锚点词组合）实测易漂移污染，
+        // 短英文技术词最稳定；上下文由主词/变体词提供
         String result = ChatService.buildEnglishQuery("微服务 学习路线 Spring Cloud Docker Kubernetes 必备知识");
-        assertThat(result).contains("microservices").contains("learning path")
-                .contains("Spring").contains("Kubernetes");
+        assertThat(result).isEqualTo("microservices");
+    }
+
+    @Test
+    void buildEnglishQuery_englishOnlyQuery_returnsNull() {
+        // 无歧义中文技术词（含英文锚点词如 Spring Cloud 的查询也归 LLM optimizedEn 翻译兜底）
+        assertThat(ChatService.buildEnglishQuery("Spring Cloud 学习路线")).isNull();
     }
 
     @Test
@@ -482,7 +489,7 @@ class ChatServiceTest {
 
     @Test
     void executeSearchAndCurate_optimizedEnMissing_englishQueryFromWordMap() throws Exception {
-        // LLM 未输出 optimizedEn → searchQueries 用词表降级生成的英文词（index=1）
+        // LLM 未输出 optimizedEn → searchQueries 用词表降级生成的短英文词（index=1）
         when(valueOps.get(anyString())).thenReturn(null);
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
@@ -500,12 +507,13 @@ class ChatServiceTest {
         ArgumentCaptor<List<String>> queriesCaptor = ArgumentCaptor.forClass(List.class);
         verify(searchAgent).execute(queriesCaptor.capture(), anyInt(), any());
         assertThat(queriesCaptor.getValue().get(0)).contains("微服务");
-        assertThat(queriesCaptor.getValue().get(1)).contains("microservices").contains("learning path");
+        // 词表降级产出稳定的短英文词（Bing 对短词稳定，长句无论中英易污染）
+        assertThat(queriesCaptor.getValue().get(1)).isEqualTo("microservices");
     }
 
     @Test
     void executeSearchAndCurate_searchQueriesOrder_mainThenEnglishThenVariants() throws Exception {
-        // 搜索词列表顺序：[主词, optimizedEn, LLM 变体...]
+        // 搜索词列表顺序：[主词, 英文检索词, LLM 变体...]；词表命中歧义词时短词优先于 LLM optimizedEn
         when(valueOps.get(anyString())).thenReturn(null);
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
@@ -527,8 +535,38 @@ class ChatServiceTest {
         List<String> queries = queriesCaptor.getValue();
         assertThat(queries).hasSize(3);
         assertThat(queries.get(0)).contains("微服务");
-        assertThat(queries.get(1)).isEqualTo("microservices learning path");
+        // 词表命中"微服务"→ 短词优先于 LLM 长翻译（Bing 对长句查询易漂移污染）
+        assertThat(queries.get(1)).isEqualTo("microservices");
         assertThat(queries.get(2)).contains("Spring Cloud 微服务教程");
+    }
+
+    @Test
+    void executeSearchAndCurate_wordMapMiss_llmOptimizedEnFallsBack() throws Exception {
+        // 词表未命中歧义词 → LLM optimizedEn 兜底作英文检索词（index=1）
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(
+                new AssistantMessage("{\"isTech\":true,\"optimized\":\"协程 调度 原理\","
+                        + "\"optimizedEn\":\"coroutine scheduling principles\","
+                        + "\"variants\":[\"Kotlin 协程 调度\"]}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        chatService.executeSearchAndCurate("协程 调度 原理", 1L, 100L, emitter);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> queriesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(searchAgent).execute(queriesCaptor.capture(), anyInt(), any());
+        List<String> queries = queriesCaptor.getValue();
+        assertThat(queries).hasSize(3);
+        assertThat(queries.get(0)).contains("协程");
+        // 词表无"协程"映射 → LLM optimizedEn 兜底
+        assertThat(queries.get(1)).isEqualTo("coroutine scheduling principles");
+        assertThat(queries.get(2)).contains("Kotlin 协程 调度");
     }
 
     // === S6: 低质兜底报告分支 ===
