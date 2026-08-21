@@ -15,29 +15,29 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * Bing 搜索客户端 — 直连 cn.bing.com，3 页虚拟线程并行抓取，解析 HTML 搜索结果。
+ * Bing 搜索客户端 — 直连 cn.bing.com（3 页）+ www.bing.com（第 1 页兜底）虚拟线程并行抓取，
+ * 解析 HTML 搜索结果。国际版兜底：cn.bing.com 对个别英文技术词（如 microservices）会返回
+ * 随机无关结果（Bing 侧行为漂移），www.bing.com 对同一查询返回正常内容。
  */
 public class BingSearchClient {
 
     private static final Logger log = LoggerFactory.getLogger(BingSearchClient.class);
 
-    private static final String BING_URL = "https://cn.bing.com/search";
+    private static final String CN_BING = "https://cn.bing.com/search";
+    private static final String WWW_BING = "https://www.bing.com/search";
     private static final int PAGES = 3;
+    // 国际版只抓第 1 页：正常场景 cn 已够量，www 仅兜底污染词，1 页 10 条足量且控制请求总量
+    private static final int WWW_PAGES = 1;
 
     public List<SearchResult> search(String query, int maxResults) {
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         try {
-            List<Future<List<SearchResult>>> futures = new ArrayList<>(PAGES);
+            List<Future<List<SearchResult>>> futures = new ArrayList<>(PAGES + WWW_PAGES);
             for (int page = 0; page < PAGES; page++) {
-                final int p = page;
-                futures.add(executor.submit(() -> {
-                    try {
-                        return fetchPage(query, p);
-                    } catch (Exception e) {
-                        log.warn("Bing 第{}页抓取失败: query={}", p + 1, query);
-                        return List.of();
-                    }
-                }));
+                futures.add(submitPage(executor, CN_BING, query, page));
+            }
+            for (int page = 0; page < WWW_PAGES; page++) {
+                futures.add(submitPage(executor, WWW_BING, query, page));
             }
 
             Set<String> seen = new LinkedHashSet<>();
@@ -63,9 +63,21 @@ public class BingSearchClient {
         }
     }
 
-    List<SearchResult> fetchPage(String query, int page) throws Exception {
+    private Future<List<SearchResult>> submitPage(ExecutorService executor, String domain,
+                                                  String query, int page) {
+        return executor.submit(() -> {
+            try {
+                return fetchPage(domain, query, page);
+            } catch (Exception e) {
+                log.warn("Bing 第{}页抓取失败: domain={}, query={}", page + 1, domain, query);
+                return List.of();
+            }
+        });
+    }
+
+    List<SearchResult> fetchPage(String domain, String query, int page) throws Exception {
         int first = page * 10 + 1;
-        Document doc = Jsoup.connect(BING_URL)
+        Document doc = Jsoup.connect(domain)
                 .data("q", query)
                 .data("first", String.valueOf(first))
                 .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
