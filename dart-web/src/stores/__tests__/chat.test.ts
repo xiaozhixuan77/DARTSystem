@@ -241,7 +241,10 @@ describe('useChatStore', () => {
       const store = useChatStore()
       await store.selectConversation(1)
 
+      // 后端完整生成（搜索 + 三节流式 + 追问）实测可达 3-4 分钟：180s 时仍在等待不报错
       await vi.advanceTimersByTimeAsync(180_000)
+      expect(store.error).toBeNull()
+      await vi.advanceTimersByTimeAsync(120_000)
       expect(store.error).toContain('中断')
     } finally {
       vi.useRealTimers()
