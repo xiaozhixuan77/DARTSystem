@@ -13,8 +13,13 @@ vi.mock('@/api/chat', () => ({
   sendMessage: vi.fn()
 }))
 
+vi.mock('@/router', () => ({
+  default: { replace: vi.fn() }
+}))
+
 import { listConversations, createConversation, deleteConversation, getMessages } from '@/api/conversation'
 import { sendMessage } from '@/api/chat'
+import router from '@/router'
 
 type Callbacks = {
   onStatus?: (status: string, message: string) => void
@@ -155,6 +160,92 @@ describe('useChatStore', () => {
     const last = store.messages[store.messages.length - 1]
     expect(last.content).toContain('错误')
     expect(getMessages).not.toHaveBeenCalled()
+  })
+
+  // === URL 同步与会话恢复 ===
+
+  it('conversation 状态事件后当前会话 id 同步到 URL', async () => {
+    const store = useChatStore()
+    const cb = captureCallbacks()
+    store.send('hello')
+    cb.onStatus?.('conversation', '55')
+
+    await vi.waitFor(() => {
+      expect(router.replace).toHaveBeenCalledWith('/chat/55')
+    })
+  })
+
+  it('selectConversation 后当前会话 id 同步到 URL', async () => {
+    vi.mocked(getMessages).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: [
+        { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: '' },
+        { id: 2, role: 'assistant', content: 'ok', metadata: null, createdAt: '' }
+      ]
+    })
+
+    const store = useChatStore()
+    await store.selectConversation(1)
+
+    await vi.waitFor(() => {
+      expect(router.replace).toHaveBeenCalledWith('/chat/1')
+    })
+  })
+
+  it('恢复会话最后一条是近期用户消息时轮询等待助手回答', async () => {
+    vi.useFakeTimers()
+    try {
+      const now = new Date().toISOString()
+      vi.mocked(getMessages)
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [{ id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now }]
+        })
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            { id: 2, role: 'assistant', content: '完整报告', metadata: null, createdAt: now }
+          ]
+        })
+
+      const store = useChatStore()
+      await store.selectConversation(1)
+      expect(store.messages).toHaveLength(1)
+
+      // 3 秒后轮询拉取到完整报告 → 停止轮询
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getMessages).toHaveBeenCalledTimes(2)
+      expect(store.messages).toHaveLength(2)
+      expect(store.messages[1].role).toBe('assistant')
+      expect(store.messages[1].content).toBe('完整报告')
+
+      // 已停止：后续不再轮询
+      vi.mocked(getMessages).mockClear()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(getMessages).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('轮询等待超时后提示回答生成中断', async () => {
+    vi.useFakeTimers()
+    try {
+      const now = new Date().toISOString()
+      vi.mocked(getMessages).mockResolvedValue({
+        code: 200, message: 'ok', suggestion: null,
+        data: [{ id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now }]
+      })
+
+      const store = useChatStore()
+      await store.selectConversation(1)
+
+      await vi.advanceTimersByTimeAsync(180_000)
+      expect(store.error).toContain('中断')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   // === 删除会话 ===
