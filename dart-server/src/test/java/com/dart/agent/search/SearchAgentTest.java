@@ -38,7 +38,8 @@ class SearchAgentTest {
     @Test
     void execute_normalFlow_returnsTopResults() throws IOException {
         List<SearchResult> searchResults = IntStream.range(0, 10)
-                .mapToObj(i -> new SearchResult("https://site" + i + ".com", "Title " + i, "Snippet " + i))
+                .mapToObj(i -> new SearchResult("https://site" + i + ".com",
+                        "Spring Boot guide " + i, "Spring Boot snippet " + i))
                 .toList();
         when(searchTools.searchWeb(anyString(), anyInt())).thenReturn(searchResults);
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
@@ -74,7 +75,7 @@ class SearchAgentTest {
     @Test
     void execute_allFetchFail_returnsEmpty() {
         when(searchTools.searchWeb(anyString(), anyInt()))
-                .thenReturn(List.of(new SearchResult("https://fail.com", "Fail", "snippet")));
+                .thenReturn(List.of(new SearchResult("https://fail.com", "query Fail", "query snippet")));
         when(searchTools.fetchPages(anyList())).thenReturn(List.of());
 
         List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, emitter);
@@ -94,7 +95,7 @@ class SearchAgentTest {
         // 10 results but only 5 unique URLs
         List<SearchResult> dups = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
-            dups.add(new SearchResult("https://unique" + (i % 5) + ".com", "T" + i, "snippet"));
+            dups.add(new SearchResult("https://unique" + (i % 5) + ".com", "query T" + i, "query snippet"));
         }
         when(searchTools.searchWeb(anyString(), anyInt())).thenReturn(dups);
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
@@ -117,7 +118,7 @@ class SearchAgentTest {
     @Test
     void execute_returnsAtMostMaxResults() {
         List<SearchResult> searchResults = IntStream.range(0, 15)
-                .mapToObj(i -> new SearchResult("https://site" + i + ".com", "T" + i, "S" + i))
+                .mapToObj(i -> new SearchResult("https://site" + i + ".com", "query T" + i, "query S" + i))
                 .toList();
         when(searchTools.searchWeb(anyString(), anyInt())).thenReturn(searchResults);
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
@@ -179,12 +180,12 @@ class SearchAgentTest {
             String q = inv.getArgument(0);
             if (q.equals("q1")) {
                 return IntStream.range(0, 4)
-                        .mapToObj(i -> new SearchResult("https://p" + i + ".com", "T", "s"))
+                        .mapToObj(i -> new SearchResult("https://p" + i + ".com", "q1 result", "q1 snippet"))
                         .toList();
             }
             int base = q.equals("q2") ? 100 : 200;
             return IntStream.range(0, 8)
-                    .mapToObj(i -> new SearchResult("https://u" + (base + i) + ".com", "T", "s"))
+                    .mapToObj(i -> new SearchResult("https://u" + (base + i) + ".com", q + " result", q + " snippet"))
                     .toList();
         });
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
@@ -212,11 +213,11 @@ class SearchAgentTest {
             String q = inv.getArgument(0);
             if (q.equals("primary")) {
                 return IntStream.range(0, 5)
-                        .mapToObj(i -> new SearchResult("https://site" + i + ".com", "T", "s"))
+                        .mapToObj(i -> new SearchResult("https://site" + i + ".com", "primary result", "primary snippet"))
                         .toList();
             }
             return IntStream.range(0, 5)
-                    .mapToObj(i -> new SearchResult("https://variant" + i + ".com", "T", "s"))
+                    .mapToObj(i -> new SearchResult("https://variant" + i + ".com", "variant result", "variant snippet"))
                     .toList();
         });
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
@@ -244,12 +245,12 @@ class SearchAgentTest {
         when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
             String q = inv.getArgument(0);
             if (q.equals("primary")) {
-                return List.of(new SearchResult("https://a.com", "A", "s"),
-                        new SearchResult("https://b.com", "B", "s"),
-                        new SearchResult("https://c.com", "C", "s"));
+                return List.of(new SearchResult("https://a.com", "primary A", "primary snippet"),
+                        new SearchResult("https://b.com", "primary B", "primary snippet"),
+                        new SearchResult("https://c.com", "primary C", "primary snippet"));
             }
-            return List.of(new SearchResult("https://b.com", "B", "s"),
-                    new SearchResult("https://d.com", "D", "s"));
+            return List.of(new SearchResult("https://b.com", "variant B", "variant snippet"),
+                    new SearchResult("https://d.com", "variant D", "variant snippet"));
         });
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
@@ -271,7 +272,7 @@ class SearchAgentTest {
     @Test
     void execute_sendsStatusEvents() throws IOException {
         when(searchTools.searchWeb(anyString(), anyInt()))
-                .thenReturn(List.of(new SearchResult("https://site.com", "Title", "Snippet")));
+                .thenReturn(List.of(new SearchResult("https://site.com", "query result", "query snippet")));
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
             List<String> urls = inv.getArgument(0);
@@ -288,25 +289,9 @@ class SearchAgentTest {
     }
 
     @Test
-    void execute_allBelowQualityThreshold_returnsEmpty() {
-        when(searchTools.searchWeb(anyString(), anyInt()))
-                .thenReturn(List.of(new SearchResult("https://low.com", "Low", "snippet")));
-        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
-            @SuppressWarnings("unchecked")
-            List<String> urls = inv.getArgument(0);
-            return urls.stream().map(u -> new PageContent(u, "T", "c ", 100, 0, false, false, 2020)).toList();
-        });
-        // scoreResources already filters below threshold → empty
-        when(searchTools.scoreResources(anyString(), anyList())).thenReturn(List.of());
-
-        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, emitter);
-        assertThat(result).isEmpty();
-    }
-
-    @Test
     void execute_topResultsSortedDescending() {
         List<SearchResult> searchResults = IntStream.range(0, 5)
-                .mapToObj(i -> new SearchResult("https://site" + i + ".com", "T" + i, "S" + i))
+                .mapToObj(i -> new SearchResult("https://site" + i + ".com", "query T" + i, "query S" + i))
                 .toList();
         when(searchTools.searchWeb(anyString(), anyInt())).thenReturn(searchResults);
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
@@ -419,10 +404,10 @@ class SearchAgentTest {
     }
 
     @Test
-    void isPolluted_englishQuery_skipped() {
-        // 英文主词不启用污染检查——无关结果也原样保留（英文查询 Bing 稳定）
+    void isPolluted_englishQuery_relevantResultsKept() {
+        // 英文查询结果含检索词字面（正常英文技术页）→ 不误判，原样保留
         when(searchTools.searchWeb(anyString(), anyInt()))
-                .thenReturn(List.of(new SearchResult("https://site.com", "Title", "Snippet")));
+                .thenReturn(List.of(new SearchResult("https://site.com", "Spring Boot guide", "spring boot tutorial")));
         when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
             List<String> urls = inv.getArgument(0);
@@ -437,6 +422,73 @@ class SearchAgentTest {
         searchAgent.execute(List.of("Spring Boot"), 5, emitter);
 
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://site.com"))));
+    }
+
+    @Test
+    void variantGroupPolluted_droppedAndPrimaryKept() {
+        // 主词结果正常（含字面词）+ 变体组结果全零命中（4399/贴吧污染）→ 变体组丢弃，只抓主词
+        when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
+            String q = inv.getArgument(0);
+            if (q.equals("spring boot 配置")) {
+                return List.of(new SearchResult("https://spring.io/1", "Spring Boot config guide", "spring boot 配置教程"));
+            }
+            return List.of(new SearchResult("https://4399.com/game", "4399小游戏大全", "在线小游戏"),
+                    new SearchResult("https://tieba.com/1", "贴吧热帖", "灌水内容"));
+        });
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        searchAgent.execute(List.of("spring boot 配置", "game 小游戏"), 5, emitter);
+
+        // 变体组污染被丢弃，只抓主词结果
+        verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://spring.io/1"))));
+    }
+
+    @Test
+    void allGroupsPolluted_returnsEmptyWithoutFetching() {
+        // 主词与变体词都返回污染结果 → 搜索阶段全丢弃 → 不抓取、返回空（search_empty）
+        when(searchTools.searchWeb(anyString(), anyInt()))
+                .thenReturn(List.of(new SearchResult("https://news.com/1", "会议报道", "要闻"),
+                        new SearchResult("https://messenger.com", "Messenger", "chat app")));
+
+        List<ScoredResource> result = searchAgent.execute(
+                List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+
+        assertThat(result).isEmpty();
+        verify(searchTools, never()).fetchPages(anyList());
+    }
+
+    @Test
+    void primaryPolluted_variantPollutedSameBatch_variantsAlsoDropped() {
+        // 全组检测：主词污染丢弃后，变体组同批污染结果也被丢弃（原仅主词检测时会保留变体组进评分）
+        when(searchTools.searchWeb(anyString(), anyInt()))
+                .thenReturn(List.of(new SearchResult("https://news.com/1", "会议报道", "要闻"),
+                        new SearchResult("https://messenger.com", "Messenger", "chat app")));
+        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<String> urls = inv.getArgument(0);
+            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
+        });
+        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            List<PageContent> pages = inv.getArgument(1);
+            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
+        });
+
+        List<ScoredResource> result = searchAgent.execute(
+                List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+
+        // 变体组因结果零命中被丢弃 → 搜索阶段无结果，不进入抓取
+        assertThat(result).isEmpty();
+        verify(searchTools, never()).fetchPages(anyList());
     }
 
     @Test
