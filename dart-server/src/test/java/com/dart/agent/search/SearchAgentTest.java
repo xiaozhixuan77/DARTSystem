@@ -432,6 +432,7 @@ class SearchAgentTest {
             if (q.equals("spring boot 配置")) {
                 return List.of(new SearchResult("https://spring.io/1", "Spring Boot config guide", "spring boot 配置教程"));
             }
+            // 变体组返回全零命中的污染结果（不含"多人在线"字面）
             return List.of(new SearchResult("https://4399.com/game", "4399小游戏大全", "在线小游戏"),
                     new SearchResult("https://tieba.com/1", "贴吧热帖", "灌水内容"));
         });
@@ -446,7 +447,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("spring boot 配置", "game 小游戏"), 5, emitter);
+        searchAgent.execute(List.of("spring boot 配置", "game 多人在线"), 5, emitter);
 
         // 变体组污染被丢弃，只抓主词结果
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://spring.io/1"))));
@@ -472,16 +473,6 @@ class SearchAgentTest {
         when(searchTools.searchWeb(anyString(), anyInt()))
                 .thenReturn(List.of(new SearchResult("https://news.com/1", "会议报道", "要闻"),
                         new SearchResult("https://messenger.com", "Messenger", "chat app")));
-        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> {
-            @SuppressWarnings("unchecked")
-            List<String> urls = inv.getArgument(0);
-            return urls.stream().map(u -> new PageContent(u, "T", "c ".repeat(100), 1000, 1, false, false, 2026)).toList();
-        });
-        when(searchTools.scoreResources(anyString(), anyList())).thenAnswer(inv -> {
-            @SuppressWarnings("unchecked")
-            List<PageContent> pages = inv.getArgument(1);
-            return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
-        });
 
         List<ScoredResource> result = searchAgent.execute(
                 List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
@@ -599,8 +590,6 @@ class SearchAgentTest {
                 .thenReturn(List.of(
                         new SearchResult("https://news.com/1", "习近平同志重要讲话", "会议报道"),
                         new SearchResult("https://messenger.com", "Messenger", "Instant messaging app")));
-        when(searchTools.fetchPages(anyList())).thenAnswer(inv -> new ArrayList<>());
-        when(searchTools.scoreResources(anyString(), anyList())).thenReturn(List.of());
 
         List<ScoredResource> result = searchAgent.execute(
                 List.of("微服务 学习路线", "microservices learning path"), 5, emitter);

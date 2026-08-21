@@ -15,7 +15,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
 /**
  * Search Agent — 搜索编排：Bing 搜索 → 并行抓取 → 四维评分 → 筛选 Top-N。
@@ -39,8 +38,6 @@ public class SearchAgent {
             Map.entry("分布式", "distributed system"), Map.entry("高并发", "high concurrency"),
             Map.entry("并发", "concurrency"), Map.entry("线程", "multithreading"),
             Map.entry("部署", "deployment"), Map.entry("集群", "cluster"));
-
-    private static final Pattern HAN_PATTERN = Pattern.compile("\\p{IsHan}");
 
     private final SearchTools searchTools;
 
@@ -147,6 +144,10 @@ public class SearchAgent {
                 if (results == null) {
                     continue;
                 }
+                if (isPolluted(queries.get(i), results)) {
+                    log.warn("检索词结果疑似 Bing 污染，丢弃: query={}", queries.get(i));
+                    continue;
+                }
                 if (i == 0) {
                     primary.addAll(results);
                 } else {
@@ -154,10 +155,6 @@ public class SearchAgent {
                 }
             }
             List<SearchResult> primaryUnique = uniqueByUrl(primary);
-            if (isPolluted(queries.getFirst(), primary)) {
-                log.warn("主词搜索结果疑似 Bing 污染，丢弃改用变体词: query={}", queries.getFirst());
-                primaryUnique = List.of();
-            }
             if (primaryUnique.isEmpty()) {
                 return uniqueByUrl(variants);
             }
@@ -191,19 +188,18 @@ public class SearchAgent {
     }
 
     /**
-     * Bing 污染快检：cn.bing.com 中文版对含"微服务"等歧义中文词的查询会返回
-     * 随机无关泛化结果（政治新闻/Messenger 等）。对 title+snippet 做关键词命中率检查，
-     * 零命中结果占比 ≥ 80% 判定污染。仅对含中文的主词启用（英文主词 Bing 稳定，实测全正常）。
+     * Bing 污染快检：cn.bing.com 中文版对含"微服务"等歧义中文词的查询会返回随机无关泛化结果
+     * （政治新闻/Messenger 等），个别英文技术词（如 microservices）也可能漂移返回垃圾内容；
+     * www.bing.com 双域合并后污染率被稀释。对 title+snippet 做关键词命中率检查，
+     * 零命中结果占比 ≥ 80% 判定污染。应用于全部检索词组（含英文词——结果页几乎总含字面词，
+     * 不误判；测试用的人工短词除外）。
      *
      * 关键词词集：query 按空白拆分的词（≥2 字符，小写）+ EN_ANCHOR_MAP 命中歧义词的英文映射
      * （防英文站结果 title 无中文词被误杀）。不能用 TextUtils.extractKeywords——中文无停用词
      * 分隔时整段粘连成一个长关键词，contains 必 0 命中，所有中文查询都会误判污染。
      */
     private static boolean isPolluted(String query, List<SearchResult> results) {
-        if (results == null || results.isEmpty()) {
-            return false;
-        }
-        if (query == null || !HAN_PATTERN.matcher(query).find()) {
+        if (query == null || results == null || results.isEmpty()) {
             return false;
         }
         List<String> keywords = pollutionKeywords(query);
