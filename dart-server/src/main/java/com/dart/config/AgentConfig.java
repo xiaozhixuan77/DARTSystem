@@ -15,6 +15,9 @@ import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
@@ -125,5 +128,19 @@ public class AgentConfig {
     @Bean
     public CuratorAgent curatorAgent(CuratorTools curatorTools) {
         return new CuratorAgent(curatorTools);
+    }
+
+    // ────────── 事务 ──────────
+
+    /**
+     * 用户消息独立事务：主编排事务跨整个流式生成（1-2 分钟）不提交，
+     * 用户输入必须经 REQUIRES_NEW 立即落库——否则流式中断后刷新页面，
+     * 其他连接（REPEATABLE READ）读不到未提交数据，输入显示为消失。
+     */
+    @Bean
+    public TransactionTemplate transactionTemplate(PlatformTransactionManager transactionManager) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return template;
     }
 }

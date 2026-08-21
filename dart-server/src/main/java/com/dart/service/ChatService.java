@@ -151,13 +151,13 @@ public class ChatService {
     public SearchResult executeSearchAndCurate(String query, Long userId,
                                                 Long conversationId, SseEmitter emitter) {
         long startNanos = System.nanoTime();
-        // 1. 持久化用户消息
+        // 1. 持久化用户消息（独立事务立即提交：流式中断后刷新页面立即可见）
         Message userMsg = new Message();
         userMsg.setConversationId(conversationId);
         userMsg.setRole("user");
         userMsg.setContent(query);
         userMsg.setCreatedAt(LocalDateTime.now());
-        messageMapper.insert(userMsg);
+        transactionTemplate.executeWithoutResult(status -> messageMapper.insert(userMsg));
 
         // 1.5 查询缓存检查（原始查询规范化 key；命中直接返回，跳过全流程，不记链路）
         SearchResult cached = tryCache(query, conversationId, emitter);
