@@ -8,7 +8,9 @@ import type { ConversationVO, MessageVO } from '@/types/chat'
 // 刷新恢复场景：SSE 断连后后端仍在后台生成完整报告，助手消息在落库后才可见。
 // 恢复会话时若最后一条是近期用户消息（回答未生成完），轮询等待助手消息出现
 const RESUME_POLL_INTERVAL_MS = 3000
-const RESUME_POLL_TIMEOUT_MS = 180_000
+// 后端完整生成（搜索 + 三节流式 + 追问）实测可达 3-4 分钟，超时须覆盖最长生成时间，
+// 否则会误报"生成中断"（此时后端仍在后台生成并最终落库）
+const RESUME_POLL_TIMEOUT_MS = 300_000
 // 仅"近期"用户消息触发轮询：历史会话最后一条 user 无后续是常态（极少），避免误轮询
 const RESUME_POLL_WINDOW_MS = 5 * 60 * 1000
 
