@@ -12,6 +12,12 @@ const chatStore = useChatStore()
     </div>
     <button class="cancel-btn" @click="chatStore.cancelStreaming">取消</button>
   </div>
+  <div v-else-if="chatStore.waitingResume" class="streaming-bar">
+    <div class="streaming-indicator">
+      <span class="spinner" />
+      <span class="streaming-text">上次回答仍在后台生成，正在自动恢复…</span>
+    </div>
+  </div>
 </template>
 
 <style lang="scss" scoped>

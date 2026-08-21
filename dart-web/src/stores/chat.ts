@@ -1,8 +1,16 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { listConversations, createConversation, deleteConversation, getMessages } from '@/api/conversation'
 import { sendMessage } from '@/api/chat'
+import router from '@/router'
 import type { ConversationVO, MessageVO } from '@/types/chat'
+
+// 刷新恢复场景：SSE 断连后后端仍在后台生成完整报告，助手消息在落库后才可见。
+// 恢复会话时若最后一条是近期用户消息（回答未生成完），轮询等待助手消息出现
+const RESUME_POLL_INTERVAL_MS = 3000
+const RESUME_POLL_TIMEOUT_MS = 180_000
+// 仅"近期"用户消息触发轮询：历史会话最后一条 user 无后续是常态（极少），避免误轮询
+const RESUME_POLL_WINDOW_MS = 5 * 60 * 1000
 
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<ConversationVO[]>([])
@@ -12,7 +20,15 @@ export const useChatStore = defineStore('chat', () => {
   const streamingContent = ref('')
   const streamingStatus = ref('')
   const error = ref<string | null>(null)
+  const waitingResume = ref(false)
   let abortFn: (() => void) | null = null
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+  let pollTimeout: ReturnType<typeof setTimeout> | null = null
+
+  // 会话 id 同步 URL：刷新后 ChatView 依据 route.params.id 自动恢复会话
+  watch(currentId, (id) => {
+    if (id) router.replace(`/chat/${id}`)
+  })
 
   const currentConversation = computed(() =>
     conversations.value.find((c) => c.id === currentId.value) ?? null
@@ -33,6 +49,39 @@ export const useChatStore = defineStore('chat', () => {
       const res = await getMessages(id)
       if (res.code === 200) messages.value = res.data
     } catch { /* ignore */ }
+    startPollingForResume()
+  }
+
+  /**
+   * 恢复会话后检测"回答仍在后台生成"：最后一条是近期用户消息且无助手回复时，
+   * 每 3s 轮询拉取消息，直到助手消息出现（后端断连后仍会生成完并落库）。
+   */
+  function startPollingForResume() {
+    stopPolling()
+    const last = messages.value[messages.value.length - 1]
+    if (!currentId.value || !last || last.role !== 'user') return
+    const createdAt = Date.parse(last.createdAt)
+    if (Number.isNaN(createdAt) || Date.now() - createdAt > RESUME_POLL_WINDOW_MS) return
+    waitingResume.value = true
+    pollTimer = setInterval(async () => {
+      const id = currentId.value
+      if (id == null) { stopPolling(); return }
+      await reloadMessages(id)
+      const tail = messages.value[messages.value.length - 1]
+      if (tail && tail.role === 'assistant') stopPolling()
+    }, RESUME_POLL_INTERVAL_MS)
+    pollTimeout = setTimeout(() => {
+      if (waitingResume.value) {
+        stopPolling()
+        error.value = '上次回答生成中断，请重试'
+      }
+    }, RESUME_POLL_TIMEOUT_MS)
+  }
+
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+    if (pollTimeout) { clearTimeout(pollTimeout); pollTimeout = null }
+    waitingResume.value = false
   }
 
   /**
@@ -66,6 +115,7 @@ export const useChatStore = defineStore('chat', () => {
       if (currentId.value === id) {
         currentId.value = null
         messages.value = []
+        stopPolling()
       }
       return true
     } catch { /* ignore */ }
@@ -153,7 +203,7 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     conversations, currentId, currentConversation, messages,
-    isStreaming, streamingContent, streamingStatus, error,
+    isStreaming, streamingContent, streamingStatus, error, waitingResume,
     loadConversations, selectConversation, newConversation,
     removeConversation, send, cancelStreaming
   }
