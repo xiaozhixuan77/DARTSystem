@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.nio.charset.StandardCharsets;
@@ -74,6 +75,7 @@ public class ChatService {
     private final RelationExtractionService relationExtractionService;
     private final KnowledgeService knowledgeService;
     private final ConversationSummaryService conversationSummaryService;
+    private final TransactionTemplate transactionTemplate;
 
     /** 未识别意图的默认沉淀标签（与 how_to 标签一致） */
     private static final String DEFAULT_SEDIMENT_TAG = "操作指南";
@@ -107,7 +109,8 @@ public class ChatService {
                        KnowledgeItemMapper knowledgeItemMapper, SearchTraceMapper searchTraceMapper,
                        RelationExtractionService relationExtractionService,
                        KnowledgeService knowledgeService,
-                       ConversationSummaryService conversationSummaryService) {
+                       ConversationSummaryService conversationSummaryService,
+                       TransactionTemplate transactionTemplate) {
         this.chatModel = chatModel;
         this.searchAgent = searchAgent;
         this.curatorAgent = curatorAgent;
@@ -120,6 +123,7 @@ public class ChatService {
         this.relationExtractionService = relationExtractionService;
         this.knowledgeService = knowledgeService;
         this.conversationSummaryService = conversationSummaryService;
+        this.transactionTemplate = transactionTemplate;
     }
 
     public record SearchResult(RagService.RagResult ragAnswer,
