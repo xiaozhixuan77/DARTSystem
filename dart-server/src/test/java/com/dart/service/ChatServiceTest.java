@@ -31,6 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -76,6 +77,9 @@ class ChatServiceTest {
     private ChatService chatService;
     private SseEmitter emitter;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    // insert 快照：mock insert 后对象可能被复用修改（草稿 insert 后 completeAssistantMessage
+    // 写回同一引用），断言 insert 时的内容须用快照
+    private final List<Message> insertSnapshots = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -84,6 +88,7 @@ class ChatServiceTest {
                 searchTraceMapper, relationExtractionService, knowledgeService, summaryService,
                 transactionTemplate);
         emitter = spy(new SseEmitter(60_000L));
+        insertSnapshots.clear();
         // lenient：所有走 executeSearchAndCurate 的用例都会经独立事务提交用户消息，
         // 回调须真实执行（否则 messageMapper.insert(user) 不会发生，insert 计数断言会失败）；
         // 纯函数用例不调用，故 lenient
@@ -93,6 +98,16 @@ class ChatServiceTest {
             action.accept(null);
             return null;
         }).when(transactionTemplate).executeWithoutResult(any());
+        // lenient：mock 的 insert 不回填自增 id（MyBatis-Plus 真实行为会回填），
+        // 草稿完成路径依赖草稿 id 判定走 updateById 而非回退 insert
+        lenient().when(messageMapper.insert(any(Message.class))).thenAnswer(inv -> {
+            Message m = inv.getArgument(0);
+            insertSnapshots.add(copyMessage(m));
+            if (m.getId() == null) {
+                m.setId((long) (1_000_000 + (int) (Math.random() * 1_000_000)));
+            }
+            return 1;
+        });
         // lenient：仅缓存相关用例使用，避免其他用例报 UnnecessaryStubbing
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
         lenient().when(knowledgeItemMapper.selectCount(any())).thenReturn(0L);
@@ -103,6 +118,17 @@ class ChatServiceTest {
         // 沉淀默认走新增路径（防 Mockito 返回 null 导致虚拟线程 NPE）
         lenient().when(knowledgeService.findSimilarItem(anyLong(), anyString(), anyString()))
                 .thenReturn(Optional.empty());
+    }
+
+    private static Message copyMessage(Message m) {
+        Message copy = new Message();
+        copy.setId(m.getId());
+        copy.setConversationId(m.getConversationId());
+        copy.setRole(m.getRole());
+        copy.setContent(m.getContent());
+        copy.setMetadata(m.getMetadata());
+        copy.setCreatedAt(m.getCreatedAt());
+        return copy;
     }
 
     // === 查询缓存 ===
@@ -185,13 +211,13 @@ class ChatServiceTest {
 
         chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
-        // 用户消息必须经独立事务模板提交：流式中断后其他连接立即可见（不被主事务延迟提交阻塞）
-        verify(transactionTemplate).executeWithoutResult(any());
+        // 用户消息 + 草稿消息均经独立事务模板提交：流式中断后其他连接立即可见（不被主事务延迟提交阻塞）
+        verify(transactionTemplate, times(2)).executeWithoutResult(any());
         // 用户消息在回调内执行 insert（含原文与会话归属）
         verify(messageMapper).insert(argThat((Message m) -> m != null && "user".equals(m.getRole())
                 && "Spring Boot".equals(m.getContent())
                 && m.getConversationId() != null && m.getConversationId().equals(100L)));
-        // 助手消息仍在主事务内直接 insert（不经独立事务模板）
+        // 助手草稿消息同样经独立事务模板 insert
         verify(messageMapper).insert(argThat((Message m) -> m != null && "assistant".equals(m.getRole())));
     }
 
@@ -213,13 +239,13 @@ class ChatServiceTest {
         chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
         // 草稿 insert（空内容 + draft 标记）发生在 curator 生成前（独立事务），
-        // 完整内容通过 updateById 写回同一条消息
-        ArgumentCaptor<Message> insertCaptor = ArgumentCaptor.forClass(Message.class);
-        verify(messageMapper, times(2)).insert(insertCaptor.capture());
-        Message draftMsg = insertCaptor.getAllValues().stream()
+        // 完整内容通过 updateById 写回同一条消息（insert 快照：对象后经
+        // completeAssistantMessage 复用写回，insert 时的状态须用快照断言）
+        assertThat(insertSnapshots).hasSize(2);
+        Message draftSnapshot = insertSnapshots.stream()
                 .filter(m -> "assistant".equals(m.getRole())).findFirst().orElseThrow();
-        assertThat(draftMsg.getContent()).isEmpty();
-        assertThat(draftMsg.getMetadata()).contains("draft");
+        assertThat(draftSnapshot.getContent()).isEmpty();
+        assertThat(draftSnapshot.getMetadata()).contains("draft");
         ArgumentCaptor<Message> updateCaptor = ArgumentCaptor.forClass(Message.class);
         verify(messageMapper).updateById(updateCaptor.capture());
         Message completed = updateCaptor.getValue();
@@ -251,13 +277,15 @@ class ChatServiceTest {
         chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
         assertThat(draftConsumer.get()).isNotNull();
-        // 触发草稿快照：部分内容经独立事务持久化（updateById，保留 draft 标记）
+        // 触发草稿快照：部分内容经独立事务持久化（updateById 仅写内容字段，
+        // metadata 不动——库中保留 draft 标记直到完整报告写回）
         draftConsumer.get().accept("# 部分内容");
         ArgumentCaptor<Message> captor = ArgumentCaptor.forClass(Message.class);
         verify(messageMapper, atLeastOnce()).updateById(captor.capture());
-        Message draftUpdate = captor.getAllValues().getFirst();
-        assertThat(draftUpdate.getContent()).isEqualTo("# 部分内容");
-        assertThat(draftUpdate.getMetadata()).contains("draft");
+        Message draftUpdate = captor.getAllValues().stream()
+                .filter(m -> "# 部分内容".equals(m.getContent())).findFirst().orElseThrow();
+        assertThat(draftUpdate.getId()).isNotNull();
+        assertThat(draftUpdate.getMetadata()).isNull();
     }
 
     @Test
@@ -1532,9 +1560,10 @@ class ChatServiceTest {
 
         ArgumentCaptor<Message> captor = ArgumentCaptor.forClass(Message.class);
         verify(messageMapper, atLeast(2)).insert(any(Message.class));
-        verify(messageMapper).updateById(captor.capture());
-        assertThat(captor.getValue().getContent()).contains("## 进一步探索");
-        assertThat(captor.getValue().getContent()).contains("Java集合框架");
+        // 草稿→完整 + 追问追加共两次 updateById，追问是最后一次
+        verify(messageMapper, atLeast(2)).updateById(captor.capture());
+        assertThat(captor.getAllValues().getLast().getContent()).contains("## 进一步探索");
+        assertThat(captor.getAllValues().getLast().getContent()).contains("Java集合框架");
     }
 
     @Test

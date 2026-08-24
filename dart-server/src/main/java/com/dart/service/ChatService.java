@@ -289,6 +289,9 @@ public class ChatService {
         }
 
         // 5. Curator Agent（意图透传为报告风格要求；会话摘要注入延续前文叙述）
+        // 先落草稿消息（独立事务立即提交，draft 标记）：流式生成期间前端可拉取
+        // 已生成部分增量续流；完整报告生成后由 completeAssistantMessage 写回同一消息
+        Message assistantDraft = persistAssistantDraft(conversationId);
         CuratedReport report;
         // 低质兜底结果（抓取失败、摘要级内容）→ Curator 精简约束 + 报告头部标注
         boolean degraded = !searchResults.isEmpty() && searchResults.getFirst().isDegraded();
@@ -301,7 +304,8 @@ public class ChatService {
                 log.warn("会话摘要读取失败，报告生成不带历史上下文: conversationId={}", conversationId, e);
             }
             report = curatorAgent.curate(effectiveQuery, searchResults, emitter,
-                    pre.intent(), sessionSummary, degraded, null);
+                    pre.intent(), sessionSummary, degraded,
+                    draft -> updateAssistantDraft(assistantDraft == null ? null : assistantDraft.getId(), draft));
             if (degraded) {
                 report = new CuratedReport(report.title(),
                         DEGRADED_NOTICE + "\n\n" + report.markdown(),
@@ -325,7 +329,7 @@ public class ChatService {
         recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
                 false, null, effectiveQuery, searchResults, "search",
                 fallbackReason, startNanos);
-        Message assistantMessage = persistAssistantMessage(conversationId, result);
+        Message assistantMessage = completeAssistantMessage(assistantDraft, conversationId, result);
         if (assistantMessage != null) {
             final Message msg = assistantMessage;
             final CuratedReport finalReport = report;
@@ -660,30 +664,90 @@ public class ChatService {
 
     // ─── 持久化 ──────────────────────────────────────────────
 
+    /**
+     * 草稿消息：curator 流式生成前先落空消息（独立事务立即提交 + draft 标记），
+     * 流式中断后前端可拉取到已生成部分；完整报告生成后由 completeAssistantMessage 写回。
+     */
+    private Message persistAssistantDraft(Long conversationId) {
+        try {
+            Message draft = new Message();
+            draft.setConversationId(conversationId);
+            draft.setRole("assistant");
+            draft.setContent("");
+            draft.setMetadata("{\"draft\":true}");
+            draft.setCreatedAt(LocalDateTime.now());
+            transactionTemplate.executeWithoutResult(status -> messageMapper.insert(draft));
+            return draft;
+        } catch (Exception e) {
+            log.error("创建助手消息草稿失败，回退完整插入", e);
+            return null;
+        }
+    }
+
+    /**
+     * 草稿增量更新：流式生成过程中的快照（独立事务立即提交，仅更新内容保留 draft 标记）。
+     */
+    private void updateAssistantDraft(Long messageId, String content) {
+        if (messageId == null) {
+            return;
+        }
+        try {
+            Message draft = new Message();
+            draft.setId(messageId);
+            draft.setContent(content);
+            transactionTemplate.executeWithoutResult(status -> messageMapper.updateById(draft));
+        } catch (Exception e) {
+            log.warn("助手消息草稿快照更新失败: messageId={}", messageId, e);
+        }
+    }
+
+    /**
+     * 草稿完成后写回完整内容（同一消息，清 draft 标记）；草稿不存在（创建失败）
+     * 时回退原完整插入路径。updateById 在主事务内，随事务提交对前端可见。
+     */
+    private Message completeAssistantMessage(Message draft, Long conversationId, SearchResult result) {
+        if (draft == null || draft.getId() == null) {
+            return persistAssistantMessage(conversationId, result);
+        }
+        try {
+            applyResultToMessage(draft, result);
+            draft.setCreatedAt(LocalDateTime.now());
+            messageMapper.updateById(draft);
+            return draft;
+        } catch (Exception e) {
+            log.error("助手消息草稿完善失败", e);
+            return null;
+        }
+    }
+
     private Message persistAssistantMessage(Long conversationId, SearchResult result) {
         try {
             Message assistantMsg = new Message();
             assistantMsg.setConversationId(conversationId);
             assistantMsg.setRole("assistant");
-            if (result.isRagHit()) {
-                assistantMsg.setContent(result.ragAnswer().answer());
-                assistantMsg.setMetadata("{\"type\":\"rag\"," +
-                        "\"sources\":" + toJsonArray(result.ragAnswer().sourceUrls()) + "}");
-            } else if (result.isFollowUpHit()) {
-                assistantMsg.setContent(result.followUpAnswer());
-                assistantMsg.setMetadata("{\"type\":\"followup\"}");
-            } else if (result.curatedReport() != null) {
-                assistantMsg.setContent(result.curatedReport().markdown());
-                assistantMsg.setMetadata("{\"type\":\"search\"," +
-                        "\"sources\":" + toJsonArray(result.curatedReport().sources()) +
-                        ",\"resultCount\":" + result.searchResults().size() + "}");
-            }
+            applyResultToMessage(assistantMsg, result);
             assistantMsg.setCreatedAt(LocalDateTime.now());
             messageMapper.insert(assistantMsg);
             return assistantMsg;
         } catch (Exception e) {
             log.error("保存助手消息失败", e);
             return null;
+        }
+    }
+
+    private void applyResultToMessage(Message msg, SearchResult result) {
+        if (result.isRagHit()) {
+            msg.setContent(result.ragAnswer().answer());
+            msg.setMetadata("{\"type\":\"rag\"," +
+                    "\"sources\":" + toJsonArray(result.ragAnswer().sourceUrls()) + "}");
+        } else if (result.isFollowUpHit()) {
+            msg.setContent(result.followUpAnswer());
+            msg.setMetadata("{\"type\":\"followup\"}");
+        } else if (result.curatedReport() != null) {
+            msg.setContent(result.curatedReport().markdown());
+            msg.setMetadata("{\"type\":\"search\"," +
+                    "\"sources\":" + toJsonArray(result.curatedReport().sources()) +
+                    ",\"resultCount\":" + result.searchResults().size() + "}");
         }
     }
 
