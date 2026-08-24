@@ -208,22 +208,164 @@ describe('useChatStore', () => {
             { id: 2, role: 'assistant', content: '完整报告', metadata: null, createdAt: now }
           ]
         })
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            { id: 2, role: 'assistant', content: '完整报告', metadata: null, createdAt: now }
+          ]
+        })
 
       const store = useChatStore()
       await store.selectConversation(1)
       expect(store.messages).toHaveLength(1)
 
-      // 3 秒后轮询拉取到完整报告 → 停止轮询
+      // 3 秒后轮询拉取到完整报告（内容变化）→ 继续；再 3 秒内容稳定 → 停止
       await vi.advanceTimersByTimeAsync(3000)
       expect(getMessages).toHaveBeenCalledTimes(2)
       expect(store.messages).toHaveLength(2)
       expect(store.messages[1].role).toBe('assistant')
       expect(store.messages[1].content).toBe('完整报告')
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getMessages).toHaveBeenCalledTimes(3)
 
       // 已停止：后续不再轮询
       vi.mocked(getMessages).mockClear()
       await vi.advanceTimersByTimeAsync(10_000)
       expect(getMessages).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('恢复会话最后一条是 draft 助手消息时轮询直到完整', async () => {
+    vi.useFakeTimers()
+    try {
+      const now = new Date().toISOString()
+      const draft = (content: string, meta: string | null) => ({
+        id: 2, role: 'assistant' as const, content, metadata: meta as any, createdAt: now
+      })
+      vi.mocked(getMessages)
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            draft('部分内容1', '{"draft":true}')
+          ]
+        })
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            draft('完整报告', null)
+          ]
+        })
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            draft('完整报告', null)
+          ]
+        })
+
+      const store = useChatStore()
+      await store.selectConversation(1)
+      // 草稿消息（生成中）→ 立即进入等待恢复状态并轮询
+      expect(store.waitingResume).toBe(true)
+      expect(store.messages[1].content).toBe('部分内容1')
+
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(store.messages[1].content).toBe('完整报告')
+      // 内容变化（草稿→完整）继续轮询；再 3 秒内容稳定 → 停止
+      expect(store.waitingResume).toBe(true)
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getMessages).toHaveBeenCalledTimes(3)
+      expect(store.waitingResume).toBe(false)
+
+      vi.mocked(getMessages).mockClear()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(getMessages).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('draft 消息轮询中内容增量更新显示', async () => {
+    vi.useFakeTimers()
+    try {
+      const now = new Date().toISOString()
+      const draft = (content: string) => ({
+        id: 2, role: 'assistant' as const, content, metadata: '{"draft":true}' as any, createdAt: now
+      })
+      vi.mocked(getMessages)
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            draft('## 第一节')
+          ]
+        })
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            draft('## 第一节\n\n## 第二节')
+          ]
+        })
+
+      const store = useChatStore()
+      await store.selectConversation(1)
+      expect(store.messages[1].content).toBe('## 第一节')
+
+      await vi.advanceTimersByTimeAsync(3000)
+      // 后端每 5s 写一次草稿快照，前端轮询增量更新显示
+      expect(store.messages[1].content).toBe('## 第一节\n\n## 第二节')
+      expect(store.waitingResume).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('轮询期间捕获追问增量后才停止', async () => {
+    vi.useFakeTimers()
+    try {
+      const now = new Date().toISOString()
+      const assistantMsg = (content: string) => ({
+        id: 2, role: 'assistant' as const, content, metadata: null, createdAt: now
+      })
+      vi.mocked(getMessages)
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            assistantMsg('完整报告')
+          ]
+        })
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            assistantMsg('完整报告\n\n## 进一步探索\n\n追问内容')
+          ]
+        })
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
+          data: [
+            { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+            assistantMsg('完整报告\n\n## 进一步探索\n\n追问内容')
+          ]
+        })
+
+      const store = useChatStore()
+      await store.selectConversation(1)
+      // 最后一条是 user 且近期 → 轮询（无草稿场景兜底）
+      await vi.advanceTimersByTimeAsync(3000)
+      // 完整报告出现但内容仍在变化（追问追加）→ 不停止
+      expect(store.messages[1].content).toContain('进一步探索')
+      expect(store.waitingResume).toBe(true)
+      // 内容稳定 → 停止
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(store.waitingResume).toBe(false)
     } finally {
       vi.useRealTimers()
     }

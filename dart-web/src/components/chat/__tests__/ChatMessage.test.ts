@@ -47,6 +47,35 @@ describe('ChatMessage.vue', () => {
     expect(wrapper.find('.message-role').text()).toBe('DART')
   })
 
+  it('draft 助手消息显示生成中标记', () => {
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: { id: 2, role: 'assistant', content: '## 部分内容', metadata: '{"draft":true}', createdAt: '' }
+      }
+    })
+    expect(wrapper.find('.generating-badge').exists()).toBe(true)
+    expect(wrapper.find('.generating-badge').text()).toContain('生成中')
+  })
+
+  it('draft 助手消息空内容时显示占位而非空气泡', () => {
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: { id: 2, role: 'assistant', content: '', metadata: '{"draft":true}', createdAt: '' }
+      }
+    })
+    expect(wrapper.find('.generating-badge').exists()).toBe(true)
+    expect(wrapper.text()).toContain('正在生成')
+  })
+
+  it('完整助手消息不显示生成中标记', () => {
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: { id: 2, role: 'assistant', content: '完整报告', metadata: null, createdAt: '' }
+      }
+    })
+    expect(wrapper.find('.generating-badge').exists()).toBe(false)
+  })
+
   it('助手消息渲染 Markdown', () => {
     const wrapper = mount(ChatMessage, {
       props: {
