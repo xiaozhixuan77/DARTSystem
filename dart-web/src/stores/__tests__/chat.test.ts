@@ -42,6 +42,11 @@ describe('useChatStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    // 默认 resume 不可用（立即触发 onError）→ 轮询兜底；resume 续流用例单独覆盖
+    vi.mocked(resumeMessage).mockImplementation(((_id: number, cb: any) => {
+      cb.onError?.(0, '连接中断')
+      return () => {}
+    }) as any)
   })
 
   it('初始状态下消息列表为空', () => {
@@ -421,7 +426,8 @@ describe('useChatStore', () => {
     expect(resumeMessage).toHaveBeenCalledWith(1, expect.any(Object))
     const cb = vi.mocked(resumeMessage).mock.calls[0][1] as any
 
-    // 实时增量逐 token 更新最后一条助手消息
+    // 后端先推 content 快照（已推送部分），随后实时增量逐 token 更新最后一条助手消息
+    cb.onContent('部分内容')
     cb.onContent('增量1')
     cb.onContent('增量2')
     expect(store.messages[1].content).toBe('部分内容增量1增量2')

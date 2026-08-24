@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { listConversations, createConversation, deleteConversation, getMessages } from '@/api/conversation'
-import { sendMessage } from '@/api/chat'
+import { resumeMessage, sendMessage } from '@/api/chat'
 import router from '@/router'
 import type { ConversationVO, MessageVO } from '@/types/chat'
 
@@ -24,6 +24,7 @@ export const useChatStore = defineStore('chat', () => {
   const error = ref<string | null>(null)
   const waitingResume = ref(false)
   let abortFn: (() => void) | null = null
+  let resumeAbort: (() => void) | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let pollTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -51,7 +52,62 @@ export const useChatStore = defineStore('chat', () => {
       const res = await getMessages(id)
       if (res.code === 200) messages.value = res.data
     } catch { /* ignore */ }
-    startPollingForResume()
+    startResumeFlow()
+  }
+
+  /**
+   * 恢复续流：生成中（最后一条是草稿助手消息或近期用户消息）时**先尝试 resume SSE**——
+   * 后端会话广播器从已生成位置继续逐 token 推送（真流式，无 5s 粒度）。
+   * resume 不可用（连接失败/已结束）时降级轮询兜底（草稿快照拉取）。
+   */
+  function startResumeFlow() {
+    stopPolling()
+    const last = messages.value[messages.value.length - 1]
+    if (!currentId.value || !last) return
+    if (last.role === 'assistant' && !isDraftMessage(last)) return
+    if (last.role === 'user') {
+      const createdAt = Date.parse(last.createdAt)
+      if (Number.isNaN(createdAt) || Date.now() - createdAt > RESUME_POLL_WINDOW_MS) return
+    }
+    const id = currentId.value
+    resumeAbort?.()
+    resumeAbort = null
+    waitingResume.value = true
+    // 锁定输入：resume 期间禁止并发发送（onContent 依赖"最后一条助手消息"更新）
+    isStreaming.value = true
+    streamingContent.value = ''
+    streamingStatus.value = ''
+    resumeAbort = resumeMessage(id, {
+      onStatus(status, msg) {
+        streamingStatus.value = status === 'rag_check' ? '正在检索知识库...'
+          : status === 'searching' ? '正在搜索...'
+          : status === 'curating' ? '正在整理结果...'
+          : msg
+      },
+      onContent(chunk) {
+        streamingContent.value += chunk
+        const lastMsg = messages.value[messages.value.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant') {
+          lastMsg.content = streamingContent.value
+        }
+      },
+      onDone() {
+        resumeAbort = null
+        isStreaming.value = false
+        streamingStatus.value = ''
+        waitingResume.value = false
+        // 完成后重载消息（快照/增量由 resume 推送，重载取最终完整内容）
+        selectConversation(id)
+        loadConversations()
+      },
+      onError() {
+        resumeAbort = null
+        isStreaming.value = false
+        streamingStatus.value = ''
+        // resume 不可用 → 降级轮询兜底（草稿每 5s 快照，前端 3s 拉取增量）
+        startPollingForResume()
+      }
+    })
   }
 
   /**
@@ -140,6 +196,8 @@ export const useChatStore = defineStore('chat', () => {
       if (currentId.value === id) {
         currentId.value = null
         messages.value = []
+        resumeAbort?.()
+        resumeAbort = null
         stopPolling()
       }
       return true
