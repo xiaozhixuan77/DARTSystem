@@ -10,7 +10,8 @@ vi.mock('@/api/conversation', () => ({
 }))
 
 vi.mock('@/api/chat', () => ({
-  sendMessage: vi.fn()
+  sendMessage: vi.fn(),
+  resumeMessage: vi.fn()
 }))
 
 vi.mock('@/router', () => ({
@@ -18,7 +19,7 @@ vi.mock('@/router', () => ({
 }))
 
 import { listConversations, createConversation, deleteConversation, getMessages } from '@/api/conversation'
-import { sendMessage } from '@/api/chat'
+import { resumeMessage, sendMessage } from '@/api/chat'
 import router from '@/router'
 
 type Callbacks = {
@@ -396,6 +397,68 @@ describe('useChatStore', () => {
       expect(store.error).toBeNull()
       await vi.advanceTimersByTimeAsync(300_000)
       expect(store.error).toContain('生成中')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // === 真续流（resume） ===
+
+  it('恢复会话时先尝试 resume 续流，增量更新消息直到完成', async () => {
+    const now = new Date().toISOString()
+    vi.mocked(getMessages).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: [
+        { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+        { id: 2, role: 'assistant', content: '部分内容', metadata: '{"draft":true}' as any, createdAt: now }
+      ]
+    })
+
+    const store = useChatStore()
+    await store.selectConversation(1)
+
+    // 生成中（draft）→ 优先尝试 resume 续流
+    expect(resumeMessage).toHaveBeenCalledWith(1, expect.any(Object))
+    const cb = vi.mocked(resumeMessage).mock.calls[0][1] as any
+
+    // 实时增量逐 token 更新最后一条助手消息
+    cb.onContent('增量1')
+    cb.onContent('增量2')
+    expect(store.messages[1].content).toBe('部分内容增量1增量2')
+    expect(store.waitingResume).toBe(true)
+
+    // 完成 → 重载消息定格
+    cb.onDone({ status: 'complete' })
+    await vi.waitFor(() => {
+      expect(getMessages).toHaveBeenCalledTimes(2)
+      expect(store.waitingResume).toBe(false)
+    })
+  })
+
+  it('resume 不可用时降级轮询兜底', async () => {
+    vi.useFakeTimers()
+    try {
+      const now = new Date().toISOString()
+      vi.mocked(getMessages).mockResolvedValue({
+        code: 200, message: 'ok', suggestion: null,
+        data: [
+          { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
+          { id: 2, role: 'assistant', content: '部分内容', metadata: '{"draft":true}' as any, createdAt: now }
+        ]
+      })
+
+      const store = useChatStore()
+      await store.selectConversation(1)
+      expect(resumeMessage).toHaveBeenCalledWith(1, expect.any(Object))
+
+      // resume 失败（连接中断）→ 降级轮询
+      const cb = vi.mocked(resumeMessage).mock.calls[0][1] as any
+      cb.onError(0, '连接中断')
+      expect(store.waitingResume).toBe(true)
+
+      // 轮询拉取消息（草稿兜底）
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getMessages).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }

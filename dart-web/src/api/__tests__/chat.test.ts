@@ -1,4 +1,4 @@
-import { sendMessage } from '@/api/chat'
+import { resumeMessage, sendMessage } from '@/api/chat'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
@@ -97,5 +97,73 @@ describe('sendMessage SSE 解析', () => {
     })
 
     expect(contents[0]).toBe('行一\n行二')
+  })
+})
+
+describe('resumeMessage 恢复续流解析', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    vi.stubGlobal('localStorage', { getItem: () => 'test-token' } as any)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('请求 /api/chat/resume 并携带会话 id', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      body: sseStream(['event:done\ndata:{"status":"completed"}\n\n'])
+    } as any)
+
+    await new Promise<void>((resolve) => {
+      resumeMessage(55, { onDone: () => resolve() })
+    })
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/chat/resume')
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ conversationId: 55 })
+    expect((init as RequestInit).headers).toHaveProperty('Authorization', 'Bearer test-token')
+  })
+
+  it('快照 + 实时增量 content 事件路由到 onContent', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      body: sseStream([
+        // 快照（已推送内容合并为一次 content）
+        'event:content\ndata:## 部分内容\n\n',
+        // 实时增量逐 token
+        'event:content\ndata:增量1\n\n',
+        'event:content\ndata:增量2\n\n',
+        'event:done\ndata:{"status":"complete"}\n\n'
+      ])
+    } as any)
+
+    const contents: string[] = []
+    await new Promise<void>((resolve) => {
+      resumeMessage(55, {
+        onContent: (chunk) => contents.push(chunk),
+        onDone: () => resolve()
+      })
+    })
+
+    expect(contents).toEqual(['## 部分内容', '增量1', '增量2'])
+  })
+
+  it('resume 失败（非 200）路由到 onError', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ message: '无权限' })
+    } as any)
+
+    const errors: Array<[number, string]> = []
+    await new Promise<void>((resolve) => {
+      resumeMessage(55, {
+        onError: (code, msg) => { errors.push([code, msg]); resolve() }
+      })
+    })
+
+    expect(errors).toEqual([[403, '无权限']])
   })
 })

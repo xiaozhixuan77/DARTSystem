@@ -1,5 +1,6 @@
 package com.dart.controller;
 
+import com.dart.broadcast.BroadcasterRegistry;
 import com.dart.broadcast.EmitterSink;
 import com.dart.dto.request.ChatRequest;
 import com.dart.dto.request.ConversationUpsertRequest;
@@ -25,6 +26,7 @@ public class ChatController {
 
     private final ChatService chatService;
     private final ConversationService conversationService;
+    private final BroadcasterRegistry broadcasterRegistry;
 
     @PostMapping(value = "/send", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter send(@Valid @RequestBody ChatRequest request) {

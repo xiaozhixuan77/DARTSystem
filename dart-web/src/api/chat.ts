@@ -18,7 +18,6 @@ export function sendMessage(
   callbacks: SSECallback
 ): () => void {
   const abortController = new AbortController()
-  let receivedDone = false
   const token = getAccessToken()
 
   fetch('/api/chat/send', {
@@ -36,66 +35,76 @@ export function sendMessage(
       callbacks.onError?.(response.status, errBody?.message || '请求失败')
       return
     }
-    const reader = response.body?.getReader()
-    if (!reader) return
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let currentEvent = ''
-    let dataBuffer = ''
-
-    function flushEvent() {
-      if (!dataBuffer) return
-      const event = currentEvent || 'message'
-      dispatch(event, dataBuffer)
-      currentEvent = ''
-      dataBuffer = ''
-    }
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (line.startsWith('event:')) {
-            flushEvent()
-            currentEvent = line.slice(6).trim()
-          } else if (line.startsWith('data:')) {
-            // Spring SseEmitter 输出 "data:" + 内容（无分隔空格），不能剥除前导空格，
-            // 否则流式推送的纯空格 delta（markdown 标题/列表的空格）会被吞掉。
-            // 空 data 行（"data:" 无内容）是内容换行的一部分：即使事件内只有空
-            // data 行（纯换行 delta），也必须还原为换行，否则前端缺换行
-            if (line === 'data:') {
-              dataBuffer += '\n'
-            } else {
-              dataBuffer += (dataBuffer ? '\n' : '') + line.slice(5)
-            }
-          } else if (line.trim() === '') {
-            // SSE spec: 空行表示事件结束
-            flushEvent()
-          }
-        }
-      }
-      flushEvent()
-      // 流正常结束但未收到 done → 连接被服务器提前关闭，报告可能已生成
-      if (!receivedDone) {
-        callbacks.onError?.(0, '连接中断')
-      }
-    } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
-        callbacks.onError?.(0, '连接中断')
-      }
-    }
+    await parseSSEStream(response, callbacks)
   }).catch((err) => {
     if ((err as Error).name !== 'AbortError') {
       callbacks.onError?.(0, '网络错误')
     }
   })
+
+  return () => abortController.abort()
+}
+
+/**
+ * 恢复续流：刷新后重新订阅正在生成的会话，从已生成位置继续接收 SSE 增量。
+ * 后端返回：快照重放 + 实时增量（生成中），或 done(completed)（已结束/无广播器）。
+ * 返回 abort 函数。
+ */
+export function resumeMessage(
+  conversationId: number,
+  callbacks: SSECallback
+): () => void {
+  const abortController = new AbortController()
+  const token = getAccessToken()
+
+  fetch('/api/chat/resume', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: token ? `Bearer ${token}` : ''
+    },
+    body: JSON.stringify({ conversationId }),
+    signal: abortController.signal
+  }).then(async (response) => {
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => null)
+      callbacks.onError?.(response.status, errBody?.message || '恢复连接失败')
+      return
+    }
+    await parseSSEStream(response, callbacks)
+  }).catch((err) => {
+    if ((err as Error).name !== 'AbortError') {
+      callbacks.onError?.(0, '网络错误')
+    }
+  })
+
+  return () => abortController.abort()
+}
+
+/**
+ * 解析 SSE 响应流（fetch + ReadableStream）：逐行拆分事件，路由到 callbacks。
+ * 流正常结束但未收到 done → 连接被服务器提前关闭（报告可能已生成）。
+ */
+async function parseSSEStream(
+  response: Response,
+  callbacks: SSECallback
+): Promise<void> {
+  let receivedDone = false
+  const reader = response.body?.getReader()
+  if (!reader) return
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let currentEvent = ''
+  let dataBuffer = ''
+
+  function flushEvent() {
+    if (!dataBuffer) return
+    const event = currentEvent || 'message'
+    dispatch(event, dataBuffer)
+    currentEvent = ''
+    dataBuffer = ''
+  }
 
   function dispatch(event: string, payload: string) {
     try {
@@ -131,5 +140,43 @@ export function sendMessage(
     }
   }
 
-  return () => abortController.abort()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          flushEvent()
+          currentEvent = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          // Spring SseEmitter 输出 "data:" + 内容（无分隔空格），不能剥除前导空格，
+          // 否则流式推送的纯空格 delta（markdown 标题/列表的空格）会被吞掉。
+          // 空 data 行（"data:" 无内容）是内容换行的一部分：即使事件内只有空
+          // data 行（纯换行 delta），也必须还原为换行，否则前端缺换行
+          if (line === 'data:') {
+            dataBuffer += '\n'
+          } else {
+            dataBuffer += (dataBuffer ? '\n' : '') + line.slice(5)
+          }
+        } else if (line.trim() === '') {
+          // SSE spec: 空行表示事件结束
+          flushEvent()
+        }
+      }
+    }
+    flushEvent()
+    // 流正常结束但未收到 done → 连接被服务器提前关闭，报告可能已生成
+    if (!receivedDone) {
+      callbacks.onError?.(0, '连接中断')
+    }
+  } catch (err) {
+    if ((err as Error).name !== 'AbortError') {
+      callbacks.onError?.(0, '连接中断')
+    }
+  }
 }
