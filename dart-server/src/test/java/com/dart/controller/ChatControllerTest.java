@@ -2,9 +2,10 @@ package com.dart.controller;
 
 import com.dart.broadcast.BroadcasterRegistry;
 import com.dart.broadcast.SessionBroadcaster;
+import com.dart.entity.User;
+import com.dart.security.UserPrincipal;
 import com.dart.service.ChatService;
 import com.dart.service.ConversationService;
-import com.dart.util.SecurityUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,9 +40,14 @@ class ChatControllerTest {
 
     @BeforeEach
     void setUp() {
+        User user = new User();
+        user.setId(1L);
+        user.setUsername("testuser");
+        user.setPasswordHash("hash");
+        user.setStatus(User.STATUS_ACTIVE);
+        UserPrincipal principal = new UserPrincipal(user);
         SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(
-                        new org.springframework.security.core.userdetails.User("u1", "p", java.util.List.of()), null));
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         mockMvc = MockMvcBuilders.standaloneSetup(
                 new ChatController(chatService, conversationService, broadcasterRegistry)).build();
     }
@@ -55,15 +62,12 @@ class ChatControllerTest {
         SessionBroadcaster broadcaster = new SessionBroadcaster(55L);
         lenient().when(broadcasterRegistry.get(55L)).thenReturn(broadcaster);
 
-        MockHttpServletResponse response = mockMvc.perform(post("/api/chat/resume")
+        // 生成中会话：SSE 异步流返回，广播器被订阅
+        mockMvc.perform(post("/api/chat/resume")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"conversationId\":55}"))
-                .andReturn().getResponse();
-
-        // 生成中会话：SSE 流返回（异步），广播器被订阅
-        assertThat(response.getStatus()).isEqualTo(200);
-        assertThat(response.getContentType()).contains("text/event-stream");
-        assertThat(response.isCommitted()).isFalse();
+                .andExpect(request().asyncStarted());
+        verify(broadcasterRegistry).get(55L);
     }
 
     @Test
