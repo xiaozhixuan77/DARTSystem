@@ -14,6 +14,17 @@ const RESUME_POLL_TIMEOUT_MS = 600_000
 // 仅"近期"用户消息触发轮询：历史会话最后一条 user 无后续是常态（极少），避免误轮询
 const RESUME_POLL_WINDOW_MS = 5 * 60 * 1000
 
+// SSE 阶段 → 展示文案（send 与 resume 续流共用同一映射）
+const PHASE_TEXT: Record<string, string> = {
+  rag_check: '正在检索知识库...',
+  searching: '正在搜索...',
+  curating: '正在整理结果...'
+}
+
+function mapStatusText(status: string, msg: string): string {
+  return PHASE_TEXT[status] ?? msg
+}
+
 export const useChatStore = defineStore('chat', () => {
   const conversations = ref<ConversationVO[]>([])
   const currentId = ref<number | null>(null)
@@ -63,12 +74,7 @@ export const useChatStore = defineStore('chat', () => {
   function startResumeFlow() {
     stopPolling()
     const last = messages.value[messages.value.length - 1]
-    if (!currentId.value || !last) return
-    if (last.role === 'assistant' && !isDraftMessage(last)) return
-    if (last.role === 'user') {
-      const createdAt = Date.parse(last.createdAt)
-      if (Number.isNaN(createdAt) || Date.now() - createdAt > RESUME_POLL_WINDOW_MS) return
-    }
+    if (!currentId.value || !isResumeCandidate(last)) return
     const id = currentId.value
     resumeAbort?.()
     resumeAbort = null
@@ -79,17 +85,10 @@ export const useChatStore = defineStore('chat', () => {
     streamingStatus.value = ''
     resumeAbort = resumeMessage(id, {
       onStatus(status, msg) {
-        streamingStatus.value = status === 'rag_check' ? '正在检索知识库...'
-          : status === 'searching' ? '正在搜索...'
-          : status === 'curating' ? '正在整理结果...'
-          : msg
+        streamingStatus.value = mapStatusText(status, msg)
       },
       onContent(chunk) {
-        streamingContent.value += chunk
-        const lastMsg = messages.value[messages.value.length - 1]
-        if (lastMsg && lastMsg.role === 'assistant') {
-          lastMsg.content = streamingContent.value
-        }
+        appendStreamingContent(chunk)
       },
       onDone() {
         resumeAbort = null
@@ -118,12 +117,7 @@ export const useChatStore = defineStore('chat', () => {
   function startPollingForResume() {
     stopPolling()
     const last = messages.value[messages.value.length - 1]
-    if (!currentId.value || !last) return
-    if (last.role === 'assistant' && !isDraftMessage(last)) return
-    if (last.role === 'user') {
-      const createdAt = Date.parse(last.createdAt)
-      if (Number.isNaN(createdAt) || Date.now() - createdAt > RESUME_POLL_WINDOW_MS) return
-    }
+    if (!currentId.value || !isResumeCandidate(last)) return
     waitingResume.value = true
     let lastStableContent = ''
     pollTimer = setInterval(async () => {
@@ -155,8 +149,32 @@ export const useChatStore = defineStore('chat', () => {
   function isDraftMessage(msg: MessageVO): boolean {
     const m = msg.metadata
     if (!m) return false
-    const raw = typeof m === 'string' ? m : JSON.stringify(m)
-    return raw.includes('draft')
+    try {
+      const parsed = typeof m === 'string' ? JSON.parse(m) : m
+      return parsed?.draft === true
+    } catch {
+      return false
+    }
+  }
+
+  /** 恢复/轮询前置守卫：最后一条是草稿助手消息或近期用户消息（回答生成中） */
+  function isResumeCandidate(last: MessageVO | undefined): boolean {
+    if (!last) return false
+    if (last.role === 'assistant' && !isDraftMessage(last)) return false
+    if (last.role === 'user') {
+      const createdAt = Date.parse(last.createdAt)
+      if (Number.isNaN(createdAt) || Date.now() - createdAt > RESUME_POLL_WINDOW_MS) return false
+    }
+    return true
+  }
+
+  /** 流式增量累积：更新 streamingContent 与最后一条助手消息（send 与 resume 共用） */
+  function appendStreamingContent(chunk: string) {
+    streamingContent.value += chunk
+    const lastMsg = messages.value[messages.value.length - 1]
+    if (lastMsg && lastMsg.role === 'assistant') {
+      lastMsg.content = streamingContent.value
+    }
   }
 
   function stopPolling() {
@@ -168,12 +186,22 @@ export const useChatStore = defineStore('chat', () => {
   /**
    * 不清空现有消息，直接覆盖为服务端最新消息。
    * SSE 中断兜底用：报告可能已生成入库，重新拉取即可显示。
+   * 返回是否变化——轮询中生成停滞（内容未变）时不整体替换数组，避免无效重渲染。
    */
-  async function reloadMessages(id: number) {
+  async function reloadMessages(id: number): Promise<boolean> {
     try {
       const res = await getMessages(id)
-      if (res.code === 200) messages.value = res.data
+      if (res.code === 200) {
+        const oldTail = messages.value[messages.value.length - 1]
+        const newTail = res.data[res.data.length - 1]
+        if (oldTail && newTail && oldTail.content === newTail.content && oldTail.role === newTail.role) {
+          return false
+        }
+        messages.value = res.data
+        return true
+      }
     } catch { /* 保留现有消息 */ }
+    return false
   }
 
   async function newConversation(): Promise<number> {
@@ -238,18 +266,10 @@ export const useChatStore = defineStore('chat', () => {
           currentId.value = Number(msg)
           return
         }
-        streamingStatus.value = status === 'rag_check' ? '正在检索知识库...'
-          : status === 'searching' ? '正在搜索...'
-          : status === 'curating' ? '正在整理结果...'
-          : msg
+        streamingStatus.value = mapStatusText(status, msg)
       },
       onContent(chunk) {
-        streamingContent.value += chunk
-        // 实时更新最后一条助手消息
-        const last = messages.value[messages.value.length - 1]
-        if (last && last.role === 'assistant') {
-          last.content = streamingContent.value
-        }
+        appendStreamingContent(chunk)
       },
       onDone(data) {
         isStreaming.value = false

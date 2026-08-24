@@ -17,32 +17,7 @@ export function sendMessage(
   conversationId: number | null,
   callbacks: SSECallback
 ): () => void {
-  const abortController = new AbortController()
-  const token = getAccessToken()
-
-  fetch('/api/chat/send', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: token ? `Bearer ${token}` : ''
-    },
-    body: JSON.stringify({ message, conversationId }),
-    signal: abortController.signal
-  }).then(async (response) => {
-    if (!response.ok) {
-      // 非 200 响应是 JSON 错误
-      const errBody = await response.json().catch(() => null)
-      callbacks.onError?.(response.status, errBody?.message || '请求失败')
-      return
-    }
-    await parseSSEStream(response, callbacks)
-  }).catch((err) => {
-    if ((err as Error).name !== 'AbortError') {
-      callbacks.onError?.(0, '网络错误')
-    }
-  })
-
-  return () => abortController.abort()
+  return sseRequest('/api/chat/send', { message, conversationId }, callbacks, '请求失败')
 }
 
 /**
@@ -54,21 +29,35 @@ export function resumeMessage(
   conversationId: number,
   callbacks: SSECallback
 ): () => void {
+  return sseRequest('/api/chat/resume', { conversationId }, callbacks, '恢复连接失败')
+}
+
+/**
+ * 公共 SSE 请求：fetch POST + ReadableStream 解析，返回 abort 函数。
+ * sendMessage 与 resumeMessage 共用（URL/body/错误文案不同）。
+ */
+function sseRequest(
+  path: string,
+  body: Record<string, unknown>,
+  callbacks: SSECallback,
+  errorFallback: string
+): () => void {
   const abortController = new AbortController()
   const token = getAccessToken()
 
-  fetch('/api/chat/resume', {
+  fetch(path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: token ? `Bearer ${token}` : ''
     },
-    body: JSON.stringify({ conversationId }),
+    body: JSON.stringify(body),
     signal: abortController.signal
   }).then(async (response) => {
     if (!response.ok) {
+      // 非 200 响应是 JSON 错误
       const errBody = await response.json().catch(() => null)
-      callbacks.onError?.(response.status, errBody?.message || '恢复连接失败')
+      callbacks.onError?.(response.status, errBody?.message || errorFallback)
       return
     }
     await parseSSEStream(response, callbacks)
