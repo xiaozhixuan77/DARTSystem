@@ -36,6 +36,44 @@ public class CuratorTools {
     /** 占位节标记（沉淀检查/降级判定引用同一标记，防文案改动静默失效） */
     public static final String SECTION_FAILED_MARKER = "本节内容生成失败";
 
+    /** 草稿快照节流间隔：流式中断后前端拉取草稿的更新粒度（5s 一次写库） */
+    private static final long DRAFT_SNAPSHOT_INTERVAL_MS = 5_000L;
+
+    /**
+     * 草稿上下文：累积已生成内容（与前端流式推送顺序/内容一致），
+     * 每 intervalMs 节流触发一次快照回调；null 时全部跳过（无草稿场景零开销）。
+     */
+    private static final class DraftContext {
+        final StringBuilder content = new StringBuilder();
+        final Consumer<String> consumer;
+        final long intervalMs;
+        long lastNotifyAt;
+
+        DraftContext(Consumer<String> consumer, long intervalMs) {
+            this.consumer = consumer;
+            this.intervalMs = intervalMs;
+        }
+
+        void appendAndMaybeNotify(String s) {
+            content.append(s);
+            long now = System.currentTimeMillis();
+            if (now - lastNotifyAt >= intervalMs) {
+                lastNotifyAt = now;
+                consumer.accept(content.toString());
+            }
+        }
+
+        void appendAndNotify(String s) {
+            content.append(s);
+            notifyNow();
+        }
+
+        void notifyNow() {
+            lastNotifyAt = System.currentTimeMillis();
+            consumer.accept(content.toString());
+        }
+    }
+
 
     private static final String SECTION_FAILED =
             "> ⚠️ " + SECTION_FAILED_MARKER + "，请稍后重试或访问参考文献了解详情。";
@@ -154,6 +192,9 @@ public class CuratorTools {
 
         String resourcesText = buildResourcesText(resources);
         List<String> sections = new ArrayList<>();
+        // 草稿 = 前端流式已推送内容的忠实快照（节 1 token 直推 + 节 2 回放 + 节 3 直推，无分隔符）
+        DraftContext draft = draftConsumer == null ? null
+                : new DraftContext(draftConsumer, DRAFT_SNAPSHOT_INTERVAL_MS);
 
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
             // 阶段 A：节 1（token 流式直推）+ 节 2 并行流式生成进队列（峰值 2 并发——
@@ -167,22 +208,32 @@ public class CuratorTools {
             });
 
             String section1 = streamSection(query, resourcesText,
-                    buildConceptPrompt(query), "concepts", emitter, styleHint, sessionSummary, degraded);
+                    buildConceptPrompt(query), "concepts", emitter, styleHint, sessionSummary, degraded, draft);
             sections.add(section1);
+            if (draft != null) {
+                draft.notifyNow();
+            }
 
             // 节 1 完成后等节 2 生产端完整结束（含截断/空白重试，无竞态可安全重试），
             // 成功后分片回放模拟打字机（~30 字符/片，30ms 间隔）
             String section2 = section2Future.get();
             if (!section2.equals(SECTION_FAILED)) {
                 pushInChunks(section2, emitter);
+                // 节 2 在回放期间预生成不推送，草稿于回放完成后同步（与前端看到内容一致）
+                if (draft != null) {
+                    draft.appendAndNotify(section2);
+                }
             }
             sections.add(section2);
 
             // 阶段 B：节 3 流式直推（与节 2 串行，保持 2 并发峰值）
             SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
             String section3 = streamSection(query, resourcesText,
-                    buildFaqAdvancePrompt(query), "faq_advance", emitter, styleHint, sessionSummary, degraded);
+                    buildFaqAdvancePrompt(query), "faq_advance", emitter, styleHint, sessionSummary, degraded, draft);
             sections.add(section3);
+            if (draft != null) {
+                draft.notifyNow();
+            }
         } catch (Exception e) {
             log.warn("并行分节生成异常，追加占位节", e);
             while (sections.size() < 3) {
@@ -195,6 +246,9 @@ public class CuratorTools {
             log.warn("所有报告节生成失败，降级使用 fallbackReport");
             CuratedReport fallback = fallbackReport(query, resources);
             SseUtils.sendEvent(emitter, SseEvents.CONTENT, fallback.markdown());
+            if (draft != null) {
+                draft.appendAndNotify(fallback.markdown());
+            }
             return fallback;
         }
 
@@ -205,6 +259,9 @@ public class CuratorTools {
                 String digest = buildFallbackSection(query, resources, fallbackTitles[i]);
                 sections.set(i, digest);
                 SseUtils.sendEvent(emitter, SseEvents.CONTENT, digest);
+                if (draft != null) {
+                    draft.appendAndNotify(digest);
+                }
             }
         }
 
@@ -281,7 +338,7 @@ public class CuratorTools {
      */
     private String streamSection(String query, String resourcesText, String sectionPrompt,
                                  String sectionName, SseEmitter emitter, String styleHint,
-                                 String sessionSummary, boolean degraded) {
+                                 String sessionSummary, boolean degraded, DraftContext draft) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
         String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt,
                 styleHint, sessionSummary, degraded);
@@ -301,6 +358,9 @@ public class CuratorTools {
                             // 否则前端累积内容缺空格/换行，markdown 格式（"### 1."、列表换行）被破坏
                             sb.append(delta);
                             SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
+                            if (draft != null) {
+                                draft.appendAndMaybeNotify(delta);
+                            }
                         })
                         .blockLast();
                 if (isTruncated(finishReason.get())) {
