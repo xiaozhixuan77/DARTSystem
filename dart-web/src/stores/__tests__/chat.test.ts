@@ -336,6 +336,10 @@ describe('useChatStore', () => {
       vi.mocked(getMessages)
         .mockResolvedValueOnce({
           code: 200, message: 'ok', suggestion: null,
+          data: [{ id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now }]
+        })
+        .mockResolvedValueOnce({
+          code: 200, message: 'ok', suggestion: null,
           data: [
             { id: 1, role: 'user', content: 'hi', metadata: null, createdAt: now },
             assistantMsg('完整报告')
@@ -361,6 +365,10 @@ describe('useChatStore', () => {
       // 最后一条是 user 且近期 → 轮询（无草稿场景兜底）
       await vi.advanceTimersByTimeAsync(3000)
       // 完整报告出现但内容仍在变化（追问追加）→ 不停止
+      expect(store.messages[1].content).toBe('完整报告')
+      expect(store.waitingResume).toBe(true)
+      // 追问追加 → 内容再变化 → 仍不停止
+      await vi.advanceTimersByTimeAsync(3000)
       expect(store.messages[1].content).toContain('进一步探索')
       expect(store.waitingResume).toBe(true)
       // 内容稳定 → 停止

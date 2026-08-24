@@ -55,22 +55,37 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * 恢复会话后检测"回答仍在后台生成"：最后一条是近期用户消息且无助手回复时，
-   * 每 3s 轮询拉取消息，直到助手消息出现（后端断连后仍会生成完并落库）。
+   * 恢复会话后检测"回答仍在后台生成"：最后一条是草稿助手消息（后端草稿增量持久化）
+   * 或近期用户消息（无草稿场景兜底）时，每 3s 轮询拉取消息——草稿内容增量增长显示，
+   * 直到完整报告出现且内容连续两次稳定（覆盖追问追加），近似流式无感续流。
    */
   function startPollingForResume() {
     stopPolling()
     const last = messages.value[messages.value.length - 1]
-    if (!currentId.value || !last || last.role !== 'user') return
-    const createdAt = Date.parse(last.createdAt)
-    if (Number.isNaN(createdAt) || Date.now() - createdAt > RESUME_POLL_WINDOW_MS) return
+    if (!currentId.value || !last) return
+    if (last.role === 'assistant' && !isDraftMessage(last)) return
+    if (last.role === 'user') {
+      const createdAt = Date.parse(last.createdAt)
+      if (Number.isNaN(createdAt) || Date.now() - createdAt > RESUME_POLL_WINDOW_MS) return
+    }
     waitingResume.value = true
+    let lastStableContent = ''
     pollTimer = setInterval(async () => {
       const id = currentId.value
       if (id == null) { stopPolling(); return }
       await reloadMessages(id)
       const tail = messages.value[messages.value.length - 1]
-      if (tail && tail.role === 'assistant') stopPolling()
+      if (tail && tail.role === 'assistant' && !isDraftMessage(tail)) {
+        // 完整报告出现；追问在 afterCommit 后 updateById 追加（SSE 已断收不到），
+        // 内容连续两次相同才停止，可捕获追问增量
+        if (tail.content === lastStableContent) {
+          stopPolling()
+        } else {
+          lastStableContent = tail.content
+        }
+      } else {
+        lastStableContent = ''
+      }
     }, RESUME_POLL_INTERVAL_MS)
     pollTimeout = setTimeout(() => {
       if (waitingResume.value) {
@@ -78,6 +93,14 @@ export const useChatStore = defineStore('chat', () => {
         error.value = '上次回答仍在生成中，请稍后刷新查看'
       }
     }, RESUME_POLL_TIMEOUT_MS)
+  }
+
+  /** 草稿消息判定：后端 metadata 为 JSON 字符串（{"draft":true}），完整消息无 draft 标记 */
+  function isDraftMessage(msg: MessageVO): boolean {
+    const m = msg.metadata
+    if (!m) return false
+    const raw = typeof m === 'string' ? m : JSON.stringify(m)
+    return raw.includes('draft')
   }
 
   function stopPolling() {

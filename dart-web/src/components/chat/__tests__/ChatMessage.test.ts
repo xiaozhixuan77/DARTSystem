@@ -50,7 +50,7 @@ describe('ChatMessage.vue', () => {
   it('draft 助手消息显示生成中标记', () => {
     const wrapper = mount(ChatMessage, {
       props: {
-        message: { id: 2, role: 'assistant', content: '## 部分内容', metadata: '{"draft":true}', createdAt: '' }
+        message: { id: 2, role: 'assistant', content: '## 部分内容', metadata: '{"draft":true}' as any, createdAt: '' }
       }
     })
     expect(wrapper.find('.generating-badge').exists()).toBe(true)
@@ -60,7 +60,7 @@ describe('ChatMessage.vue', () => {
   it('draft 助手消息空内容时显示占位而非空气泡', () => {
     const wrapper = mount(ChatMessage, {
       props: {
-        message: { id: 2, role: 'assistant', content: '', metadata: '{"draft":true}', createdAt: '' }
+        message: { id: 2, role: 'assistant', content: '', metadata: '{"draft":true}' as any, createdAt: '' }
       }
     })
     expect(wrapper.find('.generating-badge').exists()).toBe(true)

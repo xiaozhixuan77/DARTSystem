@@ -10,6 +10,12 @@ const { render, renderMermaidDiagrams } = useMarkdown()
 
 const contentRef = ref<HTMLElement | null>(null)
 const isUser = computed(() => props.message.role === 'user')
+const isDraft = computed(() => {
+  const m = props.message.metadata
+  if (!m) return false
+  const raw = typeof m === 'string' ? m : JSON.stringify(m)
+  return raw.includes('draft')
+})
 const renderedContent = computed(() => {
   if (isUser.value) return props.message.content
   return render(props.message.content)
@@ -36,11 +42,18 @@ watch(() => chatStore.isStreaming, async (now, prev) => {
 <template>
   <div class="message-row" :class="{ user: isUser }">
     <div class="message-bubble" :class="{ user: isUser }">
-      <div class="message-role">{{ isUser ? '你' : 'DART' }}</div>
+      <div class="message-role">
+        {{ isUser ? '你' : 'DART' }}
+        <span v-if="isDraft" class="generating-badge">生成中…</span>
+      </div>
       <div
         v-if="isUser"
         class="message-content"
       >{{ message.content }}</div>
+      <div
+        v-else-if="isDraft && !message.content"
+        class="message-content placeholder"
+      >正在生成…</div>
       <div
         v-else
         ref="contentRef"
@@ -73,8 +86,20 @@ watch(() => chatStore.isStreaming, async (now, prev) => {
   font-size: 12px; font-weight: 600; color: $color-muted;
   margin-bottom: 6px;
 }
+.generating-badge {
+  margin-left: 8px;
+  font-size: 11px; font-weight: 400;
+  color: $color-muted;
+  border: 1px solid $color-border;
+  border-radius: $radius;
+  padding: 0 6px;
+}
 // markdown 元素样式（标题/列表/代码块/表格等）统一由全局 styles/markdown.scss 管理
 .message-content {
   font-size: 15px; line-height: 1.8;
+  &.placeholder {
+    color: $color-muted;
+    font-style: italic;
+  }
 }
 </style>
