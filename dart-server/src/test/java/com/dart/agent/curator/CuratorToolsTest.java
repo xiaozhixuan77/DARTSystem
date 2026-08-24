@@ -16,7 +16,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import com.dart.broadcast.SseSink;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -166,7 +167,7 @@ class CuratorToolsTest {
         stubThreeSections();
         List<String> snapshots = new ArrayList<>();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L),
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class),
                 null, null, false, snapshots::add);
 
         // 草稿快照内容递增（后一次包含前一次，草稿 = 已生成部分）
@@ -185,7 +186,7 @@ class CuratorToolsTest {
         stubThreeSections();
 
         CuratedReport report = curatorTools.generateReport("Java", fourResources(),
-                new SseEmitter(0L), null, null, false, null);
+                mock(SseSink.class), null, null, false, null);
 
         assertThat(report.markdown()).contains("核心概念").contains("关键原理").contains("常见误区");
     }
@@ -194,7 +195,7 @@ class CuratorToolsTest {
     void generateReport_normalFlow_returnsJoinedReport() {
         stubThreeSections();
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
         assertThat(report).isNotNull();
         assertThat(report.markdown()).contains("Java");
         assertThat(report.markdown()).contains("📖");
@@ -205,7 +206,7 @@ class CuratorToolsTest {
     void generateReport_withStyleHint_appendsStyleRequirementToSectionPrompt() {
         stubThreeSections();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L), "deep_dive");
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class), "deep_dive");
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -219,7 +220,7 @@ class CuratorToolsTest {
     void generateReport_degraded_injectsConciseConstraintToPrompt() {
         stubThreeSections();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L), "deep_dive", null, true);
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class), "deep_dive", null, true);
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -233,7 +234,7 @@ class CuratorToolsTest {
     void generateReport_withoutStyleHint_noStyleRequirementInPrompt() {
         stubThreeSections();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -246,7 +247,7 @@ class CuratorToolsTest {
     void generateReport_streamsAllThreeSections() {
         stubThreeSections();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
         verify(chatModel, times(3)).stream(any(Prompt.class));
         verify(chatModel, never()).call(any(Prompt.class));
     }
@@ -255,7 +256,7 @@ class CuratorToolsTest {
     void generateReport_sectionsInOrder() {
         stubThreeSections();
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
         String md = report.markdown();
         int idxConcept = md.indexOf("📖");
         int idxPrinciple = md.indexOf("🔬");
@@ -274,7 +275,7 @@ class CuratorToolsTest {
     void generateReport_includesAllSixModules() {
         stubThreeSections();
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
         assertThat(report.markdown()).contains("📖");
         assertThat(report.markdown()).contains("🔬");
         assertThat(report.markdown()).contains("💻");
@@ -287,7 +288,7 @@ class CuratorToolsTest {
     void generateReport_includesReferencesSection() {
         stubThreeSections();
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
         assertThat(report.markdown()).contains("参考文献");
         assertThat(report.markdown()).contains("https://docs.oracle.com");
     }
@@ -296,15 +297,14 @@ class CuratorToolsTest {
     void generateReport_streamsEachSectionViaSse() {
         stubThreeSections();
 
-        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
-            curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        SseSink sink = mock(SseSink.class);
+        curatorTools.generateReport("Java", fourResources(), sink);
 
-            // 节 1/3 整节流式各 1 次 + 节 2 分片回放（SECTION_PRINCIPLE_CODE ~500 字符 / 30 = 多片）
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("📖")), times(1));
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("🔬")), atLeast(1));
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("⚠️")), times(1));
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), atLeast(5));
-        }
+        // 节 1/3 整节流式各 1 次 + 节 2 分片回放（SECTION_PRINCIPLE_CODE ~500 字符 / 30 = 多片）
+        verify(sink, times(1)).sendEvent(eq(SseEvents.CONTENT), contains("📖"));
+        verify(sink, atLeast(1)).sendEvent(eq(SseEvents.CONTENT), contains("🔬"));
+        verify(sink, times(1)).sendEvent(eq(SseEvents.CONTENT), contains("⚠️"));
+        verify(sink, atLeast(5)).sendEvent(eq(SseEvents.CONTENT), anyString());
     }
 
     @Test
@@ -313,14 +313,13 @@ class CuratorToolsTest {
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "content ".repeat(200), 4.5);
         ScoredResource r2 = makeResource("https://medium.com", "Medium Guide", "content ".repeat(200), 4.0);
 
-        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
-            CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2), new SseEmitter(0L));
+        SseSink sink = mock(SseSink.class);
+        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2), sink);
 
-            assertThat(report.markdown()).contains("搜索结果");
-            // 3 节全失败：不推占位/摘要（避免与 fallback 重复），仅推送 fallback 一次
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), anyString()), times(1));
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("AI 报告生成暂时不可用")), times(1));
-        }
+        assertThat(report.markdown()).contains("搜索结果");
+        // 3 节全失败：不推占位/摘要（避免与 fallback 重复），仅推送 fallback 一次
+        verify(sink, times(1)).sendEvent(eq(SseEvents.CONTENT), anyString());
+        verify(sink, times(1)).sendEvent(eq(SseEvents.CONTENT), contains("AI 报告生成暂时不可用"));
     }
 
     @Test
@@ -339,13 +338,12 @@ class CuratorToolsTest {
                 new ChatResponse(List.of(new Generation(new AssistantMessage("📖 ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("核心概念"))))));
 
-        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
-            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        SseSink sink = mock(SseSink.class);
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), sink);
 
-            // 空白 delta 进入拼接：标题带空格（非法 "###1." 不再出现）
-            assertThat(report.markdown()).contains("## 📖 核心概念");
-            assertThat(report.markdown()).doesNotContain("###1.");
-        }
+        // 空白 delta 进入拼接：标题带空格（非法 "###1." 不再出现）
+        assertThat(report.markdown()).contains("## 📖 核心概念");
+        assertThat(report.markdown()).doesNotContain("###1.");
     }
 
     @Test
@@ -366,23 +364,21 @@ class CuratorToolsTest {
                 new ChatResponse(List.of(new Generation(new AssistantMessage("- ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("**定义**"))))));
 
-        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
-            curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        SseSink sink = mock(SseSink.class);
+        curatorTools.generateReport("Java", fourResources(), sink);
 
-            ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contentCaptor.capture()),
-                    times(14)); // 节 1 流式 5 个 delta + 节 2 分片回放 ~8 片 + 节 3 流式 1 次
-            // 空白 delta（"\n"、" "）也在推送列表中
+        ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sink, times(14)).sendEvent(eq(SseEvents.CONTENT), contentCaptor.capture()); // 节 1 流式 5 个 delta + 节 2 分片回放 ~8 片 + 节 3 流式 1 次
+// 空白 delta（"\n"、" "）也在推送列表中
             assertThat(contentCaptor.getAllValues())
                     .contains("### ", "1. ", "概念名\n", "- ", "**定义**");
-        }
     }
 
     @Test
     void generateReport_setsMaxTokensPerSection() {
         stubThreeSections();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -396,7 +392,7 @@ class CuratorToolsTest {
     void generateReport_promptsRequestBoundedSectionLength() {
         stubThreeSections();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -421,18 +417,17 @@ class CuratorToolsTest {
                 new ChatResponse(List.of(new Generation(new AssistantMessage("## ")))),
                 new ChatResponse(List.of(new Generation(new AssistantMessage("📖 核心"))))));
 
-        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
-            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        SseSink sink = mock(SseSink.class);
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), sink);
 
-            // 节 1 逐 token 推送
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), eq("## ")), times(1));
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), eq("📖 核心")), times(1));
-            // 节 2/3 整块推送
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("🔬")), times(1));
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("⚠️")), times(1));
-            // 拼接报告包含流式节内容
-            assertThat(report.markdown()).contains("## 📖 核心");
-        }
+        // 节 1 逐 token 推送
+        verify(sink, times(1)).sendEvent(eq(SseEvents.CONTENT), eq("## "));
+        verify(sink, times(1)).sendEvent(eq(SseEvents.CONTENT), eq("📖 核心"));
+        // 节 2/3 整块推送
+        verify(sink, times(1)).sendEvent(eq(SseEvents.CONTENT), contains("🔬"));
+        verify(sink, times(1)).sendEvent(eq(SseEvents.CONTENT), contains("⚠️"));
+        // 拼接报告包含流式节内容
+        assertThat(report.markdown()).contains("## 📖 核心");
     }
 
     @Test
@@ -447,7 +442,7 @@ class CuratorToolsTest {
                 makeResource("https://e.com", "Resource E", "content e ".repeat(200), 3.6),
                 makeResource("https://f.com", "Resource F", "content f ".repeat(200), 3.2));
 
-        curatorTools.generateReport("Java", resources, new SseEmitter(0L));
+        curatorTools.generateReport("Java", resources, mock(SseSink.class));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -468,7 +463,7 @@ class CuratorToolsTest {
         // 4 个以内全部精读
         stubThreeSections();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -542,7 +537,7 @@ class CuratorToolsTest {
         String longContent = "ABCDEFGHIJ".repeat(200); // 2000 chars, > 1500
         ScoredResource r1 = makeResource("https://a.com", "Title A", longContent, 4.5);
         ScoredResource r2 = makeResource("https://b.com", "Title B", "short content ".repeat(20), 4.0);
-        curatorTools.generateReport("test query", List.of(r1, r2), new SseEmitter(0L));
+        curatorTools.generateReport("test query", List.of(r1, r2), mock(SseSink.class));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -579,7 +574,7 @@ class CuratorToolsTest {
             return Flux.empty();
         });
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         // 重试后三节齐全，无占位
         assertThat(report.markdown()).contains("📖");
@@ -605,7 +600,7 @@ class CuratorToolsTest {
                 .thenReturn(Flux.just(
                         new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         // 空白节不产生空节；重试后仍失败 → 用资源摘要节兜底（含资源标题）
         assertThat(report.markdown()).doesNotContain("本节内容生成失败");
@@ -627,18 +622,17 @@ class CuratorToolsTest {
         when(chatModel.stream(org.mockito.ArgumentMatchers.<Prompt>argThat(p -> p.getInstructions().getFirst().getText().contains("核心概念"))))
                 .thenReturn(Flux.empty());
 
-        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
-            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        SseSink sink = mock(SseSink.class);
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), sink);
 
-            // 报告不缺节：节 1 位置是资源摘要（含来源 URL 与摘要）
-            assertThat(report.markdown()).contains("Resource A");
-            assertThat(report.markdown()).contains("https://a.com");
-            assertThat(report.markdown()).contains("🔬");
-            assertThat(report.markdown()).contains("📚");
-            assertThat(report.markdown()).doesNotContain("本节内容生成失败");
-            // 摘要节被推送（不推占位）
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contains("Resource A")), atLeast(1));
-        }
+        // 报告不缺节：节 1 位置是资源摘要（含来源 URL 与摘要）
+        assertThat(report.markdown()).contains("Resource A");
+        assertThat(report.markdown()).contains("https://a.com");
+        assertThat(report.markdown()).contains("🔬");
+        assertThat(report.markdown()).contains("📚");
+        assertThat(report.markdown()).doesNotContain("本节内容生成失败");
+        // 摘要节被推送（不推占位）
+        verify(sink, atLeast(1)).sendEvent(eq(SseEvents.CONTENT), contains("Resource A"));
     }
 
     @Test
@@ -656,7 +650,7 @@ class CuratorToolsTest {
                 .thenReturn(Flux.just(
                         new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
         assertThat(report.markdown()).contains("📖");
         assertThat(report.markdown()).contains("Resource A");
         assertThat(report.markdown()).contains("📚");
@@ -670,7 +664,7 @@ class CuratorToolsTest {
         when(chatModel.stream(any(Prompt.class))).thenThrow(new RuntimeException("timeout"));
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "content ".repeat(200), 4.5);
         ScoredResource r2 = makeResource("https://medium.com", "Medium Guide", "content ".repeat(200), 4.0);
-        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1, r2), mock(SseSink.class));
         assertThat(report.markdown()).contains("Spring Boot");
         assertThat(report.sources()).isNotEmpty();
         assertThat(report.markdown()).contains("搜索结果");
@@ -678,7 +672,7 @@ class CuratorToolsTest {
 
     @Test
     void generateReport_emptyInput_returnsEmptyReport() {
-        CuratedReport report = curatorTools.generateReport("query", List.of(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("query", List.of(), mock(SseSink.class));
         assertThat(report.title()).isEqualTo("query");
         assertThat(report.markdown()).contains("未找到相关内容");
     }
@@ -686,7 +680,7 @@ class CuratorToolsTest {
     @Test
     void generateReport_singleResource_skipsLLM() {
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "Spring content ".repeat(100), 4.5);
-        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1), mock(SseSink.class));
         assertThat(report.markdown()).contains("Spring Boot");
         assertThat(report.markdown()).contains("Spring Official");
         verify(chatModel, times(0)).stream(any(Prompt.class));
@@ -775,7 +769,7 @@ class CuratorToolsTest {
                 .thenReturn(Flux.just(
                         new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         // 节 2 截断 1 次 + 重试成功 1 次 + 节 1/节 3 各 1 次 = stream 共 4 次
         verify(chatModel, times(4)).stream(any(Prompt.class));
@@ -790,18 +784,16 @@ class CuratorToolsTest {
         // 节 2 预生成完成后分片回放（模拟打字机）：多片 CONTENT 事件而非单片整块
         stubThreeSections();
 
-        try (MockedStatic<SseUtils> mocked = mockStatic(SseUtils.class)) {
-            CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        SseSink sink = mock(SseSink.class);
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), sink);
 
-            ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
-            mocked.verify(() -> SseUtils.sendEvent(any(), eq(SseEvents.CONTENT), contentCaptor.capture()),
-                    atLeast(5));
-            // 节 2 分片回放：单片不超过 30 字符（打字机观感），无整块大事件
-            assertThat(contentCaptor.getAllValues())
-                    .filteredOn(c -> c.contains("关键原理") || c.contains("代码示例"))
-                    .allSatisfy(c -> assertThat(c.length()).isLessThanOrEqualTo(30));
-            assertThat(report.markdown()).contains("JVM 内存模型");
-        }
+        ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
+        verify(sink, atLeast(5)).sendEvent(eq(SseEvents.CONTENT), contentCaptor.capture());
+        // 节 2 分片回放：单片不超过 30 字符（打字机观感），无整块大事件
+        assertThat(contentCaptor.getAllValues())
+                .filteredOn(c -> c.contains("关键原理") || c.contains("代码示例"))
+                .allSatisfy(c -> assertThat(c.length()).isLessThanOrEqualTo(30));
+        assertThat(report.markdown()).contains("JVM 内存模型");
     }
 
     @Test
@@ -819,7 +811,7 @@ class CuratorToolsTest {
                 .thenReturn(Flux.just(
                         new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         // 节 2 空白重试 3 次 + 节 1/节 3 各 1 次 = stream 共 5 次
         verify(chatModel, times(5)).stream(any(Prompt.class));
@@ -832,7 +824,7 @@ class CuratorToolsTest {
     void generateReport_withSessionSummary_injectsContextIntoSectionPrompts() {
         stubThreeSections();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L), "deep_dive", "主题：Spring IoC\n已讨论：三级缓存");
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class), "deep_dive", "主题：Spring IoC\n已讨论：三级缓存");
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -849,7 +841,7 @@ class CuratorToolsTest {
     void generateReport_withoutSessionSummary_noContextSection() {
         stubThreeSections();
 
-        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
@@ -886,7 +878,7 @@ class CuratorToolsTest {
                 .thenReturn(Flux.just(
                         new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
-        CuratedReport report = curatorTools.generateReport("Spring IoC", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Spring IoC", fourResources(), mock(SseSink.class));
 
         String md = report.markdown();
         // 节 3 标题之前的 fence 数为偶数 → 节 2 的代码块已在节内闭合，FAQ 未被渲染进代码区域
@@ -913,7 +905,7 @@ class CuratorToolsTest {
                                 new AssistantMessage("## 📖 核心概念\n\n```java\npublic class X {\n    @"),
                                 ChatGenerationMetadata.builder().finishReason("LENGTH").build())))));
 
-        CuratedReport report = curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L));
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
 
         // 节 1 截断不重试：三节各 1 次 stream
         verify(chatModel, times(3)).stream(any(Prompt.class));

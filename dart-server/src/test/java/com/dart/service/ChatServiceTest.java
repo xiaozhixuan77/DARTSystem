@@ -28,7 +28,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import com.dart.broadcast.SseSink;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -75,7 +75,7 @@ class ChatServiceTest {
     private TransactionTemplate transactionTemplate;
 
     private ChatService chatService;
-    private SseEmitter emitter;
+    private SseSink sink;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     // insert 快照：mock insert 后对象可能被复用修改（草稿 insert 后 completeAssistantMessage
     // 写回同一引用），断言 insert 时的内容须用快照
@@ -87,7 +87,7 @@ class ChatServiceTest {
                 embeddingService, messageMapper, redisTemplate, knowledgeItemMapper,
                 searchTraceMapper, relationExtractionService, knowledgeService, summaryService,
                 transactionTemplate);
-        emitter = spy(new SseEmitter(60_000L));
+        sink = mock(SseSink.class);
         insertSnapshots.clear();
         // lenient：所有走 executeSearchAndCurate 的用例都会经独立事务提交用户消息，
         // 回调须真实执行（否则 messageMapper.insert(user) 不会发生，insert 计数断言会失败）；
@@ -141,7 +141,7 @@ class ChatServiceTest {
                         "sources", List.of("https://a.com")));
         when(valueOps.get(anyString())).thenReturn(cachedJson);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport().markdown()).contains("缓存报告");
@@ -165,7 +165,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置与追问均失败降级
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         assertThat(result.isRagHit()).isFalse();
         verify(searchAgent).execute(anyList(), anyInt(), any());
@@ -186,8 +186,8 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        chatService.executeSearchAndCurate("  Spring Boot  ", 1L, 100L, emitter);
-        chatService.executeSearchAndCurate("spring boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("  Spring Boot  ", 1L, 100L, sink);
+        chatService.executeSearchAndCurate("spring boot", 1L, 100L, sink);
 
         // 规范化后（trim + 小写）两次查询使用同一缓存 key
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
@@ -209,7 +209,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // 用户消息 + 草稿消息均经独立事务模板提交：流式中断后其他连接立即可见（不被主事务延迟提交阻塞）
         verify(transactionTemplate, times(2)).executeWithoutResult(any());
@@ -236,7 +236,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // 草稿 insert（空内容 + draft 标记）发生在 curator 生成前（独立事务），
         // 完整内容通过 updateById 写回同一条消息（insert 快照：对象后经
@@ -274,7 +274,7 @@ class ChatServiceTest {
                     return report;
                 });
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         assertThat(draftConsumer.get()).isNotNull();
         // 触发草稿快照：部分内容经独立事务持久化（updateById 仅写内容字段，
@@ -309,7 +309,7 @@ class ChatServiceTest {
         }).doThrow(new RuntimeException("db error"))
                 .when(transactionTemplate).executeWithoutResult(any());
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // 草稿失败 → 回退原路径：直接 insert 完整助手消息（无 updateById）
         ArgumentCaptor<Message> insertCaptor = ArgumentCaptor.forClass(Message.class);
@@ -334,7 +334,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置与追问失败降级
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         assertThat(result.isRagHit()).isFalse();
         // 报告无占位节 → 异步沉淀到知识库（标题用 report.title 而非查询原文）
@@ -369,7 +369,7 @@ class ChatServiceTest {
         when(knowledgeService.findSimilarItem(eq(1L), eq("Spring 三级缓存原理"), contains("# Report")))
                 .thenReturn(Optional.of(existing));
 
-        chatService.executeSearchAndCurate("三级缓存", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("三级缓存", 1L, 100L, sink);
 
         // 相似条目存在 → 合并更新而非新增
         verify(knowledgeService, timeout(3000)).mergeItem(eq(1L), eq(99L),
@@ -393,7 +393,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        chatService.executeSearchAndCurate("三级缓存", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("三级缓存", 1L, 100L, sink);
 
         verify(embeddingService, timeout(3000))
                 .embedAndPersist(eq(1L), eq("query"), contains("# Report"),
@@ -414,7 +414,7 @@ class ChatServiceTest {
         when(embeddingService.embedAndPersist(any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of(99L));
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // 沉淀成功后触发关系抽取（同一虚拟线程，itemId 取自 embedAndPersist 返回）
         verify(relationExtractionService, timeout(3000))
@@ -436,7 +436,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // 含占位节的残缺报告不沉淀
         verify(embeddingService, after(1500).never()).embedAndPersist(any(), any(), any(), any(), any(), any());
@@ -455,7 +455,7 @@ class ChatServiceTest {
                 .thenThrow(new RuntimeException("timeout"));
         when(knowledgeItemMapper.selectCount(any())).thenReturn(50L); // 达到上限
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         verify(embeddingService, after(1500).never()).embedAndPersist(any(), any(), any(), any(), any(), any());
     }
@@ -683,7 +683,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"微服务 学习路线\",\"variants\":[]}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("学习微服务", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("学习微服务", 1L, 100L, sink);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> queriesCaptor = ArgumentCaptor.forClass(List.class);
@@ -709,7 +709,7 @@ class ChatServiceTest {
                         + "\"variants\":[\"Spring Cloud 微服务教程\"]}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("学习微服务", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("学习微服务", 1L, 100L, sink);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> queriesCaptor = ArgumentCaptor.forClass(List.class);
@@ -738,7 +738,7 @@ class ChatServiceTest {
                         + "\"variants\":[\"Kotlin 协程 调度\"]}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("协程 调度 原理", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("协程 调度 原理", 1L, 100L, sink);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> queriesCaptor = ArgumentCaptor.forClass(List.class);
@@ -765,7 +765,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置与追问均失败降级
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("微服务 学习路线", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("微服务 学习路线", 1L, 100L, sink);
 
         assertThat(result.isRagHit()).isFalse();
         // 报告头部带标注块
@@ -791,7 +791,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        chatService.executeSearchAndCurate("微服务 学习路线", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("微服务 学习路线", 1L, 100L, sink);
 
         verify(curatorAgent).curate(anyString(), anyList(), any(), any(), isNull(), eq(true), any());
         verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), isNull(), eq(false), any());
@@ -1018,7 +1018,7 @@ class ChatServiceTest {
                     "三级缓存是 Spring 解决单例 Bean 循环依赖的机制：\n1. singletonObjects 存放完整 Bean..."))));
         });
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("为什么不行", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("为什么不行", 1L, 100L, sink);
 
         assertThat(result.isFollowUpHit()).isTrue();
         assertThat(result.followUpAnswer()).contains("三级缓存");
@@ -1062,7 +1062,7 @@ class ChatServiceTest {
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("为什么不行", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("为什么不行", 1L, 100L, sink);
 
         // fail-open：续答失败回退搜索，报告正常产出
         assertThat(result.isFollowUpHit()).isFalse();
@@ -1090,7 +1090,7 @@ class ChatServiceTest {
             throw new RuntimeException("timeout");
         });
 
-        chatService.executeSearchAndCurate("Spring 三级缓存", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring 三级缓存", 1L, 100L, sink);
 
         // 正常查询走完整搜索流程，不走续答；报告产生后仍更新会话摘要（预期行为）
         verify(searchAgent).execute(anyList(), anyInt(), any());
@@ -1111,7 +1111,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置/追问均失败降级
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // 搜索路径回答产生后更新会话摘要，输入为原始报告（不含"进一步探索"追问段）
         ArgumentCaptor<String> mdCaptor = ArgumentCaptor.forClass(String.class);
@@ -1126,7 +1126,7 @@ class ChatServiceTest {
         RagResult ragAnswer = new RagResult("RAG 回答内容", List.of("https://a.com"), 0.9);
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // RAG 命中也有问答产生 → 更新会话摘要
         verify(summaryService).updateSummary(eq(1L), eq(100L), eq("Spring Boot"), eq("RAG 回答内容"));
@@ -1144,7 +1144,7 @@ class ChatServiceTest {
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // RAG 回答不足 → 降级使用并行搜索结果（不短路）
         assertThat(result.curatedReport()).isNotNull();
@@ -1160,7 +1160,7 @@ class ChatServiceTest {
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
         when(searchAgent.execute(anyList(), anyInt(), any())).thenThrow(new RuntimeException("search down"));
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).contains("搜索服务暂时不可用");
@@ -1187,7 +1187,7 @@ class ChatServiceTest {
             return new ChatResponse(List.of(new Generation(new AssistantMessage("- 追问1\n- 追问2"))));
         });
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // 追问 prompt 注入会话摘要（可引用前几轮内容）；调用 2 次 = 前置调用 + 追问
         ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
@@ -1215,7 +1215,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化后的技术问题描述\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
         assertThat(result.isRagHit()).isFalse();
         // 前置合并单次调用已由 preProcessQuery 专门用例覆盖（此处还有追问调用）
         verify(ragService).retrieve(eq("优化后的技术问题描述"), eq(1L));
@@ -1237,7 +1237,7 @@ class ChatServiceTest {
                         + "\"variants\":[\"变体查询1\",\"变体查询2\"]}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // SearchAgent 收到主词 + 2 个变体词
         verify(searchAgent).execute(eq(List.of("优化后的技术问题描述", "变体查询1", "变体查询2")),
@@ -1262,7 +1262,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("Java 内存模型", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Java 内存模型", 1L, 100L, sink);
 
         // deep_dive 扩大搜索量到 12
         verify(searchAgent).execute(anyList(), eq(12), any());
@@ -1284,7 +1284,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"quick_fact\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("Docker 是什么", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Docker 是什么", 1L, 100L, sink);
 
         // quick_fact 收窄搜索量到 5
         verify(searchAgent).execute(anyList(), eq(5), any());
@@ -1304,7 +1304,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化后的技术问题描述\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         verify(searchAgent).execute(anyList(), eq(8), any());
         verify(curatorAgent).curate(anyString(), anyList(), any(), eq("how_to"), any(), eq(false), any());
@@ -1322,7 +1322,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         ArgumentCaptor<SearchTrace> captor = ArgumentCaptor.forClass(SearchTrace.class);
         verify(searchTraceMapper).insert(captor.capture());
@@ -1341,7 +1341,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"non_tech\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("今天天气怎么样?", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("今天天气怎么样?", 1L, 100L, sink);
 
         ArgumentCaptor<SearchTrace> captor = ArgumentCaptor.forClass(SearchTrace.class);
         verify(searchTraceMapper).insert(captor.capture());
@@ -1364,7 +1364,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"how_to\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         ArgumentCaptor<SearchTrace> captor = ArgumentCaptor.forClass(SearchTrace.class);
         verify(searchTraceMapper).insert(captor.capture());
@@ -1392,7 +1392,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"how_to\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         ArgumentCaptor<SearchTrace> captor = ArgumentCaptor.forClass(SearchTrace.class);
         verify(searchTraceMapper).insert(captor.capture());
@@ -1409,7 +1409,7 @@ class ChatServiceTest {
                         "sources", List.of("https://a.com")));
         when(valueOps.get(anyString())).thenReturn(cachedJson);
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         verify(searchTraceMapper, never()).insert(any(SearchTrace.class));
     }
@@ -1429,7 +1429,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"how_to\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // 追踪记录失败仅告警，不影响主流程
         assertThat(result.isRagHit()).isFalse();
@@ -1448,7 +1448,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
         assertThat(result.isRagHit()).isFalse();
         // 降级后主词原文 + 英文 token 提取的 enQuery（spring boot 在 Bing 稳定）
         verify(searchAgent).execute(eq(List.of("Spring Boot", "spring boot")), anyInt(), any());
@@ -1460,7 +1460,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":false,\"optimized\":\"\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("今天天气怎么样", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("今天天气怎么样", 1L, 100L, sink);
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).contains("技术");
@@ -1474,7 +1474,7 @@ class ChatServiceTest {
         when(ragService.retrieve(eq("Spring Boot"), eq(1L)))
                 .thenReturn(Optional.of(new RagResult("# Spring Boot 详解", List.of("https://spring.io"))));
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
         assertThat(result.isRagHit()).isTrue();
         assertThat(result.ragAnswer().answer()).contains("Spring Boot");
         // RAG 命中短路：不进入 Curator（Search Agent 已并行启动，不做 never 断言）
@@ -1494,7 +1494,7 @@ class ChatServiceTest {
         });
 
         long start = System.currentTimeMillis();
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
         long elapsed = System.currentTimeMillis() - start;
 
         assertThat(result.isRagHit()).isTrue();
@@ -1511,7 +1511,7 @@ class ChatServiceTest {
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
@@ -1528,7 +1528,7 @@ class ChatServiceTest {
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
         verify(ragService).retrieve(eq("Spring Boot"), eq(1L));
@@ -1553,7 +1553,7 @@ class ChatServiceTest {
                         "- 想深入了解Java集合框架吗？\n- 对Spring Boot开发感兴趣？\n- 想了解Java面试常见考点吗？"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("JAVA", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("JAVA", 1L, 100L, sink);
         assertThat(result.curatedReport()).isNotNull();
         // 追问不再拼入返回对象，而是更新已持久化的消息（消息含追问）
         assertThat(result.curatedReport().markdown()).doesNotContain("## 进一步探索");
@@ -1578,7 +1578,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("JAVA", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("JAVA", 1L, 100L, sink);
         // 即使追问失败，报告仍正常返回
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).doesNotContain("## 进一步探索");
@@ -1593,7 +1593,7 @@ class ChatServiceTest {
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of());
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("obscure query", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("obscure query", 1L, 100L, sink);
         assertThat(result.ragAnswer()).isNull();
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).contains("未找到");
@@ -1608,7 +1608,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any()))
                 .thenThrow(new RuntimeException("network error"));
 
-        ChatService.SearchResult result = chatService.executeSearchAndCurate("query", 1L, 100L, emitter);
+        ChatService.SearchResult result = chatService.executeSearchAndCurate("query", 1L, 100L, sink);
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).contains("不可用");
     }
@@ -1641,7 +1641,7 @@ class ChatServiceTest {
             return vec;
         });
 
-        chatService.executeSearchAndCurate("Spring", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring", 1L, 100L, sink);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
@@ -1658,7 +1658,7 @@ class ChatServiceTest {
                 "{\"isTech\":true,\"optimized\":\"Spring 框架\",\"variants\":[\"Spring Boot 教程\",\"腰椎间盘突出治疗\"],\"intent\":\"how_to\"}");
         when(embeddingService.embed(anyString())).thenThrow(new RuntimeException("embed api error"));
 
-        chatService.executeSearchAndCurate("Spring", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring", 1L, 100L, sink);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
@@ -1685,7 +1685,7 @@ class ChatServiceTest {
                 .thenReturn(chatResponse)
                 .thenThrow(new RuntimeException("timeout"));
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         String expectedTag = switch (intent) {
             case "quick_fact" -> "速查";
@@ -1713,7 +1713,7 @@ class ChatServiceTest {
                 .thenReturn(chatResponse)
                 .thenThrow(new RuntimeException("timeout"));
 
-        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
         // LLM 幻觉出未定义意图 → 默认操作指南
         verify(embeddingService, timeout(3000))

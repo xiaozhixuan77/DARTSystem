@@ -1,5 +1,6 @@
 package com.dart.integration;
 
+import com.dart.broadcast.SseSink;
 import com.dart.agent.scoring.PageContent;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.BingSearchClient;
@@ -17,7 +18,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import static org.mockito.Mockito.mock;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -58,9 +59,9 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         List.of(new Generation(new AssistantMessage(
                                 "{\"isTech\":false,\"optimized\":\"\"}")))));
 
-        SseEmitter emitter = new SseEmitter();
+        SseSink sink = mock(SseSink.class);
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "今天天气怎么样", userId, convId, emitter);
+                "今天天气怎么样", userId, convId, sink);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
@@ -117,9 +118,9 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage("基于知识库的 RAG 回答")))));
 
-        SseEmitter emitter = new SseEmitter();
+        SseSink sink = mock(SseSink.class);
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "技术问题", userId, convId, emitter);
+                "技术问题", userId, convId, sink);
 
         assertThat(result.isRagHit()).isTrue();
         assertThat(result.ragAnswer()).isNotNull();
@@ -167,9 +168,9 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         List.of(new Generation(new AssistantMessage(
                                 "# Spring Boot 核心概念\n\n概念内容。"))))));
 
-        SseEmitter emitter = new SseEmitter();
+        SseSink sink = mock(SseSink.class);
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "Spring Boot 配置", userId, convId, emitter);
+                "Spring Boot 配置", userId, convId, sink);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
@@ -208,9 +209,9 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         List.of(new Generation(new AssistantMessage("5")))))
                 .thenThrow(new RuntimeException("LLM 报告生成超时"));
 
-        SseEmitter emitter = new SseEmitter();
+        SseSink sink = mock(SseSink.class);
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "Spring Boot 配置", userId, convId, emitter);
+                "Spring Boot 配置", userId, convId, sink);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
@@ -237,9 +238,9 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         List.of(new Generation(new AssistantMessage(
                                 "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\"}")))));
 
-        SseEmitter emitter = new SseEmitter();
+        SseSink sink = mock(SseSink.class);
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "Spring Boot 配置", userId, convId, emitter);
+                "Spring Boot 配置", userId, convId, sink);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
@@ -274,12 +275,12 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         new AssistantMessage("# 概念节内容\n\n详细说明。".repeat(200)))))));
 
         String query = "Spring Boot 缓存配置";
-        chatService.executeSearchAndCurate(query, userId, convId, new SseEmitter());
+        chatService.executeSearchAndCurate(query, userId, convId, mock(SseSink.class));
 
         // 第二次相同查询 → 命中缓存，Agent 全部不参与
         Mockito.reset(bingSearchClient, pageFetcher, chatModel);
         ChatService.SearchResult second = chatService.executeSearchAndCurate(
-                query, userId, convId, new SseEmitter());
+                query, userId, convId, mock(SseSink.class));
 
         assertThat(second.isRagHit()).isFalse();
         assertThat(second.curatedReport()).isNotNull();
@@ -301,9 +302,9 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         List.of(new Generation(new AssistantMessage(
                                 "{\"isTech\":true,\"optimized\":\"冷门技术问题\"}")))));
 
-        SseEmitter emitter = new SseEmitter();
+        SseSink sink = mock(SseSink.class);
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                "冷门技术问题", userId, convId, emitter);
+                "冷门技术问题", userId, convId, sink);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();

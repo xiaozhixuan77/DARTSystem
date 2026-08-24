@@ -1,5 +1,6 @@
 package com.dart.controller;
 
+import com.dart.broadcast.EmitterSink;
 import com.dart.dto.request.ChatRequest;
 import com.dart.dto.request.ConversationUpsertRequest;
 import com.dart.dto.response.ConversationVO;
@@ -55,7 +56,7 @@ public class ChatController {
                 SseUtils.sendStatus(emitter, "conversation", String.valueOf(finalConversationId));
 
                 ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                        request.getMessage(), userId, finalConversationId, emitter);
+                        request.getMessage(), userId, finalConversationId, new EmitterSink(emitter));
 
                 if (completed.get()) return;
 

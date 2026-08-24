@@ -1,12 +1,12 @@
 package com.dart.agent.search;
 
+import com.dart.broadcast.SseSink;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.exception.ErrorCode;
 import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,13 +46,13 @@ public class SearchAgent {
         this.searchTools = searchTools;
     }
 
-    public List<ScoredResource> execute(List<String> queries, int maxResults, SseEmitter emitter) {
+    public List<ScoredResource> execute(List<String> queries, int maxResults, SseSink sink) {
         try {
             // Step 1: 多组检索词虚拟线程并行搜索（Query 拆解产出的主词 + 变体词），合并去重
-            SseUtils.sendStatus(emitter, "searching", "正在搜索相关资源...");
+            sink.sendStatus("searching", "正在搜索相关资源...");
             List<SearchResult> rawResults = searchQueriesInParallel(queries, maxResults);
             if (rawResults.isEmpty()) {
-                SseUtils.sendError(emitter, ErrorCode.NO_QUALITY_RESULTS.getCode(),
+                sink.sendError(ErrorCode.NO_QUALITY_RESULTS.getCode(),
                         ErrorCode.NO_QUALITY_RESULTS.getMessage());
                 return List.of();
             }
@@ -67,7 +67,7 @@ public class SearchAgent {
                     .toList();
 
             // Step 3: 并行抓取（失败时用搜索摘要兜底）
-            SseUtils.sendStatus(emitter, "fetching", "正在抓取页面内容...");
+            sink.sendStatus("fetching", "正在抓取页面内容...");
             List<com.dart.agent.scoring.PageContent> pages = searchTools.fetchPages(urls);
             // 抓取失败的 URL 用搜索摘要作为内容
             java.util.Set<String> fetchedUrls = pages.stream()
@@ -82,23 +82,23 @@ public class SearchAgent {
                 }
             }
             if (pages.isEmpty()) {
-                SseUtils.sendError(emitter, ErrorCode.FETCH_PAGE_ERROR.getCode(), "所有页面抓取失败");
+                sink.sendError(ErrorCode.FETCH_PAGE_ERROR.getCode(), "所有页面抓取失败");
                 return List.of();
             }
 
             // Step 4: 四维评分 + 筛选（用主检索词评估匹配度）
-            SseUtils.sendStatus(emitter, "scoring", "正在评估资源质量...");
+            sink.sendStatus("scoring", "正在评估资源质量...");
             List<ScoredResource> scored = searchTools.scoreResources(queries.getFirst(), pages);
             if (scored.isEmpty()) {
                 // 低质兜底：raw 结果相关（逐条命中）但评分过滤光（多为抓取失败）→ 用摘要构造降级项
                 List<ScoredResource> degraded = buildDegradedResults(
                         queries.getFirst(), rawResults, maxResults);
                 if (!degraded.isEmpty()) {
-                    SseUtils.sendStatus(emitter, "scoring", "抓取受限，基于搜索结果摘要整理...");
-                    SseUtils.sendEvent(emitter, SseEvents.SEARCH_RESULT, degraded);
+                    sink.sendStatus("scoring", "抓取受限，基于搜索结果摘要整理...");
+                    sink.sendEvent(SseEvents.SEARCH_RESULT, degraded);
                     return degraded;
                 }
-                SseUtils.sendError(emitter, ErrorCode.NO_QUALITY_RESULTS.getCode(),
+                sink.sendError(ErrorCode.NO_QUALITY_RESULTS.getCode(),
                         ErrorCode.NO_QUALITY_RESULTS.getMessage());
                 return List.of();
             }
@@ -107,12 +107,12 @@ public class SearchAgent {
             List<ScoredResource> top = scored.stream()
                     .limit(Math.min(maxResults, scored.size()))
                     .toList();
-            SseUtils.sendEvent(emitter, SseEvents.SEARCH_RESULT, top);
+            sink.sendEvent(SseEvents.SEARCH_RESULT, top);
             return top;
 
         } catch (Exception e) {
             log.error("Search Agent 执行异常: {}", queries, e);
-            SseUtils.sendError(emitter, ErrorCode.AGENT_EXECUTION_ERROR.getCode(),
+            sink.sendError(ErrorCode.AGENT_EXECUTION_ERROR.getCode(),
                     ErrorCode.AGENT_EXECUTION_ERROR.getMessage());
             return List.of();
         }

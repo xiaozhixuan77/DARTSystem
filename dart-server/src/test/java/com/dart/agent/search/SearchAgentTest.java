@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import com.dart.broadcast.SseSink;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -26,12 +26,12 @@ class SearchAgentTest {
     @Mock
     private SearchTools searchTools;
 
-    private SseEmitter emitter;
+    private SseSink sink;
     private SearchAgent searchAgent;
 
     @BeforeEach
     void setUp() {
-        emitter = spy(new SseEmitter(60_000L));
+        sink = mock(SseSink.class);
         searchAgent = new SearchAgent(searchTools);
     }
 
@@ -54,20 +54,20 @@ class SearchAgentTest {
                     .toList();
         });
 
-        List<ScoredResource> result = searchAgent.execute(List.of("Spring Boot"), 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("Spring Boot"), 5, sink);
         assertThat(result).isNotEmpty();
         assertThat(result.size()).isLessThanOrEqualTo(5);
         verify(searchTools).searchWeb(eq("Spring Boot"), anyInt());
         verify(searchTools).fetchPages(anyList());
         verify(searchTools).scoreResources(eq("Spring Boot"), anyList());
-        verify(emitter, atLeastOnce()).send(any(SseEmitter.SseEventBuilder.class));
+        verify(sink, atLeastOnce()).sendEvent(any(), any());
     }
 
     @Test
     void execute_searchReturnsEmpty_returnsEmpty() {
         when(searchTools.searchWeb(anyString(), anyInt())).thenReturn(List.of());
 
-        List<ScoredResource> result = searchAgent.execute(List.of("obscure query"), 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("obscure query"), 5, sink);
         assertThat(result).isEmpty();
         verify(searchTools, never()).fetchPages(anyList());
     }
@@ -78,7 +78,7 @@ class SearchAgentTest {
                 .thenReturn(List.of(new SearchResult("https://fail.com", "query Fail", "query snippet")));
         when(searchTools.fetchPages(anyList())).thenReturn(List.of());
 
-        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, sink);
         assertThat(result).isEmpty();
     }
 
@@ -86,7 +86,7 @@ class SearchAgentTest {
     void execute_searchToolsException_returnsEmpty() {
         when(searchTools.searchWeb(anyString(), anyInt())).thenThrow(new RuntimeException("network error"));
 
-        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, sink);
         assertThat(result).isEmpty();
     }
 
@@ -109,7 +109,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        List<ScoredResource> result = searchAgent.execute(List.of("query"), 8, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 8, sink);
         // 5 unique URLs after dedup
         assertThat(result.size()).isLessThanOrEqualTo(5);
         verify(searchTools).fetchPages(argThat(urls -> urls.size() <= 5));
@@ -133,7 +133,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.15)).toList();
         });
 
-        List<ScoredResource> result = searchAgent.execute(List.of("query"), 3, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 3, sink);
         assertThat(result.size()).isLessThanOrEqualTo(3);
     }
 
@@ -164,7 +164,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("Spring Boot 配置", "Spring Boot datasource 教程"), 5, emitter);
+        searchAgent.execute(List.of("Spring Boot 配置", "Spring Boot datasource 教程"), 5, sink);
 
         // 两组词都被搜索，合并结果后 URL 去重：a、b、c 各抓一次
         verify(searchTools, times(2)).searchWeb(anyString(), anyInt());
@@ -200,7 +200,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("q1", "q2", "q3"), 8, emitter);
+        searchAgent.execute(List.of("q1", "q2", "q3"), 8, sink);
 
         // 20 个唯一 URL 只能抓取前 12 个；未抓取的后 8 个靠搜索摘要兜底参与评分
         verify(searchTools).fetchPages(argThat(urls -> urls.size() == 12));
@@ -231,7 +231,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        List<ScoredResource> result = searchAgent.execute(List.of("primary", "variant"), 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("primary", "variant"), 5, sink);
 
         verify(searchTools, times(2)).searchWeb(anyString(), anyInt());
         verify(searchTools).fetchPages(argThat(urls -> urls.size() == 5
@@ -263,7 +263,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("primary", "variant"), 5, emitter);
+        searchAgent.execute(List.of("primary", "variant"), 5, sink);
 
         // 3 条主词 + 1 条补充（b.com 重复去重）
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://a.com", "https://b.com", "https://c.com", "https://d.com"))));
@@ -284,8 +284,8 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 3, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("query"), 5, emitter);
-        verify(emitter, atLeast(3)).send(any(SseEmitter.SseEventBuilder.class));
+        searchAgent.execute(List.of("query"), 5, sink);
+        verify(sink, atLeastOnce()).sendEvent(any(), any());
     }
 
     @Test
@@ -313,7 +313,7 @@ class SearchAgentTest {
             return scored;
         });
 
-        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("query"), 5, sink);
         if (result.size() >= 2) {
             assertThat(result.get(0).getWeightedScore()).isGreaterThanOrEqualTo(result.get(1).getWeightedScore());
         }
@@ -344,7 +344,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+        searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, sink);
 
         // 污染主词结果被丢弃，只抓变体词（英文）的结果
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://microservices.io"))));
@@ -371,7 +371,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+        searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, sink);
 
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://cnblogs.com/ms"))));
     }
@@ -397,7 +397,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        List<ScoredResource> result = searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+        List<ScoredResource> result = searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, sink);
 
         assertThat(result).isNotEmpty();
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://microservices.io"))));
@@ -419,7 +419,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("Spring Boot"), 5, emitter);
+        searchAgent.execute(List.of("Spring Boot"), 5, sink);
 
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://site.com"))));
     }
@@ -447,7 +447,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("spring boot 配置", "game 多人在线"), 5, emitter);
+        searchAgent.execute(List.of("spring boot 配置", "game 多人在线"), 5, sink);
 
         // 变体组污染被丢弃，只抓主词结果
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://spring.io/1"))));
@@ -461,7 +461,7 @@ class SearchAgentTest {
                         new SearchResult("https://messenger.com", "Messenger", "chat app")));
 
         List<ScoredResource> result = searchAgent.execute(
-                List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+                List.of("微服务 学习路线", "microservices learning path"), 5, sink);
 
         assertThat(result).isEmpty();
         verify(searchTools, never()).fetchPages(anyList());
@@ -475,7 +475,7 @@ class SearchAgentTest {
                         new SearchResult("https://messenger.com", "Messenger", "chat app")));
 
         List<ScoredResource> result = searchAgent.execute(
-                List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+                List.of("微服务 学习路线", "microservices learning path"), 5, sink);
 
         // 变体组因结果零命中被丢弃 → 搜索阶段无结果，不进入抓取
         assertThat(result).isEmpty();
@@ -505,7 +505,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of(query, "microservices learning path"), 5, emitter);
+        searchAgent.execute(List.of(query, "microservices learning path"), 5, sink);
 
         // 主词结果保留（未被误判污染）：两个 URL 都抓
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of(
@@ -535,7 +535,7 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
-        searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+        searchAgent.execute(List.of("微服务 学习路线", "microservices learning path"), 5, sink);
 
         verify(searchTools).fetchPages(argThat(urls -> urls.equals(List.of("https://spring.io/guides"))));
     }
@@ -557,7 +557,7 @@ class SearchAgentTest {
                         inv.getArgument(2), 5, 1, 1, 2, 1.95, true));
 
         List<ScoredResource> result = searchAgent.execute(
-                List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+                List.of("微服务 学习路线", "microservices learning path"), 5, sink);
 
         assertThat(result).isNotEmpty();
         assertThat(result).allMatch(ScoredResource::isDegraded);
@@ -579,7 +579,7 @@ class SearchAgentTest {
                         inv.getArgument(2), 5, 1, 1, 2, 1.95, true));
 
         List<ScoredResource> result = searchAgent.execute(
-                List.of("微服务 学习路线", "microservices learning path"), 3, emitter);
+                List.of("微服务 学习路线", "microservices learning path"), 3, sink);
 
         assertThat(result).hasSize(3);
     }
@@ -593,7 +593,7 @@ class SearchAgentTest {
                         new SearchResult("https://messenger.com", "Messenger", "Instant messaging app")));
 
         List<ScoredResource> result = searchAgent.execute(
-                List.of("微服务 学习路线", "microservices learning path"), 5, emitter);
+                List.of("微服务 学习路线", "microservices learning path"), 5, sink);
 
         assertThat(result).isEmpty();
         verify(searchTools, never()).degradedResource(anyString(), anyString(), anyString());

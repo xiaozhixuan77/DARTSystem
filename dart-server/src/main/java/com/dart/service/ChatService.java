@@ -1,5 +1,6 @@
 package com.dart.service;
 
+import com.dart.broadcast.SseSink;
 import com.dart.agent.IntentKeys;
 import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.curator.CuratorAgent;
@@ -33,7 +34,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -149,7 +149,7 @@ public class ChatService {
      */
     @Transactional
     public SearchResult executeSearchAndCurate(String query, Long userId,
-                                                Long conversationId, SseEmitter emitter) {
+                                                Long conversationId, SseSink sink) {
         long startNanos = System.nanoTime();
         // 1. 持久化用户消息（独立事务立即提交：流式中断后刷新页面立即可见）
         Message userMsg = new Message();
@@ -160,7 +160,7 @@ public class ChatService {
         transactionTemplate.executeWithoutResult(status -> messageMapper.insert(userMsg));
 
         // 1.5 查询缓存检查（原始查询规范化 key；命中直接返回，跳过全流程，不记链路）
-        SearchResult cached = tryCache(query, conversationId, emitter);
+        SearchResult cached = tryCache(query, conversationId, sink);
         if (cached != null) {
             return cached;
         }
@@ -168,7 +168,7 @@ public class ChatService {
         // 2. 领域过滤 + 提示词优化（合并为一次 LLM 调用）
         QueryPreProcess pre = preProcessQuery(query);
         if (!pre.isTech()) {
-            SseUtils.sendError(emitter, ErrorCode.NON_TECH_QUERY.getCode(),
+            sink.sendError(ErrorCode.NON_TECH_QUERY.getCode(),
                     ErrorCode.NON_TECH_QUERY.getMessage());
             SearchResult errorResult = SearchResult.searchResult(
                     errorReport(ErrorCode.NON_TECH_QUERY.getMessage()), List.of());
@@ -185,8 +185,8 @@ public class ChatService {
         if (pre.followUp()) {
             Optional<String> answer = generateMemoryAnswer(conversationId, userId, query);
             if (answer.isPresent()) {
-                SseUtils.sendStatus(emitter, "curating", "正在基于会话记忆回答...");
-                SseUtils.sendEvent(emitter, SseEvents.CONTENT, answer.get());
+                sink.sendStatus("curating", "正在基于会话记忆回答...");
+                sink.sendEvent(SseEvents.CONTENT, answer.get());
                 SearchResult result = SearchResult.followUpAnswer(answer.get());
                 persistAssistantMessage(conversationId, result);
                 recordTrace(userId, conversationId, userMsg.getId(), query, IntentKeys.FOLLOWUP,
@@ -202,7 +202,7 @@ public class ChatService {
 
         // 3+4. RAG 检查与 Search Agent 并行启动；RAG 命中则短路，未命中等搜索完成。
         //     RAG 命中时不等慢搜索任务（shutdownNow 中断，虚拟线程后台收尾）
-        SseUtils.sendStatus(emitter, "rag_check", "正在检索知识库...");
+        sink.sendStatus("rag_check", "正在检索知识库...");
         List<ScoredResource> searchResults;
         boolean ragDegraded = false;
         ExecutorService parallelExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -226,7 +226,7 @@ public class ChatService {
             // 变体词先经 embedding 主题校验，跑题词（如 LLM 联想跑偏）在搜索前丢弃
             searchQueries.addAll(filterVariants(effectiveQuery, pre.variants()));
             Future<List<ScoredResource>> searchFuture = parallelExecutor.submit(() ->
-                    searchAgent.execute(searchQueries, targetResultsFor(pre.intent()), emitter));
+                    searchAgent.execute(searchQueries, targetResultsFor(pre.intent()), sink));
 
             Optional<RagService.RagResult> ragResult;
             try {
@@ -238,7 +238,7 @@ public class ChatService {
             if (ragResult.isPresent()
                     && !ragResult.get().answer().contains(RagService.RAG_INSUFFICIENT_MARKER)) {
                 SearchResult result = SearchResult.ragHit(ragResult.get());
-                SseUtils.sendEvent(emitter, SseEvents.CONTENT, result.ragAnswer().answer());
+                sink.sendEvent(SseEvents.CONTENT, result.ragAnswer().answer());
                 persistAssistantMessage(conversationId, result);
                 recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
                         true, ragResult.get().maxSimilarity(), effectiveQuery,
@@ -259,7 +259,7 @@ public class ChatService {
                 searchResults = searchFuture.get();
             } catch (Exception e) {
                 log.error("Search Agent 异常", e);
-                SseUtils.sendError(emitter, ErrorCode.AGENT_EXECUTION_ERROR.getCode(),
+                sink.sendError(ErrorCode.AGENT_EXECUTION_ERROR.getCode(),
                         "搜索服务暂时不可用，请稍后重试");
                 SearchResult errorResult = SearchResult.searchResult(
                         errorReport("搜索服务暂时不可用，请稍后重试"), List.of());
@@ -273,7 +273,7 @@ public class ChatService {
         }
 
         if (searchResults.isEmpty()) {
-            SseUtils.sendError(emitter, ErrorCode.NO_QUALITY_RESULTS.getCode(),
+            sink.sendError(ErrorCode.NO_QUALITY_RESULTS.getCode(),
                     ErrorCode.NO_QUALITY_RESULTS.getMessage());
             SearchResult emptyResult = SearchResult.searchResult(
                     new CuratedReport(effectiveQuery,
@@ -303,7 +303,7 @@ public class ChatService {
             } catch (Exception e) {
                 log.warn("会话摘要读取失败，报告生成不带历史上下文: conversationId={}", conversationId, e);
             }
-            report = curatorAgent.curate(effectiveQuery, searchResults, emitter,
+            report = curatorAgent.curate(effectiveQuery, searchResults, sink,
                     pre.intent(), sessionSummary, degraded,
                     draft -> updateAssistantDraft(assistantDraft == null ? null : assistantDraft.getId(), draft));
             if (degraded) {
@@ -336,7 +336,7 @@ public class ChatService {
             final Long finalUserId = userId;
             final boolean finalDegraded = degraded;
             Runnable followUpAndCache = () -> generateFollowUpAndUpdate(
-                    msg, finalReport, query, emitter, finalUserId, pre.intent(), finalDegraded);
+                    msg, finalReport, query, sink, finalUserId, pre.intent(), finalDegraded);
             if (TransactionSynchronizationManager.isSynchronizationActive()) {
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
@@ -357,7 +357,7 @@ public class ChatService {
      * 低质内容上生成追问=双重低质；低质报告污染知识库与 24h 缓存。
      */
     private void generateFollowUpAndUpdate(Message assistantMessage, CuratedReport report,
-                                           String query, SseEmitter emitter, Long userId,
+                                           String query, SseSink sink, Long userId,
                                            String intent, boolean degraded) {
         String markdown = report.markdown();
         try {
@@ -365,8 +365,8 @@ public class ChatService {
                 String followUp = generateFollowUp(query, markdown,
                         assistantMessage.getConversationId(), userId);
                 if (followUp != null && !followUp.isBlank()) {
-                    SseUtils.sendStatus(emitter, "curating", "正在生成追问建议...");
-                    SseUtils.sendEvent(emitter, SseEvents.CONTENT,
+                    sink.sendStatus("curating", "正在生成追问建议...");
+                    sink.sendEvent(SseEvents.CONTENT,
                             "\n\n---\n\n## 进一步探索\n\n" + followUp);
                     CuratedReport withFollowUp = appendFollowUp(report, followUp);
                     assistantMessage.setContent(withFollowUp.markdown());
@@ -768,7 +768,7 @@ public class ChatService {
      * 读取报告缓存：命中则 SSE 推送并持久化消息，返回结果；未命中返回 null。
      * 缓存 key 为原始查询（trim + 小写）的 SHA-256 前 8 字节十六进制。
      */
-    private SearchResult tryCache(String query, Long conversationId, SseEmitter emitter) {
+    private SearchResult tryCache(String query, Long conversationId, SseSink sink) {
         try {
             String json = redisTemplate.opsForValue().get(cacheKey(query));
             if (json == null || json.isBlank()) {
@@ -783,7 +783,7 @@ public class ChatService {
             node.path("sources").forEach(s -> sources.add(s.asText()));
             CuratedReport report = new CuratedReport(query, markdown, sources, Instant.now());
             SearchResult result = SearchResult.searchResult(report, List.of());
-            SseUtils.sendEvent(emitter, SseEvents.CONTENT, markdown);
+            sink.sendEvent(SseEvents.CONTENT, markdown);
             persistAssistantMessage(conversationId, result);
             log.info("报告缓存命中: query={}", query);
             return result;

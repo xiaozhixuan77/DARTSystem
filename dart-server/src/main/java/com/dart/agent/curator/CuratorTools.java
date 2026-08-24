@@ -1,5 +1,6 @@
 package com.dart.agent.curator;
 
+import com.dart.broadcast.SseSink;
 import com.dart.agent.IntentKeys;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.util.SseEvents;
@@ -10,7 +11,6 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
 import java.util.*;
@@ -143,16 +143,16 @@ public class CuratorTools {
      * ①核心概念（token 级流式直推）→ ②原理+代码示例（与节 1 并行流式生成进队列，
      * 节 1 完成后实时消费推送）→ ③误区FAQ+进阶+参考文献（流式直推）。
      */
-    public CuratedReport generateReport(String query, List<ScoredResource> resources, SseEmitter emitter) {
-        return generateReport(query, resources, emitter, null);
+    public CuratedReport generateReport(String query, List<ScoredResource> resources, SseSink sink) {
+        return generateReport(query, resources, sink, null);
     }
 
     /**
      * @param styleHint 查询意图（风格要求）；null/未知意图不注入风格句
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources,
-                                        SseEmitter emitter, String styleHint) {
-        return generateReport(query, resources, emitter, styleHint, null);
+                                        SseSink sink, String styleHint) {
+        return generateReport(query, resources, sink, styleHint, null);
     }
 
     /**
@@ -160,17 +160,17 @@ public class CuratorTools {
      * @param sessionSummary 会话滚动摘要（长记忆）：注入节 prompt 延续前文叙述；null 表示无历史
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources,
-                                        SseEmitter emitter, String styleHint, String sessionSummary) {
-        return generateReport(query, resources, emitter, styleHint, sessionSummary, false);
+                                        SseSink sink, String styleHint, String sessionSummary) {
+        return generateReport(query, resources, sink, styleHint, sessionSummary, false);
     }
 
     /**
      * @param degraded true = 素材为搜索摘要级（抓取失败兜底），各节注入精简约束防虚构
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources,
-                                        SseEmitter emitter, String styleHint, String sessionSummary,
+                                        SseSink sink, String styleHint, String sessionSummary,
                                         boolean degraded) {
-        return generateReport(query, resources, emitter, styleHint, sessionSummary, degraded, null);
+        return generateReport(query, resources, sink, styleHint, sessionSummary, degraded, null);
     }
 
     /**
@@ -179,7 +179,7 @@ public class CuratorTools {
      *                      用于流式中断后前端直接拉取已生成部分（无感续流）
      */
     public CuratedReport generateReport(String query, List<ScoredResource> resources,
-                                        SseEmitter emitter, String styleHint, String sessionSummary,
+                                        SseSink sink, String styleHint, String sessionSummary,
                                         boolean degraded, Consumer<String> draftConsumer) {
         if (resources == null || resources.isEmpty()) {
             return emptyReport(query);
@@ -199,16 +199,16 @@ public class CuratorTools {
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
             // 阶段 A：节 1（token 流式直推）+ 节 2 并行流式生成进队列（峰值 2 并发——
             // 官网对并发长输入偶发空响应，2 并发实测 0 空，3 并发 ~1/3 空）
-            SseUtils.sendStatus(emitter, "curating", "正在讲解核心概念...");
+            sink.sendStatus("curating", "正在讲解核心概念...");
             Future<String> section2Future = pool.submit(() -> {
-                SseUtils.sendStatus(emitter, "curating", "正在解析原理与代码示例...");
+                sink.sendStatus("curating", "正在解析原理与代码示例...");
                 return streamSectionToQueue(query, resourcesText,
                         buildPrincipleCodePrompt(query), "principles_code",
                         styleHint, sessionSummary, degraded);
             });
 
             String section1 = streamSection(query, resourcesText,
-                    buildConceptPrompt(query), "concepts", emitter, styleHint, sessionSummary, degraded, draft);
+                    buildConceptPrompt(query), "concepts", sink, styleHint, sessionSummary, degraded, draft);
             sections.add(section1);
             if (draft != null) {
                 draft.notifyNow();
@@ -218,7 +218,7 @@ public class CuratorTools {
             // 成功后分片回放模拟打字机（~30 字符/片，30ms 间隔）
             String section2 = section2Future.get();
             if (!section2.equals(SECTION_FAILED)) {
-                pushInChunks(section2, emitter);
+                pushInChunks(section2, sink);
                 // 节 2 在回放期间预生成不推送，草稿于回放完成后同步（与前端看到内容一致）
                 if (draft != null) {
                     draft.appendAndNotify(section2);
@@ -227,9 +227,9 @@ public class CuratorTools {
             sections.add(section2);
 
             // 阶段 B：节 3 流式直推（与节 2 串行，保持 2 并发峰值）
-            SseUtils.sendStatus(emitter, "curating", "正在整理误区与进阶方向...");
+            sink.sendStatus("curating", "正在整理误区与进阶方向...");
             String section3 = streamSection(query, resourcesText,
-                    buildFaqAdvancePrompt(query), "faq_advance", emitter, styleHint, sessionSummary, degraded, draft);
+                    buildFaqAdvancePrompt(query), "faq_advance", sink, styleHint, sessionSummary, degraded, draft);
             sections.add(section3);
             if (draft != null) {
                 draft.notifyNow();
@@ -245,7 +245,7 @@ public class CuratorTools {
         if (sections.stream().allMatch(s -> s.equals(SECTION_FAILED))) {
             log.warn("所有报告节生成失败，降级使用 fallbackReport");
             CuratedReport fallback = fallbackReport(query, resources);
-            SseUtils.sendEvent(emitter, SseEvents.CONTENT, fallback.markdown());
+            sink.sendEvent(SseEvents.CONTENT, fallback.markdown());
             if (draft != null) {
                 draft.appendAndNotify(fallback.markdown());
             }
@@ -258,7 +258,7 @@ public class CuratorTools {
             if (sections.get(i).equals(SECTION_FAILED)) {
                 String digest = buildFallbackSection(query, resources, fallbackTitles[i]);
                 sections.set(i, digest);
-                SseUtils.sendEvent(emitter, SseEvents.CONTENT, digest);
+                sink.sendEvent(SseEvents.CONTENT, digest);
                 if (draft != null) {
                     draft.appendAndNotify(digest);
                 }
@@ -318,11 +318,11 @@ public class CuratorTools {
      * 节 2 分片回放：预生成完整文本按 ~30 字符/片推送 CONTENT（打字机观感），
      * 30ms 间隔——观感接近真实流式，且因内容已完整生成可安全重试。
      */
-    private void pushInChunks(String markdown, SseEmitter emitter) {
+    private void pushInChunks(String markdown, SseSink sink) {
         int chunkSize = 30;
         for (int i = 0; i < markdown.length(); i += chunkSize) {
             int end = Math.min(i + chunkSize, markdown.length());
-            SseUtils.sendEvent(emitter, SseEvents.CONTENT, markdown.substring(i, end));
+            sink.sendEvent(SseEvents.CONTENT, markdown.substring(i, end));
             try {
                 Thread.sleep(30);
             } catch (InterruptedException e) {
@@ -337,7 +337,7 @@ public class CuratorTools {
      * 同时累积完整文本返回；空白响应重试一次（官网偶发空流），失败返回占位文本。
      */
     private String streamSection(String query, String resourcesText, String sectionPrompt,
-                                 String sectionName, SseEmitter emitter, String styleHint,
+                                 String sectionName, SseSink sink, String styleHint,
                                  String sessionSummary, boolean degraded, DraftContext draft) {
         ChatOptions options = ChatOptions.builder().maxTokens(MAX_TOKENS_PER_SECTION).build();
         String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt,
@@ -357,7 +357,7 @@ public class CuratorTools {
                             // 空白 delta（空格/换行）必须同时进入拼接与 SSE 推送，
                             // 否则前端累积内容缺空格/换行，markdown 格式（"### 1."、列表换行）被破坏
                             sb.append(delta);
-                            SseUtils.sendEvent(emitter, SseEvents.CONTENT, delta);
+                            sink.sendEvent(SseEvents.CONTENT, delta);
                             if (draft != null) {
                                 draft.appendAndMaybeNotify(delta);
                             }

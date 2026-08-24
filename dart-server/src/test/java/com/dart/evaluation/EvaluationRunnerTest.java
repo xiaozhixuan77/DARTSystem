@@ -1,6 +1,7 @@
 package com.dart.evaluation;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.dart.broadcast.SseSink;
 import com.dart.agent.curator.CuratorAgent;
 import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.scoring.ScoredResource;
@@ -25,7 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import static org.mockito.Mockito.mock;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -130,11 +131,11 @@ class EvaluationRunnerTest {
         long start = System.nanoTime();
         String answer;
         try {
-            List<ScoredResource> results = searchAgent.execute(List.of(q.query()), 8, new SseEmitter());
+            List<ScoredResource> results = searchAgent.execute(List.of(q.query()), 8, mock(SseSink.class));
             if (results.isEmpty()) {
                 answer = "（无搜索结果）";
             } else {
-                CuratedReport report = curatorAgent.curate(q.query(), results, new SseEmitter());
+                CuratedReport report = curatorAgent.curate(q.query(), results, mock(SseSink.class));
                 answer = report.markdown();
             }
         } catch (Exception e) {
@@ -159,7 +160,7 @@ class EvaluationRunnerTest {
         boolean ragHit;
         try {
             ChatService.SearchResult result = chatService.executeSearchAndCurate(
-                    q.query(), EVAL_USER_ID, conv.getId(), new SseEmitter());
+                    q.query(), EVAL_USER_ID, conv.getId(), mock(SseSink.class));
             ragHit = result.isRagHit();
             answer = ragHit ? result.ragAnswer().answer() : result.curatedReport().markdown();
         } catch (Exception e) {
