@@ -22,8 +22,11 @@ public class SessionBroadcaster implements SseSink {
 
     private final Long conversationId;
     private final ConcurrentHashMap<Long, SseEmitter> subscribers = new ConcurrentHashMap<>();
-    /** 非 content 事件日志（[eventName, data]），供新订阅者重放；content 用 contentBuffer 快照 */
-    private final List<Object[]> eventLog = new CopyOnWriteArrayList<>();
+    /** 非 content 事件日志，供新订阅者重放；content 用 contentBuffer 快照 */
+    private final List<LoggedEvent> eventLog = new CopyOnWriteArrayList<>();
+
+    private record LoggedEvent(String eventName, Object data) {
+    }
     /** 已推送内容快照（content 事件增量累积），新订阅者收到"截至当前的全部已推送内容" */
     private final StringBuilder contentBuffer = new StringBuilder();
     private final AtomicLong subscriberSeq = new AtomicLong();
@@ -56,12 +59,20 @@ public class SessionBroadcaster implements SseSink {
         emitter.onTimeout(() -> subscribers.remove(id));
         emitter.onError(e -> subscribers.remove(id));
 
+        // 竞态防护：complete() 可能在"检查 completed 与 put 之间"执行并清空订阅者，
+        // 此处复查——已完成的会话不重放，直接关闭本订阅者（避免悬挂至超时）
+        if (completed) {
+            subscribers.remove(id);
+            SseUtils.completeSafe(emitter);
+            return;
+        }
+
         // 按时间序重放：状态事件 → 内容快照（已推送部分整块出现，后续增量实时转发）
-        for (Object[] event : eventLog) {
-            sendToEmitter(emitter, (String) event[0], event[1]);
+        for (LoggedEvent event : eventLog) {
+            SseUtils.sendEvent(emitter, event.eventName(), event.data());
         }
         if (!contentBuffer.isEmpty()) {
-            sendToEmitter(emitter, SseEvents.CONTENT, contentBuffer.toString());
+            SseUtils.sendEvent(emitter, SseEvents.CONTENT, contentBuffer.toString());
         }
     }
 
@@ -75,10 +86,10 @@ public class SessionBroadcaster implements SseSink {
                 contentBuffer.append(data.toString());
             }
         } else {
-            eventLog.add(new Object[]{eventName, data});
+            eventLog.add(new LoggedEvent(eventName, data));
         }
         for (SseEmitter emitter : subscribers.values()) {
-            sendToEmitter(emitter, eventName, data);
+            SseUtils.sendEvent(emitter, eventName, data);
         }
     }
 
@@ -114,9 +125,5 @@ public class SessionBroadcaster implements SseSink {
             SseUtils.errorSafe(emitter, t);
         }
         subscribers.clear();
-    }
-
-    private void sendToEmitter(SseEmitter emitter, String eventName, Object data) {
-        SseUtils.sendEvent(emitter, eventName, data);
     }
 }
