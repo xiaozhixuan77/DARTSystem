@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Curator Agent — 整理编排：去重 → LLM 生成报告 → 输出校验 → 降级兜底。
@@ -48,6 +49,16 @@ public class CuratorAgent {
     public CuratedReport curate(String query, List<ScoredResource> searchResults,
                                 SseEmitter emitter, String intent, String sessionSummary,
                                 boolean degraded) {
+        return curate(query, searchResults, emitter, intent, sessionSummary, degraded, null);
+    }
+
+    /**
+     * @param draftConsumer 报告生成过程中的草稿快照回调（透传给 CuratorTools，
+     *                      5s 节流）；null 表示不回调
+     */
+    public CuratedReport curate(String query, List<ScoredResource> searchResults,
+                                SseEmitter emitter, String intent, String sessionSummary,
+                                boolean degraded, Consumer<String> draftConsumer) {
         try {
             SseUtils.sendStatus(emitter, "curating", "正在整理归纳...");
 
@@ -57,8 +68,8 @@ public class CuratorAgent {
             }
 
             CuratedReport report = degraded
-                    ? curatorTools.generateReport(query, deduped, emitter, intent, sessionSummary, true)
-                    : curatorTools.generateReport(query, deduped, emitter, intent, sessionSummary);
+                    ? curatorTools.generateReport(query, deduped, emitter, intent, sessionSummary, true, draftConsumer)
+                    : curatorTools.generateReport(query, deduped, emitter, intent, sessionSummary, false, draftConsumer);
 
             if (!curatorTools.validateReport(report)) {
                 // 单次 LLM 精简重写抢救；重写成功且通过校验则替换，否则降级 fallback（无循环）

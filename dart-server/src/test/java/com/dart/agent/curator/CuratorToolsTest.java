@@ -19,6 +19,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -159,6 +160,35 @@ class CuratorToolsTest {
     }
 
     // === 分节报告生成 ===
+
+    @Test
+    void generateReport_callsDraftConsumerWithProgress() {
+        stubThreeSections();
+        List<String> snapshots = new ArrayList<>();
+
+        curatorTools.generateReport("Java", fourResources(), new SseEmitter(0L),
+                null, null, false, snapshots::add);
+
+        // 草稿快照内容递增（后一次包含前一次，草稿 = 已生成部分）
+        assertThat(snapshots).isNotEmpty();
+        for (int i = 1; i < snapshots.size(); i++) {
+            assertThat(snapshots.get(i)).contains(snapshots.get(i - 1));
+        }
+        // 首个快照已含节 1（核心概念），最终快照覆盖三节全部内容
+        assertThat(snapshots.getFirst()).contains("核心概念");
+        assertThat(snapshots.getLast())
+                .contains("核心概念").contains("关键原理").contains("常见误区");
+    }
+
+    @Test
+    void generateReport_draftConsumerNull_skipsCallbacks() {
+        stubThreeSections();
+
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(),
+                new SseEmitter(0L), null, null, false, null);
+
+        assertThat(report.markdown()).contains("核心概念").contains("关键原理").contains("常见误区");
+    }
 
     @Test
     void generateReport_normalFlow_returnsJoinedReport() {

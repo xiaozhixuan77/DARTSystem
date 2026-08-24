@@ -11,6 +11,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -45,13 +46,13 @@ class CuratorAgentTest {
         CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull())).thenReturn(expectedReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull())).thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
         CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter);
         assertThat(report).isNotNull();
         verify(curatorTools).deduplicate(anyList());
-        verify(curatorTools).generateReport(anyString(), anyList(), any(), any(), isNull());
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull());
         verify(emitter, atLeastOnce()).send(any(SseEmitter.SseEventBuilder.class));
     }
 
@@ -61,13 +62,13 @@ class CuratorAgentTest {
         CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), eq("deep_dive"), isNull())).thenReturn(expectedReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), eq("deep_dive"), isNull(), eq(false), isNull())).thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
         CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter, "deep_dive");
 
         assertThat(report).isNotNull();
-        verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("deep_dive"), isNull());
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("deep_dive"), isNull(), eq(false), isNull());
     }
 
     @Test
@@ -76,13 +77,13 @@ class CuratorAgentTest {
         CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), isNull(), isNull())).thenReturn(expectedReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), isNull(), isNull(), eq(false), isNull())).thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
         // 3 参入口 → 4 参委托（styleHint=null, sessionSummary=null）
         curatorAgent.curate("query", List.of(r1), emitter);
 
-        verify(curatorTools).generateReport(anyString(), anyList(), any(), isNull(), isNull());
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), isNull(), isNull(), eq(false), isNull());
     }
 
     @Test
@@ -91,14 +92,14 @@ class CuratorAgentTest {
         CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), eq("主题：Spring IoC")))
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), eq("主题：Spring IoC"), eq(false), isNull()))
                 .thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
         CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter, "deep_dive", "主题：Spring IoC");
 
         assertThat(report).isNotNull();
-        verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("deep_dive"), eq("主题：Spring IoC"));
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("deep_dive"), eq("主题：Spring IoC"), eq(false), isNull());
     }
 
     @Test
@@ -108,7 +109,7 @@ class CuratorAgentTest {
         CuratedReport fallback = new CuratedReport("query", "# Fallback\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull())).thenReturn(invalidReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull())).thenReturn(invalidReport);
         when(curatorTools.validateReport(invalidReport)).thenReturn(false);
         when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(fallback);
 
@@ -122,7 +123,7 @@ class CuratorAgentTest {
         CuratedReport invalidReport = new CuratedReport("query", "too short", List.of(), Instant.now());
         String rewritten = "# 重写报告\n\n核心内容 ".repeat(20);
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull())).thenReturn(invalidReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull())).thenReturn(invalidReport);
         when(curatorTools.validateReport(invalidReport)).thenReturn(false);
         when(curatorTools.regenerateReport(anyString(), anyList())).thenReturn(rewritten);
         // 语义匹配而非实例 equals：CuratorAgent 内部重写报告的 generatedAt 由 report 携带，
@@ -144,7 +145,7 @@ class CuratorAgentTest {
         CuratedReport fallback = new CuratedReport("query", "# Fallback\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull())).thenReturn(invalidReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull())).thenReturn(invalidReport);
         when(curatorTools.validateReport(invalidReport)).thenReturn(false);
         when(curatorTools.regenerateReport(anyString(), anyList())).thenReturn(null);
         when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(fallback);
@@ -160,7 +161,7 @@ class CuratorAgentTest {
         CuratedReport fallback = new CuratedReport("query", "# Fallback\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull())).thenReturn(invalidReport);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull())).thenReturn(invalidReport);
         when(curatorTools.validateReport(any())).thenReturn(false);
         when(curatorTools.regenerateReport(anyString(), anyList()))
                 .thenReturn("# 仍然过短");
@@ -180,7 +181,7 @@ class CuratorAgentTest {
 
         CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter);
         assertThat(report).isNotNull();
-        verify(curatorTools, never()).generateReport(anyString(), anyList(), any(), any(), isNull());
+        verify(curatorTools, never()).generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull());
     }
 
     @Test
@@ -189,7 +190,7 @@ class CuratorAgentTest {
         CuratedReport expected = new CuratedReport("query", "# Ok ".repeat(20),
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull())).thenReturn(expected);
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull())).thenReturn(expected);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
         curatorAgent.curate("query", List.of(r1), emitter);
@@ -202,13 +203,30 @@ class CuratorAgentTest {
         CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
                 List.of("https://a.com"), Instant.now());
         when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
-        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(true)))
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(true), isNull()))
                 .thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
         CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter, "how_to", null, true);
 
         assertThat(report).isNotNull();
-        verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("how_to"), isNull(), eq(true));
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("how_to"), isNull(), eq(true), isNull());
+    }
+
+    @Test
+    void curate_withDraftConsumer_passesThroughToGenerateReport() throws IOException {
+        ScoredResource r1 = makeResource("https://a.com", "Title A", 4.5);
+        CuratedReport expectedReport = new CuratedReport("query", "# Report\n\nContent...",
+                List.of("https://a.com"), Instant.now());
+        when(curatorTools.deduplicate(anyList())).thenReturn(List.of(r1));
+        when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), any()))
+                .thenReturn(expectedReport);
+        when(curatorTools.validateReport(any())).thenReturn(true);
+
+        Consumer<String> consumer = snapshot -> { };
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), emitter, null, null, false, consumer);
+
+        assertThat(report).isNotNull();
+        verify(curatorTools).generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), same(consumer));
     }
 }

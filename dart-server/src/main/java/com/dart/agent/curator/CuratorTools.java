@@ -15,6 +15,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
@@ -131,6 +132,17 @@ public class CuratorTools {
     public CuratedReport generateReport(String query, List<ScoredResource> resources,
                                         SseEmitter emitter, String styleHint, String sessionSummary,
                                         boolean degraded) {
+        return generateReport(query, resources, emitter, styleHint, sessionSummary, degraded, null);
+    }
+
+    /**
+     * @param draftConsumer 报告生成过程中的草稿快照回调（每 5s 节流 + 节完成时触发），
+     *                      内容与前端流式推送顺序/内容一致；null 表示不回调。
+     *                      用于流式中断后前端直接拉取已生成部分（无感续流）
+     */
+    public CuratedReport generateReport(String query, List<ScoredResource> resources,
+                                        SseEmitter emitter, String styleHint, String sessionSummary,
+                                        boolean degraded, Consumer<String> draftConsumer) {
         if (resources == null || resources.isEmpty()) {
             return emptyReport(query);
         }
