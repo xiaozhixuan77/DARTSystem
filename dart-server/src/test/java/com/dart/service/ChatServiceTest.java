@@ -122,7 +122,7 @@ class ChatServiceTest {
         assertThat(result.curatedReport().sources()).contains("https://a.com");
         verify(ragService, never()).retrieve(anyString(), anyLong());
         verify(searchAgent, never()).execute(anyList(), anyInt(), any());
-        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any());
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
         verify(chatModel, never()).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verify(messageMapper, times(2)).insert(any(Message.class));
     }
@@ -135,7 +135,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置与追问均失败降级
 
@@ -156,7 +156,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
@@ -179,7 +179,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
@@ -195,6 +195,103 @@ class ChatServiceTest {
         verify(messageMapper).insert(argThat((Message m) -> m != null && "assistant".equals(m.getRole())));
     }
 
+    // === 草稿增量持久化 ===
+
+    @Test
+    void executeSearchAndCurate_insertsDraftThenCompletes() throws Exception {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any()))
+                .thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        // 草稿 insert（空内容 + draft 标记）发生在 curator 生成前（独立事务），
+        // 完整内容通过 updateById 写回同一条消息
+        ArgumentCaptor<Message> insertCaptor = ArgumentCaptor.forClass(Message.class);
+        verify(messageMapper, times(2)).insert(insertCaptor.capture());
+        Message draftMsg = insertCaptor.getAllValues().stream()
+                .filter(m -> "assistant".equals(m.getRole())).findFirst().orElseThrow();
+        assertThat(draftMsg.getContent()).isEmpty();
+        assertThat(draftMsg.getMetadata()).contains("draft");
+        ArgumentCaptor<Message> updateCaptor = ArgumentCaptor.forClass(Message.class);
+        verify(messageMapper).updateById(updateCaptor.capture());
+        Message completed = updateCaptor.getValue();
+        assertThat(completed.getContent()).contains("完整报告内容");
+        assertThat(completed.getMetadata()).doesNotContain("draft").contains("sources");
+    }
+
+    @Test
+    void executeSearchAndCurate_draftConsumer_updatesDraftIncrementally() throws Exception {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+
+        // 捕获 ChatService 传给 curator 的草稿回调：生成过程中部分内容通过它持久化
+        java.util.concurrent.atomic.AtomicReference<Consumer<String>> draftConsumer = new java.util.concurrent.atomic.AtomicReference<>();
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any()))
+                .thenAnswer(inv -> {
+                    @SuppressWarnings("unchecked")
+                    Consumer<String> consumer = inv.getArgument(6);
+                    draftConsumer.set(consumer);
+                    return report;
+                });
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        assertThat(draftConsumer.get()).isNotNull();
+        // 触发草稿快照：部分内容经独立事务持久化（updateById，保留 draft 标记）
+        draftConsumer.get().accept("# 部分内容");
+        ArgumentCaptor<Message> captor = ArgumentCaptor.forClass(Message.class);
+        verify(messageMapper, atLeastOnce()).updateById(captor.capture());
+        Message draftUpdate = captor.getAllValues().getFirst();
+        assertThat(draftUpdate.getContent()).isEqualTo("# 部分内容");
+        assertThat(draftUpdate.getMetadata()).contains("draft");
+    }
+
+    @Test
+    void executeSearchAndCurate_draftInsertFailure_fallsBackToInsert() throws Exception {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any()))
+                .thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+        // 第一次事务（用户消息）成功，第二次（草稿 insert）失败
+        doAnswer(inv -> {
+            @SuppressWarnings("unchecked")
+            Consumer<TransactionStatus> action = inv.getArgument(0);
+            action.accept(null);
+            return null;
+        }).doThrow(new RuntimeException("db error"))
+                .when(transactionTemplate).executeWithoutResult(any());
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
+
+        // 草稿失败 → 回退原路径：直接 insert 完整助手消息（无 updateById）
+        ArgumentCaptor<Message> insertCaptor = ArgumentCaptor.forClass(Message.class);
+        verify(messageMapper, times(2)).insert(insertCaptor.capture());
+        Message fallbackMsg = insertCaptor.getAllValues().stream()
+                .filter(m -> "assistant".equals(m.getRole())).findFirst().orElseThrow();
+        assertThat(fallbackMsg.getContent()).contains("完整报告内容");
+        verify(messageMapper, never()).updateById(any(Message.class));
+    }
+
     // === 报告自动沉淀（预灌 RAG 知识库）===
 
     @Test
@@ -205,7 +302,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置与追问失败降级
 
@@ -236,7 +333,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("Spring 三级缓存原理", "# Report\n\n完整报告内容 ".repeat(20),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
         KnowledgeItem existing = new KnowledgeItem();
@@ -264,7 +361,7 @@ class ChatServiceTest {
                 "# Report\n\n完整报告内容 ".repeat(20),
                 List.of("https://blog.example.com/post", "https://docs.spring.io/spring-boot/index.html"),
                 Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
@@ -283,7 +380,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置与追问失败降级
         when(embeddingService.embedAndPersist(any(), any(), any(), any(), any(), any()))
@@ -307,7 +404,7 @@ class ChatServiceTest {
         CuratedReport report = new CuratedReport("query",
                 "# Report\n\n> ⚠️ 本节内容生成失败，请稍后重试或访问参考文献了解详情。",
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
@@ -325,7 +422,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
         when(knowledgeItemMapper.selectCount(any())).thenReturn(50L); // 达到上限
@@ -553,7 +650,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"微服务 学习路线\",\"variants\":[]}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
@@ -577,7 +674,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"微服务 学习路线\","
                         + "\"optimizedEn\":\"microservices learning path\","
@@ -606,7 +703,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"协程 调度 原理\","
                         + "\"optimizedEn\":\"coroutine scheduling principles\","
@@ -636,7 +733,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(degradedSr));
         CuratedReport report = new CuratedReport("query", "# 精简报告\n\n要点内容 ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(true))).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(true), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置与追问均失败降级
 
@@ -662,14 +759,14 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(degradedSr));
         CuratedReport report = new CuratedReport("query", "# 精简报告\n\n要点内容 ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(true))).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(true), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
         chatService.executeSearchAndCurate("微服务 学习路线", 1L, 100L, emitter);
 
-        verify(curatorAgent).curate(anyString(), anyList(), any(), any(), isNull(), eq(true));
-        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), isNull());
+        verify(curatorAgent).curate(anyString(), anyList(), any(), any(), isNull(), eq(true), any());
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), isNull(), eq(false), any());
     }
 
     @Test
@@ -900,7 +997,7 @@ class ChatServiceTest {
         // 续答不触发搜索/RAG/Curator
         verify(searchAgent, never()).execute(anyList(), anyInt(), any());
         verify(ragService, never()).retrieve(anyString(), anyLong());
-        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any());
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
         // 回答持久化 type=followup（user + assistant 两次 insert）
         ArgumentCaptor<Message> msgCaptor = ArgumentCaptor.forClass(Message.class);
         verify(messageMapper, times(2)).insert(msgCaptor.capture());
@@ -935,7 +1032,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("为什么不行", 1L, 100L, emitter);
 
@@ -953,7 +1050,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenAnswer(inv -> {
             org.springframework.ai.chat.prompt.Prompt p = inv.getArgument(0);
             String text = p.getInstructions().getFirst().getText();
@@ -982,7 +1079,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整内容 ".repeat(20),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout")); // 前置/追问均失败降级
 
@@ -1017,7 +1114,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
@@ -1049,7 +1146,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(summaryService.getSummary(1L, 100L)).thenReturn("主题：Spring IoC\n关键结论：三级缓存");
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenAnswer(inv -> {
             org.springframework.ai.chat.prompt.Prompt p = inv.getArgument(0);
@@ -1083,7 +1180,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
         // 前置合并单次调用 → JSON（isTech + 优化词）
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
@@ -1095,7 +1192,7 @@ class ChatServiceTest {
         // 前置合并单次调用已由 preProcessQuery 专门用例覆盖（此处还有追问调用）
         verify(ragService).retrieve(eq("优化后的技术问题描述"), eq(1L));
         verify(searchAgent).execute(eq(List.of("优化后的技术问题描述")), anyInt(), any());
-        verify(curatorAgent).curate(eq("优化后的技术问题描述"), anyList(), any(), any(), any());
+        verify(curatorAgent).curate(eq("优化后的技术问题描述"), anyList(), any(), any(), any(), eq(false), any());
     }
 
     @Test
@@ -1106,7 +1203,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化后的技术问题描述\","
                         + "\"variants\":[\"变体查询1\",\"变体查询2\"]}"))));
@@ -1131,7 +1228,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"Java 内存模型\","
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
@@ -1142,7 +1239,7 @@ class ChatServiceTest {
         // deep_dive 扩大搜索量到 12
         verify(searchAgent).execute(anyList(), eq(12), any());
         // 意图透传给 CuratorAgent（报告风格）
-        verify(curatorAgent).curate(anyString(), anyList(), any(), eq("deep_dive"), any());
+        verify(curatorAgent).curate(anyString(), anyList(), any(), eq("deep_dive"), any(), eq(false), any());
     }
 
     @Test
@@ -1153,7 +1250,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"Docker 是什么\","
                         + "\"variants\":[],\"intent\":\"quick_fact\"}"))));
@@ -1174,7 +1271,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化后的技术问题描述\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
@@ -1182,7 +1279,7 @@ class ChatServiceTest {
         chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
         verify(searchAgent).execute(anyList(), eq(8), any());
-        verify(curatorAgent).curate(anyString(), anyList(), any(), eq("how_to"), any());
+        verify(curatorAgent).curate(anyString(), anyList(), any(), eq("how_to"), any(), eq(false), any());
     }
 
     // === SearchTrace 链路追踪 ===
@@ -1233,7 +1330,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化词\","
                         + "\"variants\":[],\"intent\":\"how_to\"}"))));
@@ -1261,7 +1358,7 @@ class ChatServiceTest {
         CuratedReport report = new CuratedReport("query",
                 "# Report\n\n> ⚠️ 本节内容生成失败，请稍后重试或访问参考文献了解详情。",
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化词\","
                         + "\"variants\":[],\"intent\":\"how_to\"}"))));
@@ -1297,7 +1394,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(searchTraceMapper.insert(any(SearchTrace.class))).thenThrow(new RuntimeException("db error"));
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化词\","
@@ -1318,7 +1415,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         // 前置合并调用抛异常 → 降级 isTech=true + 优化词为原文
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
@@ -1341,7 +1438,7 @@ class ChatServiceTest {
         assertThat(result.curatedReport().markdown()).contains("技术");
         verify(ragService, never()).retrieve(anyString(), anyLong());
         verify(searchAgent, never()).execute(anyList(), anyInt(), any());
-        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any());
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
     }
 
     @Test
@@ -1353,7 +1450,7 @@ class ChatServiceTest {
         assertThat(result.isRagHit()).isTrue();
         assertThat(result.ragAnswer().answer()).contains("Spring Boot");
         // RAG 命中短路：不进入 Curator（Search Agent 已并行启动，不做 never 断言）
-        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any());
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
     }
 
     @Test
@@ -1384,14 +1481,14 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
 
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
         verify(searchAgent).execute(anyList(), anyInt(), any());
-        verify(curatorAgent).curate(anyString(), anyList(), any(), any(), any());
+        verify(curatorAgent).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
     }
 
     @Test
@@ -1401,14 +1498,14 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, emitter);
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
         verify(ragService).retrieve(eq("Spring Boot"), eq(1L));
         verify(searchAgent).execute(anyList(), anyInt(), any());
-        verify(curatorAgent).curate(anyString(), anyList(), any(), any(), any());
+        verify(curatorAgent).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
     }
 
     @Test
@@ -1418,7 +1515,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("Java", "# Java 技术学习报告\n\nJava是...".repeat(3),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
 
         // 前置合并第一次调用 → JSON（isTech + 优化词）; generateFollowUp 第二次调用 → 追问
         when(chatResponse.getResults())
@@ -1447,7 +1544,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         // 前置合并与追问 LLM 调用均失败
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
@@ -1456,7 +1553,10 @@ class ChatServiceTest {
         // 即使追问失败，报告仍正常返回
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).doesNotContain("## 进一步探索");
-        verify(messageMapper, never()).updateById(any(Message.class));
+        // 追问失败：仅一次 updateById（草稿→完整报告），无追问追加更新
+        ArgumentCaptor<Message> completeCaptor = ArgumentCaptor.forClass(Message.class);
+        verify(messageMapper, times(1)).updateById(completeCaptor.capture());
+        assertThat(completeCaptor.getValue().getContent()).doesNotContain("## 进一步探索");
     }
 
     @Test
@@ -1470,7 +1570,7 @@ class ChatServiceTest {
         assertThat(result.curatedReport().markdown()).contains("未找到");
         // 空结果提示应引导用户补充具体技术名词重试
         assertThat(result.curatedReport().markdown()).contains("具体技术名词");
-        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any());
+        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
     }
 
     @Test
@@ -1493,7 +1593,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(new AssistantMessage(variantsJson))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenReturn(chatResponse)
@@ -1549,7 +1649,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(new AssistantMessage(
                 "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\",\"variants\":[\"sb\"],\"intent\":\"" + intent + "\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
@@ -1577,7 +1677,7 @@ class ChatServiceTest {
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
                 List.of("https://a.com"), Instant.now());
-        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any())).thenReturn(report);
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(new AssistantMessage(
                 "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\",\"variants\":[\"sb\"],\"intent\":\"general\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))

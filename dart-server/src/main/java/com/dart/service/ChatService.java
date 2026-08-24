@@ -300,11 +300,8 @@ public class ChatService {
             } catch (Exception e) {
                 log.warn("会话摘要读取失败，报告生成不带历史上下文: conversationId={}", conversationId, e);
             }
-            report = degraded
-                    ? curatorAgent.curate(effectiveQuery, searchResults, emitter,
-                            pre.intent(), sessionSummary, true)
-                    : curatorAgent.curate(effectiveQuery, searchResults, emitter,
-                            pre.intent(), sessionSummary);
+            report = curatorAgent.curate(effectiveQuery, searchResults, emitter,
+                    pre.intent(), sessionSummary, degraded, null);
             if (degraded) {
                 report = new CuratedReport(report.title(),
                         DEGRADED_NOTICE + "\n\n" + report.markdown(),
