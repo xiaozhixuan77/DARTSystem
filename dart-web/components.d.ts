@@ -16,6 +16,7 @@ declare module 'vue' {
     AuthCard: typeof import('./src/components/auth/AuthCard.vue')['default']
     ChatInput: typeof import('./src/components/chat/ChatInput.vue')['default']
     ChatMessage: typeof import('./src/components/chat/ChatMessage.vue')['default']
+    ChatNavigator: typeof import('./src/components/chat/ChatNavigator.vue')['default']
     KnowledgeCard: typeof import('./src/components/knowledge/KnowledgeCard.vue')['default']
     KnowledgeEditDialog: typeof import('./src/components/knowledge/KnowledgeEditDialog.vue')['default']
     KnowledgeGraphView: typeof import('./src/components/knowledge/KnowledgeGraphView.vue')['default']
