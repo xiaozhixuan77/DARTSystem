@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 
+const props = defineProps<{ disabled?: boolean }>()
 const emit = defineEmits<{ send: [message: string] }>()
 const input = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -16,7 +17,7 @@ watch(input, autoResize)
 
 function handleSend() {
   const trimmed = input.value.trim()
-  if (!trimmed) return
+  if (props.disabled || !trimmed) return
   emit('send', trimmed)
   input.value = ''
 }
@@ -40,7 +41,7 @@ function handleKeydown(e: KeyboardEvent) {
         rows="1"
         @keydown="handleKeydown"
       />
-      <button class="send-btn" @click="handleSend" :disabled="!input.trim()">
+      <button class="send-btn" @click="handleSend" :disabled="!input.trim() || disabled">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           width="20" height="20">
           <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
