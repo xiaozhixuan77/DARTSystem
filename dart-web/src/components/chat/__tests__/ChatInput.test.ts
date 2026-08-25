@@ -74,4 +74,20 @@ describe('ChatInput.vue', () => {
     const wrapper = mount(ChatInput)
     expect(wrapper.find('.input-hint').text()).toContain('Enter')
   })
+
+  it('disabled 时不发送且保留输入', async () => {
+    const wrapper = mount(ChatInput, { props: { disabled: true } })
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('hello')
+    await textarea.trigger('keydown', { key: 'Enter', shiftKey: false })
+
+    expect(wrapper.emitted('send')).toBeFalsy()
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('hello')
+  })
+
+  it('disabled 时有输入内容发送按钮仍禁用', async () => {
+    const wrapper = mount(ChatInput, { props: { disabled: true } })
+    await wrapper.find('textarea').setValue('hello')
+    expect(wrapper.find('.send-btn').attributes('disabled')).toBeDefined()
+  })
 })
