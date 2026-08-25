@@ -47,6 +47,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   <div v-if="navItems.length > 0" ref="rootRef" class="chat-navigator">
     <button
       class="nav-toggle"
+      :class="{ 'nav-toggle-open': open }"
       type="button"
       :title="open ? '收起导航' : '对话记录导航'"
       @click="toggle"
@@ -76,7 +77,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   bottom: 0;
   z-index: 100;
 }
-// 右半圆凸出按钮：贴右缘垂直居中，灰色细边框
+// 左凸半圆按钮：弧面朝左（指向对话区）、直边贴右缘（开口朝右），垂直居中，灰色细边框
 .nav-toggle {
   position: absolute;
   top: 50%;
@@ -86,8 +87,8 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   height: 48px;
   padding: 0;
   border: 1px solid $color-border;
-  border-left: none;
-  border-radius: 0 9px 9px 0;
+  border-right: none;
+  border-radius: 9px 0 0 9px;
   background: $color-surface;
   color: $color-muted;
   font-size: 10px;
@@ -96,8 +97,13 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: -1px 1px 4px rgba(0, 0, 0, 0.06);
+  transition: right $duration-fast $ease-out;
   &:hover { color: $color-accent; }
+}
+// 抽屉展开时按钮跟随：左移到抽屉面板左缘（弧面仍朝对话区，可点击收起）
+.nav-toggle-open {
+  right: $nav-width;
 }
 .nav-panel {
   position: absolute;
