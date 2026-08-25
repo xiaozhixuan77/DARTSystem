@@ -50,7 +50,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
       type="button"
       :title="open ? '收起导航' : '对话记录导航'"
       @click="toggle"
-    >{{ open ? '◄' : '►' }}</button>
+    >{{ open ? '►' : '◄' }}</button>
     <div v-if="open" class="nav-panel">
       <div class="nav-panel-title">对话记录</div>
       <div class="nav-list">
