@@ -53,6 +53,7 @@ class JwtAuthenticationFilterTest {
     void doFilterInternal_withValidBearerToken_setsAuthentication() throws Exception {
         when(request.getHeader("Authorization")).thenReturn("Bearer valid.token.here");
         when(jwtTokenProvider.validate("valid.token.here")).thenReturn(true);
+        when(jwtTokenProvider.getTokenType("valid.token.here")).thenReturn("access");
         when(jwtTokenProvider.getUsername("valid.token.here")).thenReturn("testuser");
 
         UserDetails userDetails = new org.springframework.security.core.userdetails.User(
@@ -65,6 +66,20 @@ class JwtAuthenticationFilterTest {
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication().getName())
                 .isEqualTo("testuser");
+    }
+
+    @Test
+    void doFilterInternal_withRefreshToken_rejectsDespiteValidSignature() throws Exception {
+        when(request.getHeader("Authorization")).thenReturn("Bearer refresh.token.here");
+        when(jwtTokenProvider.validate("refresh.token.here")).thenReturn(true);
+        when(jwtTokenProvider.getTokenType("refresh.token.here")).thenReturn("refresh");
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        // refresh token 验签通过但类型不符 → 不认证（防 refresh token 误用于业务接口）
+        verify(filterChain).doFilter(request, response);
+        verify(userDetailsService, never()).loadUserByUsername(anyString());
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test

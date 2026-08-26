@@ -5,6 +5,7 @@ import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
@@ -189,6 +190,21 @@ class CuratorToolsTest {
                 mock(SseSink.class), null, null, false, null);
 
         assertThat(report.markdown()).contains("核心概念").contains("关键原理").contains("常见误区");
+    }
+
+    @Test
+    @Timeout(10)
+    void generateReport_streamHangs_appliesInternalTimeoutAndDegrades() throws Exception {
+        org.springframework.test.util.ReflectionTestUtils.setField(curatorTools, "streamTimeout",
+                java.time.Duration.ofMillis(100));
+        when(chatModel.stream(any(Prompt.class))).thenReturn(Flux.never());
+
+        CuratedReport report = curatorTools.generateReport("Java", fourResources(), mock(SseSink.class));
+
+        // LLM 流挂起 → 内部超时打断重试，最终降级兜底，绝不永久挂死
+        assertThat(report).isNotNull();
+        assertThat(report.markdown()).isNotBlank();
+        verify(chatModel, atLeast(3)).stream(any(Prompt.class));
     }
 
     @Test
