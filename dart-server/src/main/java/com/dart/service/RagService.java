@@ -172,7 +172,11 @@ public class RagService {
                 参考材料：
                 %s
 
-                请生成简洁、准确的中文回答。""".formatted(insufficiencyInstruction,
+                请根据参考材料生成结构化中文回答：
+                - 先给出 1-2 句直接结论
+                - 再按要点分点展开（- 列表），覆盖材料中的概念、步骤、示例等关键信息
+                - 材料含代码时保留关键代码片段
+                - 回答总长度控制在 300-500 字，准确完整，不要省略核心技术点""".formatted(insufficiencyInstruction,
                 query.replace("<", "&lt;"), context);
 
         try {
