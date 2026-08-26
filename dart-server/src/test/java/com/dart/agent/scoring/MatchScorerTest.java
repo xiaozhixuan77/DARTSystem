@@ -38,6 +38,13 @@ class MatchScorerTest {
     }
 
     @Test
+    void evaluate_upperMidHitRate_returns4() {
+        // 3 词命中 2（0.67 落在 0.6-0.8 区间），无标题加分 → 4
+        int score = scorer.evaluate("spring boot config", "spring 框架配置 config 相关");
+        assertThat(score).isEqualTo(4);
+    }
+
+    @Test
     void evaluate_lowHitRate_returns2() {
         int score = scorer.evaluate("Java Spring Boot配置",
                 "Kotlin is a programming language that runs on JVM. It can be used for Android development.");

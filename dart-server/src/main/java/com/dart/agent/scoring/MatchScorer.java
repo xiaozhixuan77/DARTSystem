@@ -43,9 +43,8 @@ public class MatchScorer {
         boolean titleMatch = titleRegion.contains(query.toLowerCase()) ||
                 keywords.size() >= 2 && titleRegion.contains(keywords.get(0)) && titleRegion.contains(keywords.get(1));
 
-        // 评分映射
+        // 评分映射（0.6-0.8 区间与 ≥0.8 无标题加分同档 4，原 ≥0.8 分支为死分支已合并）
         if (hitRate >= 0.8 && titleMatch) return 5;
-        if (hitRate >= 0.8) return 4;
         if (hitRate >= 0.6) return 4;
         if (hitRate >= 0.4) return 3;
         if (hitRate >= 0.2) return 2;

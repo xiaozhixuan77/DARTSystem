@@ -322,7 +322,8 @@ public class ChatService {
             fallbackReason = "rag_insufficient" + (fallbackReason == null ? "" : "," + fallbackReason);
         }
         if (degraded) {
-            fallbackReason = "low_quality_fallback" + (ragDegraded ? ",rag_insufficient" : "");
+            // 前缀累加而非覆盖：保留 rag_insufficient 与节失败原因，链路可完整回溯降级链
+            fallbackReason = "low_quality_fallback" + (fallbackReason == null ? "" : "," + fallbackReason);
         }
         recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
                 false, null, effectiveQuery, searchResults, "search",
@@ -933,6 +934,16 @@ public class ChatService {
     private static final java.util.regex.Pattern HAN_PATTERN = java.util.regex.Pattern.compile("\\p{IsHan}");
     private static final java.util.regex.Pattern EN_TOKEN_PATTERN =
             java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9.]{1,}");
+    private static final java.util.regex.Pattern FOLLOWUP_PATTERN =
+            java.util.regex.Pattern.compile("\"isFollowUp\"\\s*:\\s*(true|false)");
+    private static final java.util.regex.Pattern IS_TECH_PATTERN =
+            java.util.regex.Pattern.compile("\"isTech\"\\s*:\\s*(true|false)");
+    private static final java.util.regex.Pattern OPTIMIZED_PATTERN =
+            java.util.regex.Pattern.compile("\"optimized\"\\s*:\\s*\"([^\"]*)\"");
+    private static final java.util.regex.Pattern OPTIMIZED_EN_PATTERN =
+            java.util.regex.Pattern.compile("\"optimizedEn\"\\s*:\\s*\"([^\"]*)\"");
+    private static final java.util.regex.Pattern INTENT_PATTERN =
+            java.util.regex.Pattern.compile("\"intent\"\\s*:\\s*\"([^\"]*)\"");
 
     /**
      * 词表降级英文检索词生成：主词英文 token 组合优先，纯中文查询用歧义词稳定映射兜底。
@@ -1076,14 +1087,12 @@ public class ChatService {
         if (json == null || json.isBlank()) {
             return false;
         }
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("\"isFollowUp\"\\s*:\\s*(true|false)").matcher(json);
+        java.util.regex.Matcher m = FOLLOWUP_PATTERN.matcher(json);
         return m.find() && Boolean.parseBoolean(m.group(1));
     }
 
     private static boolean parseIsTech(String json) {
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("\"isTech\"\\s*:\\s*(true|false)").matcher(json);
+        java.util.regex.Matcher m = IS_TECH_PATTERN.matcher(json);
         if (m.find()) {
             return Boolean.parseBoolean(m.group(1));
         }
@@ -1091,14 +1100,12 @@ public class ChatService {
     }
 
     private static String parseOptimized(String json) {
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("\"optimized\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
+        java.util.regex.Matcher m = OPTIMIZED_PATTERN.matcher(json);
         return m.find() ? m.group(1) : null;
     }
 
     private static String parseOptimizedEn(String json) {
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("\"optimizedEn\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
+        java.util.regex.Matcher m = OPTIMIZED_EN_PATTERN.matcher(json);
         return m.find() ? m.group(1) : null;
     }
 
@@ -1109,8 +1116,7 @@ public class ChatService {
         if (json == null || json.isBlank()) {
             return "how_to";
         }
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("\"intent\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
+        java.util.regex.Matcher m = INTENT_PATTERN.matcher(json);
         return m.find() ? m.group(1) : "how_to";
     }
 
