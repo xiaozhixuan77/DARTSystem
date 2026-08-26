@@ -43,6 +43,9 @@ public class ChatController {
             convReq.setTitle(title);
             ConversationVO newConv = conversationService.createConversation(userId, convReq);
             conversationId = newConv.getId();
+        } else {
+            // 会话归属校验（非本人会话抛 FORBIDDEN/NOT_FOUND，由 GlobalExceptionHandler 处理）
+            conversationService.getConversation(userId, conversationId);
         }
 
         final Long finalConversationId = conversationId;

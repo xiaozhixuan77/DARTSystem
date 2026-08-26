@@ -11,6 +11,10 @@ spring:
       host: localhost
       port: 6379
 
+jwt:
+  # 仅本地开发默认值；非 dev 环境必须通过 JWT_SECRET 环境变量显式注入
+  secret: ZGV2LWRlZmF1bHQtc2VjcmV0LWZvci1sb2NhbC1kZXZlbG9wbWVudC1vbmx5LW5vdC1mb3ItcHJvZHVjdGlvbg==
+
 logging:
   level:
     com.dart: DEBUG

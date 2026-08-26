@@ -94,10 +94,9 @@ public class RagService {
                 }
             }
             Map<Long, KnowledgeItem> itemMap = new HashMap<>();
-            for (Long id : itemIds) {
-                KnowledgeItem item = knowledgeItemMapper.selectById(id);
+            for (KnowledgeItem item : knowledgeItemMapper.selectBatchIds(itemIds)) {
                 if (item != null && userId.equals(item.getUserId()) && item.getIsDeleted() == 0) {
-                    itemMap.put(id, item);
+                    itemMap.put(item.getId(), item);
                 }
             }
 
@@ -216,15 +215,24 @@ public class RagService {
                 relatedIds.add(r.getObjectId());
             }
         }
+        Map<Long, KnowledgeItem> fetched = new HashMap<>();
+        List<Long> missingIds = relatedIds.stream().filter(id -> !hitItems.containsKey(id)).toList();
+        if (!missingIds.isEmpty()) {
+            try {
+                for (KnowledgeItem item : knowledgeItemMapper.selectBatchIds(missingIds)) {
+                    if (item != null) {
+                        fetched.put(item.getId(), item);
+                    }
+                }
+            } catch (Exception e) {
+                // 批量加载失败时跳过未命中条目（与原逐条容错语义一致）
+            }
+        }
         List<String> context = new ArrayList<>();
         for (Long id : relatedIds) {
             KnowledgeItem item = hitItems.get(id);
             if (item == null) {
-                try {
-                    item = knowledgeItemMapper.selectById(id);
-                } catch (Exception e) {
-                    continue;
-                }
+                item = fetched.get(id);
             }
             if (item == null || item.getTitle() == null) {
                 continue;

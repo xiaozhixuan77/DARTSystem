@@ -160,7 +160,7 @@ public class ChatService {
         transactionTemplate.executeWithoutResult(status -> messageMapper.insert(userMsg));
 
         // 1.5 查询缓存检查（原始查询规范化 key；命中直接返回，跳过全流程，不记链路）
-        SearchResult cached = tryCache(query, conversationId, sink);
+        SearchResult cached = tryCache(userId, query, conversationId, sink);
         if (cached != null) {
             return cached;
         }
@@ -378,7 +378,7 @@ public class ChatService {
             log.warn("追问生成失败", e);
         } finally {
             if (!degraded) {
-                writeCache(query, markdown, report.sources());
+                writeCache(userId, query, markdown, report.sources());
                 sedimentReport(userId, report.title(), query, markdown, report.sources(), intent);
             }
             // 摘要更新必须传原始报告（不含追问段），追问段会污染摘要
@@ -768,9 +768,9 @@ public class ChatService {
      * 读取报告缓存：命中则 SSE 推送并持久化消息，返回结果；未命中返回 null。
      * 缓存 key 为原始查询（trim + 小写）的 SHA-256 前 8 字节十六进制。
      */
-    private SearchResult tryCache(String query, Long conversationId, SseSink sink) {
+    private SearchResult tryCache(Long userId, String query, Long conversationId, SseSink sink) {
         try {
-            String json = redisTemplate.opsForValue().get(cacheKey(query));
+            String json = redisTemplate.opsForValue().get(cacheKey(userId, query));
             if (json == null || json.isBlank()) {
                 return null;
             }
@@ -796,20 +796,20 @@ public class ChatService {
     /**
      * 写入报告缓存（仅搜索路径；RAG 回答与用户知识库相关，不缓存）。
      */
-    private void writeCache(String query, String markdown, List<String> sources) {
+    private void writeCache(Long userId, String query, String markdown, List<String> sources) {
         try {
             Map<String, Object> data = Map.of("markdown", markdown, "sources", sources);
-            redisTemplate.opsForValue().set(cacheKey(query),
+            redisTemplate.opsForValue().set(cacheKey(userId, query),
                     OBJECT_MAPPER.writeValueAsString(data), Duration.ofHours(cacheTtlHours));
         } catch (Exception e) {
             log.warn("写入报告缓存失败", e);
         }
     }
 
-    private String cacheKey(String query) {
+    private String cacheKey(Long userId, String query) {
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256")
-                    .digest(query.trim().toLowerCase().getBytes(StandardCharsets.UTF_8));
+                    .digest((userId + "|" + query.trim().toLowerCase()).getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder(RedisKeyConstants.REPORT_CACHE_PREFIX);
             for (int i = 0; i < 8; i++) {
                 sb.append(String.format("%02x", hash[i]));
