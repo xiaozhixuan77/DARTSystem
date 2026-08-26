@@ -150,6 +150,26 @@ class KnowledgeServiceTest {
     }
 
     @Test
+    void listUserKnowledge_keywordWithWildcards_escapesLikePattern() {
+        Page<KnowledgeItem> mockPage = new Page<>(1, 10);
+        mockPage.setRecords(List.of(createItem(1L, 1L, "Spring Guide")));
+        when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
+                .thenReturn(mockPage);
+
+        knowledgeService.listUserKnowledge(1L, 1, 10, null, "100%_真");
+
+        ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
+        // 先触发 SQL 生成（参数随之绑定），再断言 LIKE 参数中的 % / _ 已被转义为字面匹配
+        captor.getValue().getCustomSqlSegment();
+        java.util.Map<String, Object> pairs = captor.getValue().getParamNameValuePairs();
+        assertThat(pairs.values())
+                .anyMatch(v -> v.toString().contains("100\\%\\_真"));
+        assertThat(pairs.values())
+                .noneMatch(v -> v.toString().equals("%100%_真%"));
+    }
+
+    @Test
     void listUserKnowledge_blankKeyword_noKeywordCondition() {
         Page<KnowledgeItem> mockPage = new Page<>(1, 10);
         mockPage.setRecords(List.of(createItem(1L, 1L, "Spring Guide")));
@@ -329,7 +349,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(createItem(2L, 1L, "Spring")));
         when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        when(relationMapper.selectCount(any())).thenReturn(0L);
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
 
         knowledgeService.linkRelatedItems(1L, 1L);
 
@@ -347,7 +367,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(createItem(2L, 1L, "Spring Boot")));
         when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        when(relationMapper.selectCount(any())).thenReturn(0L);
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
 
         knowledgeService.linkRelatedItems(1L, 1L);
 
@@ -364,6 +384,22 @@ class KnowledgeServiceTest {
         knowledgeService.linkRelatedItems(1L, 1L);
 
         verify(relationMapper, never()).insert(any(KnowledgeRelation.class));
+    }
+
+    @Test
+    void rebuildLinks_batchLoadsRelations_noSelectCountPerPair() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(1L, 1L, "Spring Boot"),
+                        createItem(2L, 1L, "Spring")));
+        when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+
+        int created = knowledgeService.rebuildLinks(1L);
+
+        // 现存关系一次批量预载（selectList），杜绝逐对 selectCount 的 O(n²) 查询
+        assertThat(created).isEqualTo(1);
+        verify(relationMapper).insert(any(KnowledgeRelation.class));
+        verify(relationMapper, never()).selectCount(any());
     }
 
     @Test
@@ -385,7 +421,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(createItem(2L, 1L, "Spring Cloud 与 Spring Boot 有什么区别？")));
         when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        when(relationMapper.selectCount(any())).thenReturn(0L);
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
 
         knowledgeService.linkRelatedItems(1L, 1L);
 
@@ -415,7 +451,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(createItem(2L, 1L, "自动配置原理！")));
         when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        when(relationMapper.selectCount(any())).thenReturn(0L);
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
 
         knowledgeService.linkRelatedItems(1L, 1L);
 
@@ -431,7 +467,7 @@ class KnowledgeServiceTest {
                 .thenReturn(List.of(createItem(2L, 1L, "Spring Boot")));
         when(knowledgeChunkMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(chunkOf(1L, fullVector(0.5f)), chunkOf(2L, fullVector(0.5f))));
-        when(relationMapper.selectCount(any())).thenReturn(0L);
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
 
         knowledgeService.linkRelatedItems(1L, 1L);
 
@@ -459,7 +495,8 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
                 .thenReturn(List.of(createItem(2L, 1L, "Spring")));
         when(knowledgeChunkMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        when(relationMapper.selectCount(any())).thenReturn(1L);
+        KnowledgeRelation existing = relation(1L, "related_to", 2L, null);
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
 
         knowledgeService.linkRelatedItems(1L, 1L);
 
@@ -473,7 +510,7 @@ class KnowledgeServiceTest {
                         createItem(1L, 1L, "Spring"),
                         createItem(2L, 1L, "Spring Boot"),
                         createItem(3L, 1L, "Spring Cloud")));
-        when(relationMapper.selectCount(any())).thenReturn(0L);
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
 
         int created = knowledgeService.rebuildLinks(1L);
 
@@ -488,7 +525,9 @@ class KnowledgeServiceTest {
                 .thenReturn(List.of(
                         createItem(1L, 1L, "Spring"),
                         createItem(2L, 1L, "Spring Boot")));
-        when(relationMapper.selectCount(any())).thenReturn(0L, 1L);
+        // 第一次无现存关系 → 建 1 条；第二次已有 1-2 关系 → 幂等跳过
+        when(relationMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(), List.of(relation(1L, "related_to", 2L, null)));
 
         assertThat(knowledgeService.rebuildLinks(1L)).isEqualTo(1);
         assertThat(knowledgeService.rebuildLinks(1L)).isZero();
@@ -541,14 +580,15 @@ class KnowledgeServiceTest {
     @Test
     void getGraphData_returnsTwoLayerGraph() {
         when(knowledgeItemMapper.selectById(1L)).thenReturn(createItem(1L, 1L, "Spring Boot"));
-        when(knowledgeItemMapper.selectById(2L)).thenReturn(createItem(2L, 1L, "Spring Framework"));
-        when(knowledgeItemMapper.selectById(3L)).thenReturn(createItem(3L, 1L, "Spring Cloud"));
+        when(knowledgeItemMapper.selectBatchIds(anyCollection()))
+                .thenReturn(List.of(createItem(2L, 1L, "Spring Framework"),
+                        createItem(3L, 1L, "Spring Cloud")));
 
         KnowledgeRelation r1 = relation(1L, "extends", 2L, null);
         KnowledgeRelation r2 = relation(3L, "related_to", 1L, null);
         KnowledgeRelation r3 = relation(2L, "part_of", null, "Spring Data");
-        // 层 1（中心 1 的关系）→ 层 2（一级节点 2、3 的关系）
-        when(relationMapper.selectList(any())).thenReturn(List.of(r1, r2), List.of(r3), List.of());
+        // 层 1（中心 1 的关系）→ 层 2 批量（全部一级节点一次查询，含中心关联的 r1/r2 由循环跳过）
+        when(relationMapper.selectList(any())).thenReturn(List.of(r1, r2), List.of(r1, r2, r3));
 
         KnowledgeGraphDTO graph = knowledgeService.getGraphData(1L, 1L);
 

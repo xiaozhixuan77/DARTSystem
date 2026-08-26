@@ -153,6 +153,23 @@ class SessionBroadcasterTest {
     }
 
     @Test
+    void subscribe_replaysSnapshotExactlyOnce() {
+        try (MockedStatic<SseUtils> sse = mockStatic(SseUtils.class)) {
+            broadcaster.sendStatus("searching", "正在搜索...");
+            broadcaster.sendEvent("content", "hello ");
+            SseEmitter emitter = newEmitter();
+            broadcaster.subscribe(emitter);
+
+            // 快照先行 + 入 map 后实时转发：状态与内容均只重放一次（防 put-重放窗口内重复）
+            sse.verify(() -> SseUtils.sendEvent(eq(emitter), eq("content"), eq("hello ")),
+                    org.mockito.Mockito.times(1));
+            sse.verify(() -> SseUtils.sendEvent(eq(emitter), eq("status"),
+                    eq(Map.of("phase", "searching", "message", "正在搜索..."))),
+                    org.mockito.Mockito.times(1));
+        }
+    }
+
+    @Test
     void sendError_accumulatesForReplayAndBroadcasts() {
         try (MockedStatic<SseUtils> sse = mockStatic(SseUtils.class)) {
             SseEmitter e1 = newEmitter();

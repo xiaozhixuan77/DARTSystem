@@ -58,6 +58,18 @@ class EmbeddingServiceTest {
         lenient().when(redisTemplate.opsForHash()).thenReturn(hashOps);
     }
 
+    /** 批量语义 stub：响应 embedding 数与请求文本数一致（OpenAI 数组 input 的返回契约） */
+    private void stubEmbeddingCall(float[] emb) {
+        when(embeddingModel.call(any(EmbeddingRequest.class))).thenAnswer(inv -> {
+            EmbeddingRequest req = inv.getArgument(0);
+            java.util.List<org.springframework.ai.embedding.Embedding> embs = new java.util.ArrayList<>();
+            for (int i = 0; i < req.getInstructions().size(); i++) {
+                embs.add(new org.springframework.ai.embedding.Embedding(emb, i));
+            }
+            return new org.springframework.ai.embedding.EmbeddingResponse(embs);
+        });
+    }
+
     @Test
     void embed_returns1024DimVector() {
         float[] expectedEmbedding = new float[1024];
@@ -76,9 +88,7 @@ class EmbeddingServiceTest {
     void embedAndPersist_normalFlow_savesToMySQLAndRedis() {
         setupMappersAndRedis();
         float[] emb = new float[1024];
-        when(embeddingModel.call(any(EmbeddingRequest.class)))
-                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
-                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+        stubEmbeddingCall(emb);
 
         String content = "# Spring Boot 教程\n\n这是关于Spring Boot的详细教程内容。".repeat(30);
         ScoredResource scores = new ScoredResource("https://spring.io", "Spring Tutorial", content, 5, 5, 5, 4, 4.85);
@@ -95,15 +105,44 @@ class EmbeddingServiceTest {
     void embedAndPersist_shortContent_createsSingleChunk() {
         setupMappersAndRedis();
         float[] emb = new float[1024];
-        when(embeddingModel.call(any(EmbeddingRequest.class)))
-                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
-                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+        stubEmbeddingCall(emb);
 
         String shortContent = "这是一段简短的Spring教程内容，包含足够的字符来通过最小长度过滤。";
         ScoredResource scores = new ScoredResource("https://x.com", "X", shortContent, 4, 4, 3, 4, 4.0);
 
         embeddingService.embedAndPersist(1L, "Short", shortContent, "https://x.com", scores, "操作指南");
         verify(knowledgeChunkMapper, atMost(1)).insert(any(KnowledgeChunk.class));
+    }
+
+    @Test
+    void embedBatch_sendsOneRequestPerBatchAndReturnsOrderedVectors() {
+        float[] emb = new float[1024];
+        stubEmbeddingCall(emb);
+
+        List<float[]> vectors = embeddingService.embedBatch(List.of("a", "b", "c"));
+
+        // 一次 call 携带全部 3 条文本（< 32 上限单批），返回顺序与输入一致
+        org.mockito.ArgumentCaptor<EmbeddingRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(EmbeddingRequest.class);
+        verify(embeddingModel).call(captor.capture());
+        assertThat(captor.getValue().getInstructions()).containsExactly("a", "b", "c");
+        assertThat(vectors).hasSize(3);
+    }
+
+    @Test
+    void embedBatch_batchCallFails_fallsBackToPerItem() {
+        float[] emb = new float[1024];
+        // 首次批量调用失败 → 回退逐条（每条单独 call 成功）
+        when(embeddingModel.call(any(EmbeddingRequest.class)))
+                .thenThrow(new RuntimeException("batch error"))
+                .thenAnswer(inv -> new org.springframework.ai.embedding.EmbeddingResponse(
+                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+
+        List<float[]> vectors = embeddingService.embedBatch(List.of("x", "y"));
+
+        // 1 次批量失败 + 2 次逐条成功，结果齐全
+        assertThat(vectors).hasSize(2);
+        verify(embeddingModel, times(3)).call(any(EmbeddingRequest.class));
     }
 
     @Test
@@ -140,9 +179,7 @@ class EmbeddingServiceTest {
     void embedAndPersist_persistsTags() {
         setupMappersAndRedis();
         float[] emb = new float[1024];
-        when(embeddingModel.call(any(EmbeddingRequest.class)))
-                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
-                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+        stubEmbeddingCall(emb);
 
         String content = "# 标题\n\n这是一段用于分块测试的内容。".repeat(30);
         ScoredResource scores = new ScoredResource("https://a.com", "A", content, 5, 5, 5, 5, 5.0);
@@ -173,9 +210,7 @@ class EmbeddingServiceTest {
         when(knowledgeChunkMapper.selectList(any(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class)))
                 .thenReturn(List.of(oldChunk(1L, 0), oldChunk(1L, 1)));
         float[] emb = new float[1024];
-        when(embeddingModel.call(any(EmbeddingRequest.class)))
-                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
-                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+        stubEmbeddingCall(emb);
 
         String content = "这是正文编辑后用于重建分块的测试内容内容。".repeat(30);
         embeddingService.rebuildChunksForItem(1L, content);
@@ -206,9 +241,7 @@ class EmbeddingServiceTest {
         when(knowledgeChunkMapper.selectList(any(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class)))
                 .thenReturn(List.of());
         float[] emb = new float[1024];
-        when(embeddingModel.call(any(EmbeddingRequest.class)))
-                .thenReturn(new org.springframework.ai.embedding.EmbeddingResponse(
-                        List.of(new org.springframework.ai.embedding.Embedding(emb, 0))));
+        stubEmbeddingCall(emb);
 
         String content = "这是正文编辑后用于重建分块的测试内容内容。".repeat(30);
         embeddingService.rebuildChunksForItem(1L, content);

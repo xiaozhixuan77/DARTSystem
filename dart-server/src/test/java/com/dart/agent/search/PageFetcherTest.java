@@ -111,4 +111,46 @@ class PageFetcherTest {
                 .hasMessageContaining("内网地址");
         assertThat(fetcher.getCallUrls()).isEmpty();
     }
+
+    @Test
+    void fetch_oversizedPage_truncatesContent() {
+        PageFetcher fetcher = new PageFetcher(1000) {
+            @Override
+            protected Document connectRaw(String url, int timeoutMs) {
+                Document d = new Document("https://example.com");
+                StringBuilder huge = new StringBuilder();
+                for (int i = 0; i < 30_000; i++) {
+                    huge.append("x".repeat(10));
+                }
+                d.body().appendElement("article").text(huge.toString());
+                return d;
+            }
+        };
+
+        PageContent pc = fetcher.fetch("https://example.com");
+
+        // 超大页面提取文本被截断，防 12 URL 并行抓取的内存峰值
+        assertThat(pc.getContent().length()).isLessThanOrEqualTo(200_000);
+    }
+
+    @Test
+    void fetch_htmlWithPreAndCode_countsCodeBlocksFromHtml() {
+        PageFetcher fetcher = new PageFetcher(1000) {
+            @Override
+            protected Document connectRaw(String url, int timeoutMs) {
+                Document d = new Document("https://example.com");
+                org.jsoup.nodes.Element article = d.body().appendElement("article");
+                article.appendElement("pre").text("code block 1");
+                article.appendElement("code").text("inline code");
+                article.appendElement("pre").text("code block 2");
+                article.appendText("普通正文，无代码围栏");
+                return d;
+            }
+        };
+
+        PageContent pc = fetcher.fetch("https://example.com");
+
+        // 代码块统计基于 HTML 原文 <pre>/<code> 元素（纯文本数 ``` 恒为 0 的缺陷已修复）
+        assertThat(pc.getCodeBlockCount()).isEqualTo(3);
+    }
 }

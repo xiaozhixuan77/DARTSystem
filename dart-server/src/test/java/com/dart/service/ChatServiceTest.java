@@ -1226,6 +1226,13 @@ class ChatServiceTest {
     }
 
     @Test
+    void toJsonArray_escapesBackslashAndQuote() {
+        String json = org.springframework.test.util.ReflectionTestUtils.invokeMethod(chatService,
+                "toJsonArray", List.of("https://a.com\\b\"c"));
+        assertThat(json).isEqualTo("[\"https://a.com\\\\b\\\"c\"]");
+    }
+
+    @Test
     void executeSearchAndCurate_memoryAnswerEscapesSummaryInjection() {
         when(valueOps.get(anyString())).thenReturn(null);
         when(summaryService.getSummary(1L, 100L))
