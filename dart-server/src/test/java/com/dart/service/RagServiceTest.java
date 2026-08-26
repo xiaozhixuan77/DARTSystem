@@ -23,6 +23,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -77,7 +78,7 @@ class RagServiceTest {
         item.setSourceUrl("https://spring.io");
         item.setIsDeleted(0);
         when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
-        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
 
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setKnowledgeItemId(1L);
@@ -93,6 +94,10 @@ class RagServiceTest {
 
         Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
         assertThat(result).isPresent();
+
+        // 批量加载 KnowledgeItem，杜绝逐条 selectById 的 N+1
+        verify(knowledgeItemMapper).selectBatchIds(anyCollection());
+        verify(knowledgeItemMapper, never()).selectById(anyLong());
     }
 
     @Test
@@ -156,7 +161,7 @@ class RagServiceTest {
         item.setSourceUrl("https://spring.io");
         item.setIsDeleted(0);
         when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
-        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
 
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setKnowledgeItemId(1L);
@@ -187,7 +192,7 @@ class RagServiceTest {
         item.setSourceUrl("https://spring.io");
         item.setIsDeleted(0);
         when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
-        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
 
         java.util.List<KnowledgeChunk> six = new java.util.ArrayList<>();
         for (int i = 0; i < 6; i++) {
@@ -264,7 +269,6 @@ class RagServiceTest {
         item.setSourceUrl("https://spring.io");
         item.setIsDeleted(0);
         when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
-        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
 
         KnowledgeItem related = new KnowledgeItem();
         related.setId(2L);
@@ -272,7 +276,14 @@ class RagServiceTest {
         related.setTitle("Spring Framework 原理");
         related.setContent("Spring Framework 是 Spring Boot 的基础，提供 IoC 容器与 AOP 能力。");
         related.setIsDeleted(0);
-        when(knowledgeItemMapper.selectById(2L)).thenReturn(related);
+        // 两次批量调用：命中条目 [1] 与 1-hop 关联条目 [2]，按参数分发
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenAnswer(inv -> {
+            java.util.Collection<Long> ids = inv.getArgument(0);
+            if (ids.contains(2L)) {
+                return List.of(related);
+            }
+            return List.of(item);
+        });
 
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setKnowledgeItemId(1L);
@@ -317,7 +328,7 @@ class RagServiceTest {
         item.setSourceUrl("https://spring.io");
         item.setIsDeleted(0);
         when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
-        when(knowledgeItemMapper.selectById(1L)).thenReturn(item);
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
 
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setKnowledgeItemId(1L);

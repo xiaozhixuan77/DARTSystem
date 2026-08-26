@@ -2,7 +2,11 @@ package com.dart.controller;
 
 import com.dart.broadcast.BroadcasterRegistry;
 import com.dart.broadcast.SessionBroadcaster;
+import com.dart.dto.request.ChatRequest;
+import com.dart.dto.response.ConversationVO;
 import com.dart.entity.User;
+import com.dart.exception.BusinessException;
+import com.dart.exception.ErrorCode;
 import com.dart.security.UserPrincipal;
 import com.dart.service.ChatService;
 import com.dart.service.ConversationService;
@@ -20,7 +24,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
@@ -68,6 +74,33 @@ class ChatControllerTest {
                         .content("{\"conversationId\":55}"))
                 .andExpect(request().asyncStarted());
         verify(broadcasterRegistry).get(55L);
+    }
+
+    @Test
+    void send_withForeignConversationId_rejectsWithoutRegisteringBroadcaster() throws Exception {
+        ChatRequest request = new ChatRequest();
+        request.setConversationId(99L);
+        request.setMessage("test");
+        when(conversationService.getConversation(1L, 99L))
+                .thenThrow(new BusinessException(ErrorCode.FORBIDDEN));
+
+        assertThatThrownBy(() -> new ChatController(chatService, conversationService, broadcasterRegistry)
+                .send(request))
+                .isInstanceOf(BusinessException.class);
+        verify(broadcasterRegistry, never()).register(99L);
+    }
+
+    @Test
+    void send_withOwnConversationId_passesOwnershipCheck() throws Exception {
+        ChatRequest request = new ChatRequest();
+        request.setConversationId(55L);
+        request.setMessage("test");
+        lenient().when(conversationService.getConversation(1L, 55L)).thenReturn(new ConversationVO());
+        lenient().when(broadcasterRegistry.register(55L)).thenReturn(new SessionBroadcaster(55L));
+
+        // 归属校验通过：走到广播器注册（SSE 异步路径），不抛异常
+        new ChatController(chatService, conversationService, broadcasterRegistry).send(request);
+        verify(broadcasterRegistry).register(55L);
     }
 
     @Test

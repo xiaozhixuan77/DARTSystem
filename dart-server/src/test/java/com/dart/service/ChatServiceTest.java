@@ -195,6 +195,27 @@ class ChatServiceTest {
         assertThat(keyCaptor.getAllValues().get(0)).isEqualTo(keyCaptor.getAllValues().get(1));
     }
 
+    @Test
+    void executeSearchAndCurate_cacheKey_isolatesByUserId() throws Exception {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("timeout"));
+
+        chatService.executeSearchAndCurate("spring boot", 1L, 100L, sink);
+        chatService.executeSearchAndCurate("spring boot", 2L, 200L, sink);
+
+        // 缓存 key 必须按 userId 隔离：同查询不同用户不得共享报告缓存
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(valueOps, times(2)).get(keyCaptor.capture());
+        assertThat(keyCaptor.getAllValues().get(0)).isNotEqualTo(keyCaptor.getAllValues().get(1));
+    }
+
     // === 用户消息独立事务 ===
 
     @Test
