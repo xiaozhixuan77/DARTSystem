@@ -1,0 +1,86 @@
+# RAG 压力测试配置（RUN_PERF=true 门控）
+# 复用 dart_test 库（schema.sql 重建）；真实 embedding 由 SILICONFLOW_API_KEY 注入
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/dart_test?serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: dart2024
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+  autoconfigure:
+    exclude:
+      - org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
+      - org.springframework.ai.model.embedding.observation.autoconfigure.EmbeddingObservationAutoConfiguration
+      - org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration
+      - org.springframework.ai.autoconfigure.vectorstore.redis.RedisVectorStoreAutoConfiguration
+      - org.springframework.boot.http.client.autoconfigure.reactive.ReactiveHttpClientAutoConfiguration
+      - org.springframework.boot.http.client.autoconfigure.HttpClientAutoConfiguration
+      - org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration
+      - org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration
+      - org.springframework.boot.webclient.autoconfigure.WebClientAutoConfiguration
+      - org.springframework.boot.http.converter.autoconfigure.HttpMessageConvertersAutoConfiguration
+      - org.springframework.boot.http.codec.autoconfigure.CodecsAutoConfiguration
+
+  ai:
+    deepseek:
+      api-key: test-key-not-real
+      base-url: https://api.siliconflow.cn
+    openai:
+      api-key: ${SILICONFLOW_API_KEY:}
+      base-url: https://api.siliconflow.cn
+      embedding:
+        options:
+          model: BAAI/bge-m3
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+jwt:
+  secret: dGhpc0lzQVRlc3RTZWNyZXRGb3JKV1RTaWduaW5nUHVycG9zZXM=
+  access-token-expiration: 300
+  refresh-token-expiration: 1800
+
+agent:
+  curator:
+    jaccard-threshold: 0.85
+  search:
+    max-results: 5
+    fetch-timeout-ms: 2000
+    score-threshold: 3.0
+  scoring:
+    weights:
+      timeliness: 0.15
+      authority: 0.30
+      depth: 0.20
+      match: 0.35
+  chunk:
+    size: 500
+    overlap: 50
+    min-length: 20
+  rag:
+    similarity-threshold: 0.60
+    top-k: 5
+  sediment:
+    # 压测造数/查询不触发沉淀，保持数据纯净
+    enabled: false
+
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: auto
+    banner: false
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+logging:
+  level:
+    com.dart: INFO
