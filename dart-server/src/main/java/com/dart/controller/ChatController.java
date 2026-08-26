@@ -13,6 +13,7 @@ import com.dart.util.SseEvents;
 import com.dart.util.SseUtils;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -22,6 +23,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/chat")
 @RequiredArgsConstructor
+@Slf4j
 public class ChatController {
 
     private final ChatService chatService;
@@ -67,6 +69,8 @@ public class ChatController {
                 broadcaster.sendEvent(SseEvents.DONE,
                         Map.of("status", "complete", "conversationId", finalConversationId));
             } catch (Exception e) {
+                log.error("chat 编排失败: conversationId={}, userId={}",
+                        finalConversationId, userId, e);
                 broadcaster.sendError(500, "服务内部错误");
             } finally {
                 // 正常与异常路径都清理注册表，防泄漏

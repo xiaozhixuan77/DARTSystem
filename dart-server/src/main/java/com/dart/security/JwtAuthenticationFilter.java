@@ -58,7 +58,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = authHeader.substring(7);
         try {
-            if (jwtTokenProvider.validate(token)) {
+            // 仅 access token 可认证业务接口：refresh token 即使验签通过也不放行（防误用/泄露）
+            if (jwtTokenProvider.validate(token)
+                    && "access".equals(jwtTokenProvider.getTokenType(token))) {
                 String username = jwtTokenProvider.getUsername(token);
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 

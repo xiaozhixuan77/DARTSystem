@@ -30,9 +30,6 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -146,8 +143,9 @@ public class ChatService {
 
     /**
      * 执行完整的搜索-整理流程（供 SSE 端点调用）。
+     * 无外层事务：编排跨流式生成（1-2 分钟）不应长期占用连接池连接，
+     * 各写库点（用户消息/草稿/报告/链路）经 REQUIRES_NEW 独立提交。
      */
-    @Transactional
     public SearchResult executeSearchAndCurate(String query, Long userId,
                                                 Long conversationId, SseSink sink) {
         long startNanos = System.nanoTime();
@@ -330,23 +328,10 @@ public class ChatService {
                 false, null, effectiveQuery, searchResults, "search",
                 fallbackReason, startNanos);
         Message assistantMessage = completeAssistantMessage(assistantDraft, conversationId, result);
+        // 报告经独立事务落库成功后，直接同步执行追问/缓存/沉淀（保持"落库成功才追问"语义）
         if (assistantMessage != null) {
-            final Message msg = assistantMessage;
-            final CuratedReport finalReport = report;
-            final Long finalUserId = userId;
-            final boolean finalDegraded = degraded;
-            Runnable followUpAndCache = () -> generateFollowUpAndUpdate(
-                    msg, finalReport, query, sink, finalUserId, pre.intent(), finalDegraded);
-            if (TransactionSynchronizationManager.isSynchronizationActive()) {
-                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        followUpAndCache.run();
-                    }
-                });
-            } else {
-                followUpAndCache.run();
-            }
+            generateFollowUpAndUpdate(assistantMessage, report, query, sink,
+                    userId, pre.intent(), degraded);
         }
         return result;
     }
@@ -533,7 +518,7 @@ public class ChatService {
             trace.setFallbackReason(fallbackReason);
             trace.setProcessingTimeMs((int) ((System.nanoTime() - startNanos) / 1_000_000));
             trace.setCreatedAt(LocalDateTime.now());
-            searchTraceMapper.insert(trace);
+            transactionTemplate.executeWithoutResult(status -> searchTraceMapper.insert(trace));
         } catch (Exception e) {
             log.warn("搜索链路追踪记录失败: query={}", query, e);
         }
@@ -581,7 +566,7 @@ public class ChatService {
                 if (content != null && content.length() > memoryReportCharsPerRound) {
                     content = content.substring(0, memoryReportCharsPerRound);
                 }
-                reports.append("<report>\n").append(content).append("\n</report>\n\n");
+                reports.append("<report>\n").append(escapeXml(content)).append("\n</report>\n\n");
             }
             String sanitized = query.replace("<", "&lt;").replace(">", "&gt;");
             String prompt = """
@@ -601,7 +586,7 @@ public class ChatService {
                     - 引用必须来自历史报告，不得虚构来源
                     - 简洁、准确的中文回答
                     """.formatted(
-                    summary == null || summary.isBlank() ? "（无）" : summary,
+                    summary == null || summary.isBlank() ? "（无）" : escapeXml(summary),
                     reports.isEmpty() ? "（无历史报告）" : reports,
                     sanitized);
             String response = chatModel.call(new Prompt(new UserMessage(prompt)))
@@ -634,7 +619,7 @@ public class ChatService {
             }
             String memorySection = (summary == null || summary.isBlank()) ? ""
                     : "历史会话摘要（可引用前几轮已讨论内容，追问应延续而非重复）：\n<session_memory>\n"
-                            + summary + "\n</session_memory>\n\n";
+                            + escapeXml(summary) + "\n</session_memory>\n\n";
             String prompt = """
                     %s以下是一份知识学习报告（含 Mermaid 知识图谱和结构化章节），根据报告已覆盖的内容，提出2-3个读者可能感兴趣的追问方向。
                     追问应与知识图谱的分支主题相关但不重复已讲内容，以自然对话语气、中文写出。
@@ -712,7 +697,7 @@ public class ChatService {
         try {
             applyResultToMessage(draft, result);
             draft.setCreatedAt(LocalDateTime.now());
-            messageMapper.updateById(draft);
+            transactionTemplate.executeWithoutResult(status -> messageMapper.updateById(draft));
             return draft;
         } catch (Exception e) {
             log.error("助手消息草稿完善失败", e);
@@ -727,7 +712,7 @@ public class ChatService {
             assistantMsg.setRole("assistant");
             applyResultToMessage(assistantMsg, result);
             assistantMsg.setCreatedAt(LocalDateTime.now());
-            messageMapper.insert(assistantMsg);
+            transactionTemplate.executeWithoutResult(status -> messageMapper.insert(assistantMsg));
             return assistantMsg;
         } catch (Exception e) {
             log.error("保存助手消息失败", e);
@@ -1072,6 +1057,14 @@ public class ChatService {
         }
         sb.append("\n<user_query>").append(sanitized).append("</user_query>");
         return sb.toString();
+    }
+
+    /**
+     * prompt 注入防护：< > 转义（与 preProcessQuery/CuratorTools 一致），
+     * 防止会话摘要/历史报告闭合 XML 标签注入指令。
+     */
+    private static String escapeXml(String s) {
+        return s == null ? "" : s.replace("<", "&lt;").replace(">", "&gt;");
     }
 
     /**

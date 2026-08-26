@@ -12,13 +12,16 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
-import java.util.function.Consumer;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -38,6 +41,12 @@ public class CuratorTools {
 
     /** 草稿快照节流间隔：流式中断后前端拉取草稿的更新粒度（5s 一次写库） */
     private static final long DRAFT_SNAPSHOT_INTERVAL_MS = 5_000L;
+
+    /**
+     * 单节 LLM 流式生成内部超时：先于 HTTP 层读超时（120s）熔断，
+     * 防止流挂起（TCP 未断）时重试链无限等待。非 final 便于测试注入短超时。
+     */
+    private Duration streamTimeout = Duration.ofSeconds(90);
 
     /**
      * 草稿上下文：累积已生成内容（与前端流式推送顺序/内容一致），
@@ -215,8 +224,15 @@ public class CuratorTools {
             }
 
             // 节 1 完成后等节 2 生产端完整结束（含截断/空白重试，无竞态可安全重试），
-            // 成功后分片回放模拟打字机（~30 字符/片，30ms 间隔）
-            String section2 = section2Future.get();
+            // 成功后分片回放模拟打字机（~30 字符/片，30ms 间隔）；超时中断后台生成按失败节兜底
+            String section2;
+            try {
+                section2 = section2Future.get(streamTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                section2Future.cancel(true);
+                log.warn("节 2 生成超时({}ms)，中断后台生成，按失败节兜底", streamTimeout.toMillis());
+                section2 = SECTION_FAILED;
+            }
             if (!section2.equals(SECTION_FAILED)) {
                 pushInChunks(section2, sink);
                 // 节 2 在回放期间预生成不推送，草稿于回放完成后同步（与前端看到内容一致）
@@ -296,6 +312,7 @@ public class CuratorTools {
                             }
                             sb.append(delta);
                         })
+                        .timeout(streamTimeout)
                         .blockLast();
                 if (isTruncated(finishReason.get())) {
                     // 节 2 预生成无实时消费，截断可安全重试（调用方等完整结果）
@@ -362,6 +379,7 @@ public class CuratorTools {
                                 draft.appendAndMaybeNotify(delta);
                             }
                         })
+                        .timeout(streamTimeout)
                         .blockLast();
                 if (isTruncated(finishReason.get())) {
                     log.warn("报告节[{}]第 {} 次流式输出截断({})，内容不完整", sectionName, attempt, finishReason.get());
@@ -431,11 +449,19 @@ public class CuratorTools {
         }
     }
 
+    /**
+     * prompt 注入防护：< > 转义（与 preProcessQuery/regenerateReport 一致），
+     * 防止用户输入/会话摘要/网页内容闭合 XML 标签注入指令。
+     */
+    private static String escapeXml(String s) {
+        return s == null ? "" : s.replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     private String buildSectionPrompt(String query, String resourcesText,
                                       String sectionPrompt, String styleHint, String sessionSummary,
                                       boolean degraded) {
         StringBuilder sb = new StringBuilder();
-        sb.append("你是一个技术教育专家，正在撰写关于「").append(query)
+        sb.append("你是一个技术教育专家，正在撰写关于「").append(escapeXml(query))
                 .append("」的深度学习报告。基于以下搜索结果素材撰写。\n\n");
         String style = styleHint == null ? null : INTENT_STYLE.get(styleHint);
         if (style != null) {
@@ -451,10 +477,10 @@ public class CuratorTools {
         if (sessionSummary != null && !sessionSummary.isBlank()) {
             sb.append("会话上下文（此前对话的滚动摘要，仅作延续叙述参考，"
                     + "不得作为引用来源，引用必须来自本次搜索素材，不得虚构来源）：\n")
-                    .append("<session_memory>\n").append(sessionSummary)
+                    .append("<session_memory>\n").append(escapeXml(sessionSummary))
                     .append("\n</session_memory>\n\n");
         }
-        sb.append(sectionPrompt).append("\n\n---\n\n").append(resourcesText);
+        sb.append(sectionPrompt).append("\n\n---\n\n").append(escapeXml(resourcesText));
         return sb.toString();
     }
 
