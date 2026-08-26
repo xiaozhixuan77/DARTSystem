@@ -83,10 +83,19 @@ class ChatServiceTest {
 
     @BeforeEach
     void setUp() {
-        chatService = new ChatService(chatModel, searchAgent, curatorAgent, ragService,
-                embeddingService, messageMapper, redisTemplate, knowledgeItemMapper,
-                searchTraceMapper, relationExtractionService, knowledgeService, summaryService,
-                transactionTemplate);
+        // 职责类传真实实例（内部依赖复用本类 mock），拆分后行为与拆分前一致
+        QueryPreProcessor queryPreProcessor = new QueryPreProcessor(chatModel, embeddingService);
+        MessagePersistenceService messagePersistenceService =
+                new MessagePersistenceService(messageMapper, transactionTemplate);
+        ChatCacheService chatCacheService = new ChatCacheService(redisTemplate, messagePersistenceService);
+        SedimentService sedimentService = new SedimentService(embeddingService,
+                knowledgeItemMapper, knowledgeService, relationExtractionService);
+        MemoryAnswerService memoryAnswerService =
+                new MemoryAnswerService(chatModel, summaryService, messageMapper);
+        chatService = new ChatService(searchAgent, curatorAgent, ragService, summaryService,
+                messageMapper, searchTraceMapper, transactionTemplate,
+                queryPreProcessor, chatCacheService, messagePersistenceService,
+                sedimentService, memoryAnswerService);
         sink = mock(SseSink.class);
         insertSnapshots.clear();
         // lenient：所有走 executeSearchAndCurate 的用例都会经独立事务提交用户消息，
@@ -111,10 +120,10 @@ class ChatServiceTest {
         // lenient：仅缓存相关用例使用，避免其他用例报 UnnecessaryStubbing
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
         lenient().when(knowledgeItemMapper.selectCount(any())).thenReturn(0L);
-        // 单元测试不走 Spring 容器，手动注入 @Value 配置
-        org.springframework.test.util.ReflectionTestUtils.setField(chatService, "sedimentEnabled", true);
-        org.springframework.test.util.ReflectionTestUtils.setField(chatService, "sedimentMaxItemsPerUser", 50);
-        org.springframework.test.util.ReflectionTestUtils.setField(chatService, "cacheTtlHours", 24L);
+        // 单元测试不走 Spring 容器，手动注入 @Value 配置（职责类拆分后按归属注入）
+        org.springframework.test.util.ReflectionTestUtils.setField(sedimentService, "sedimentEnabled", true);
+        org.springframework.test.util.ReflectionTestUtils.setField(sedimentService, "sedimentMaxItemsPerUser", 50);
+        org.springframework.test.util.ReflectionTestUtils.setField(chatCacheService, "cacheTtlHours", 24L);
         // 沉淀默认走新增路径（防 Mockito 返回 null 导致虚拟线程 NPE）
         lenient().when(knowledgeService.findSimilarItem(anyLong(), anyString(), anyString()))
                 .thenReturn(Optional.empty());
@@ -662,35 +671,35 @@ class ChatServiceTest {
     void buildEnglishQuery_ambiguousWord_returnsStableAnchorsWithEnglishTokens() {
         // 输出稳定锚点词 + 主词英文 token——"microservices" 在 Bing 双域实测随机污染（索引故障），
         // "spring cloud" 等稳定锚点（spring 词系全稳定）；上下文由主词/变体词提供
-        String result = ChatService.buildEnglishQuery("微服务 学习路线 Spring Cloud Docker Kubernetes 必备知识");
+        String result = QueryPreProcessor.buildEnglishQuery("微服务 学习路线 Spring Cloud Docker Kubernetes 必备知识");
         assertThat(result).isEqualTo("spring cloud docker kubernetes");
     }
 
     @Test
     void buildEnglishQuery_englishTokenOnly_returnsEnglishTokens() {
         // 无歧义中文技术词但有英文 token（Spring Cloud）→ 提取 token 组合（Bing 对英文词稳定）
-        assertThat(ChatService.buildEnglishQuery("Spring Cloud 学习路线")).isEqualTo("spring cloud");
+        assertThat(QueryPreProcessor.buildEnglishQuery("Spring Cloud 学习路线")).isEqualTo("spring cloud");
     }
 
     @Test
     void buildEnglishQuery_tokenPresent_anchorNotMixedIn() {
         // 有英文 token 时歧义词映射不混入——"distributed system" 触发 Bing 词典结果霸榜、
         // microservices 词系随机污染，纯 token 组合（spring cloud kubernetes）实测全相关
-        String result = ChatService.buildEnglishQuery("微服务 学习路线 Spring Cloud Kubernetes 分布式系统");
+        String result = QueryPreProcessor.buildEnglishQuery("微服务 学习路线 Spring Cloud Kubernetes 分布式系统");
         assertThat(result).isEqualTo("spring cloud kubernetes");
     }
 
     @Test
     void buildEnglishQuery_chineseOnlyWithAmbiguousWord_anchorFallback() {
         // 纯中文歧义词查询（无英文 token）→ 稳定映射兜底
-        assertThat(ChatService.buildEnglishQuery("微服务架构")).isEqualTo("spring cloud");
-        assertThat(ChatService.buildEnglishQuery("缓存 淘汰策略")).isEqualTo("cache");
+        assertThat(QueryPreProcessor.buildEnglishQuery("微服务架构")).isEqualTo("spring cloud");
+        assertThat(QueryPreProcessor.buildEnglishQuery("缓存 淘汰策略")).isEqualTo("cache");
     }
 
     @Test
     void buildEnglishQuery_noAmbiguousWordNoEnglishToken_returnsNull() {
         // 纯中文查询（无歧义词映射、无英文 token）→ null，由 LLM optimizedEn 翻译兜底
-        assertThat(ChatService.buildEnglishQuery("排序算法 空间复杂度")).isNull();
+        assertThat(QueryPreProcessor.buildEnglishQuery("排序算法 空间复杂度")).isNull();
     }
 
     @Test
@@ -1227,8 +1236,8 @@ class ChatServiceTest {
 
     @Test
     void toJsonArray_escapesBackslashAndQuote() {
-        String json = org.springframework.test.util.ReflectionTestUtils.invokeMethod(chatService,
-                "toJsonArray", List.of("https://a.com\\b\"c"));
+        String json = org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                MessagePersistenceService.class, "toJsonArray", List.of("https://a.com\\b\"c"));
         assertThat(json).isEqualTo("[\"https://a.com\\\\b\\\"c\"]");
     }
 
