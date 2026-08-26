@@ -20,8 +20,7 @@ public class PageFetcher {
 
     private static final int MAX_ATTEMPTS = 2;
     private static final long RETRY_DELAY_MS = 500;
-
-    private static final Pattern CODE_FENCE = Pattern.compile("```");
+    private static final int MAX_EXTRACTED_TEXT_CHARS = 200_000;
     private static final Pattern DIAGRAM_KEYWORDS = Pattern.compile(
             "\\b(diagram|archite[ck]ture|flowchart|sequence|component|class diagram|时序图|架构图|流程图)\\b",
             Pattern.CASE_INSENSITIVE);
@@ -40,7 +39,7 @@ public class PageFetcher {
         String title = extractTitle(doc);
         String content = extractContent(doc);
         int wordCount = countWords(content);
-        int codeBlockCount = countCodeBlocks(content);
+        int codeBlockCount = countCodeBlocks(doc);
         boolean hasDiagram = DIAGRAM_KEYWORDS.matcher(content).find();
         boolean hasExercise = EXERCISE_KEYWORDS.matcher(content).find();
         Integer year = extractYear(content);
@@ -202,7 +201,11 @@ public class PageFetcher {
                 : content != null ? content
                 : body;
 
-        return target.text();
+        // 超大页面防护：截断到上限，防 12 URL 并行抓取时的内存峰值
+        String text = target.text();
+        return text.length() > MAX_EXTRACTED_TEXT_CHARS
+                ? text.substring(0, MAX_EXTRACTED_TEXT_CHARS)
+                : text;
     }
 
     private int countWords(String text) {
@@ -212,16 +215,9 @@ public class PageFetcher {
         return text.split("\\s+").length;
     }
 
-    private int countCodeBlocks(String text) {
-        if (text == null || text.isBlank()) {
-            return 0;
-        }
-        int count = 0;
-        java.util.regex.Matcher m = CODE_FENCE.matcher(text);
-        while (m.find()) {
-            count++;
-        }
-        return count / 2; // 每对 ``` 算一个代码块
+    /** 代码块统计改对 HTML 原文：<pre>/<code> 元素（此前对纯文本数 ``` 恒为 0，深度评分低估代码页） */
+    private int countCodeBlocks(Document doc) {
+        return doc.select("pre, code").size();
     }
 
     private Integer extractYear(String content) {

@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -54,6 +55,10 @@ public class SessionBroadcaster implements SseSink {
             return;
         }
         long id = subscriberSeq.incrementAndGet();
+        // 先取快照再入 map：put 与重放之间到达的事件走实时转发（入 map 后立即生效），
+        // 若 put 前不取快照，该窗口事件会被转发 + 重放各一次造成重复
+        List<LoggedEvent> snapshot = new ArrayList<>(eventLog);
+        String contentSnapshot = contentBuffer.toString();
         subscribers.put(id, emitter);
         emitter.onCompletion(() -> subscribers.remove(id));
         emitter.onTimeout(() -> subscribers.remove(id));
@@ -68,11 +73,11 @@ public class SessionBroadcaster implements SseSink {
         }
 
         // 按时间序重放：状态事件 → 内容快照（已推送部分整块出现，后续增量实时转发）
-        for (LoggedEvent event : eventLog) {
+        for (LoggedEvent event : snapshot) {
             SseUtils.sendEvent(emitter, event.eventName(), event.data());
         }
-        if (!contentBuffer.isEmpty()) {
-            SseUtils.sendEvent(emitter, SseEvents.CONTENT, contentBuffer.toString());
+        if (!contentSnapshot.isEmpty()) {
+            SseUtils.sendEvent(emitter, SseEvents.CONTENT, contentSnapshot);
         }
     }
 

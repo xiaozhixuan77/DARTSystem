@@ -36,6 +36,8 @@ public class EmbeddingService {
 
     private static final int MAX_RETRIES = 3;
     private static final long[] RETRY_DELAYS_MS = {1000, 2000, 4000};
+    /** 单次 embedding 请求最大文本数（OpenAI 兼容 input 数组） */
+    private static final int EMBED_BATCH_SIZE = 32;
 
     private final EmbeddingModel embeddingModel;
     private final MarkdownSplitter splitter;
@@ -92,19 +94,11 @@ public class EmbeddingService {
             return List.of(knowledgeItemId);
         }
 
-        // Step 3: 批量 Embedding
-        List<float[]> embeddings = new ArrayList<>();
-        List<String> embeddingIds = new ArrayList<>();
+        // Step 3: 批量 Embedding（一次请求多条，减少远程调用；失败回退逐条，仍失败抛异常终止）
+        List<float[]> embeddings = embedAll(chunks, knowledgeItemId, "persist");
+        List<String> embeddingIds = new ArrayList<>(chunks.size());
         for (ChunkResult chunk : chunks) {
-            try {
-                float[] vec = embed(chunk.chunkText());
-                embeddings.add(vec);
-                String embeddingId = "chunk:" + knowledgeItemId + ":" + chunk.chunkIndex();
-                embeddingIds.add(embeddingId);
-            } catch (Exception e) {
-                log.error("Embedding 失败: itemId={}, chunkIndex={}", knowledgeItemId, chunk.chunkIndex(), e);
-                throw new RuntimeException("Embedding API 调用失败", e);
-            }
+            embeddingIds.add("chunk:" + knowledgeItemId + ":" + chunk.chunkIndex());
         }
 
         // Step 4: 批量写入 KnowledgeChunk (MySQL)，同时存储向量
@@ -165,18 +159,10 @@ public class EmbeddingService {
         }
 
         List<ChunkResult> chunks = splitter.split(content);
-        List<float[]> embeddings = new ArrayList<>();
-        List<String> embeddingIds = new ArrayList<>();
+        List<float[]> embeddings = embedAll(chunks, knowledgeItemId, "rebuild");
+        List<String> embeddingIds = new ArrayList<>(chunks.size());
         for (ChunkResult chunk : chunks) {
-            try {
-                float[] vec = embed(chunk.chunkText());
-                embeddings.add(vec);
-                embeddingIds.add("chunk:" + knowledgeItemId + ":" + chunk.chunkIndex());
-            } catch (Exception e) {
-                log.error("Embedding 失败: itemId={}, chunkIndex={}",
-                        knowledgeItemId, chunk.chunkIndex(), e);
-                throw new RuntimeException("Embedding API 调用失败", e);
-            }
+            embeddingIds.add("chunk:" + knowledgeItemId + ":" + chunk.chunkIndex());
         }
         for (int i = 0; i < chunks.size(); i++) {
             KnowledgeChunk kc = new KnowledgeChunk();
@@ -233,6 +219,41 @@ public class EmbeddingService {
         var request = new org.springframework.ai.embedding.EmbeddingRequest(List.of(text), options);
         var response = embeddingModel.call(request);
         return response.getResult().getOutput();
+    }
+
+    /**
+     * 批量向量化：一次请求多条文本（OpenAI 兼容 input 数组），减少远程调用次数；
+     * 整批失败回退逐条（保持单条 fail-open 语义），逐条仍失败则抛异常。
+     */
+    public List<float[]> embedBatch(List<String> texts) {
+        List<float[]> results = new ArrayList<>(texts.size());
+        var options = org.springframework.ai.embedding.DefaultEmbeddingOptions.builder().build();
+        for (int i = 0; i < texts.size(); i += EMBED_BATCH_SIZE) {
+            List<String> batch = texts.subList(i, Math.min(i + EMBED_BATCH_SIZE, texts.size()));
+            List<float[]> vecs;
+            try {
+                var request = new org.springframework.ai.embedding.EmbeddingRequest(batch, options);
+                vecs = embeddingModel.call(request).getResults().stream()
+                        .map(org.springframework.ai.embedding.Embedding::getOutput).toList();
+            } catch (Exception e) {
+                log.warn("批量 embedding 失败({} 条)，回退逐条: {}", batch.size(), e.getMessage());
+                vecs = new ArrayList<>(batch.size());
+                for (String text : batch) {
+                    vecs.add(embed(text));
+                }
+            }
+            results.addAll(vecs);
+        }
+        return results;
+    }
+
+    private List<float[]> embedAll(List<ChunkResult> chunks, Long knowledgeItemId, String op) {
+        try {
+            return embedBatch(chunks.stream().map(ChunkResult::chunkText).toList());
+        } catch (Exception e) {
+            log.error("Embedding 失败: itemId={}, op={}", knowledgeItemId, op, e);
+            throw new RuntimeException("Embedding API 调用失败", e);
+        }
     }
 
     private void writeToRedisWithRetry(List<String> embeddingIds, List<float[]> embeddings) {

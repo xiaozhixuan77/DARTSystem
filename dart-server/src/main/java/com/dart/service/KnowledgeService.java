@@ -27,7 +27,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -66,7 +68,7 @@ public class KnowledgeService {
             query.apply("FIND_IN_SET({0}, tags)", tag.trim());
         }
         if (keyword != null && !keyword.isBlank()) {
-            String kw = keyword.trim();
+            String kw = escapeLikeKeyword(keyword.trim());
             query.and(q -> q.like("title", kw)
                     .or().like("tags", kw)
                     .or().like("notes", kw)
@@ -79,6 +81,11 @@ public class KnowledgeService {
                 .map(this::toVO)
                 .toList();
         return new PageResult<>(records, p.getTotal());
+    }
+
+    /** MySQL LIKE 通配符转义（默认 ESCAPE '\'）：防 %/_ 篡改匹配语义（先转义反斜杠再转义通配符） */
+    private static String escapeLikeKeyword(String s) {
+        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     public KnowledgeDetailVO getKnowledgeDetail(Long userId, Long knowledgeId) {
@@ -292,27 +299,41 @@ public class KnowledgeService {
             Long other = otherSide(r, knowledgeId);
             if (other != null) {
                 level1ItemIds.add(other);
-                ensureItemNode(nodes, other);
             } else {
                 ensureExternalNode(nodes, r.getObjectLabel());
             }
         }
+        ensureItemNodes(nodes, level1ItemIds);
 
+        // 层 2 批量加载：全部一级条目一次查询（原来逐节点 relationsOf → N+1）
+        List<KnowledgeRelation> level2Relations = level1ItemIds.isEmpty() ? List.of()
+                : relationMapper.selectList(new QueryWrapper<KnowledgeRelation>()
+                        .in("subject_id", level1ItemIds).or().in("object_id", level1ItemIds));
+        Set<Long> level2ItemIds = new LinkedHashSet<>();
         for (Long l1 : level1ItemIds) {
-            for (KnowledgeRelation r : relationsOf(l1)) {
+            for (KnowledgeRelation r : level2Relations) {
+                if (!involves(r, l1)) {
+                    continue;
+                }
                 Long other = otherSide(r, l1);
                 if (other != null && other.equals(knowledgeId)) {
                     continue; // 中心节点的关系已在层 1 覆盖
                 }
                 addEdge(nodes, edges, r);
                 if (other != null) {
-                    ensureItemNode(nodes, other);
+                    level2ItemIds.add(other);
                 } else {
                     ensureExternalNode(nodes, r.getObjectLabel());
                 }
             }
         }
+        ensureItemNodes(nodes, level2ItemIds);
         return new KnowledgeGraphDTO(new ArrayList<>(nodes.values()), new ArrayList<>(edges.values()));
+    }
+
+    private static boolean involves(KnowledgeRelation r, Long itemId) {
+        return (r.getSubjectId() != null && r.getSubjectId().equals(itemId))
+                || (r.getObjectId() != null && r.getObjectId().equals(itemId));
     }
 
     /**
@@ -368,14 +389,20 @@ public class KnowledgeService {
         edges.putIfAbsent(key, new KnowledgeGraphDTO.GraphEdge(source, target, r.getPredicate()));
     }
 
-    private void ensureItemNode(Map<String, KnowledgeGraphDTO.GraphNode> nodes, Long itemId) {
-        if (nodes.containsKey(nodeId(itemId))) {
+    /** 批量补齐条目节点：一次 selectBatchIds 替代逐节点 selectById（防 N+1） */
+    private void ensureItemNodes(Map<String, KnowledgeGraphDTO.GraphNode> nodes,
+                                 Collection<Long> itemIds) {
+        List<Long> missing = itemIds.stream()
+                .filter(id -> !nodes.containsKey(nodeId(id)))
+                .distinct().toList();
+        if (missing.isEmpty()) {
             return;
         }
-        KnowledgeItem item = knowledgeItemMapper.selectById(itemId);
-        if (item != null) {
-            nodes.put(nodeId(itemId),
-                    new KnowledgeGraphDTO.GraphNode(nodeId(itemId), item.getTitle(), "knowledge"));
+        for (KnowledgeItem item : knowledgeItemMapper.selectBatchIds(missing)) {
+            if (item != null) {
+                nodes.put(nodeId(item.getId()),
+                        new KnowledgeGraphDTO.GraphNode(nodeId(item.getId()), item.getTitle(), "knowledge"));
+            }
         }
     }
 
@@ -402,13 +429,15 @@ public class KnowledgeService {
             return;
         }
         List<KnowledgeItem> items = loadItems(userId);
+        Set<String> existingPairs = loadExistingRelations(
+                items.stream().map(KnowledgeItem::getId).toList());
         Map<Long, float[]> vectors = loadFirstChunkVectors(
                 items.stream().map(KnowledgeItem::getId).toList());
         for (KnowledgeItem other : items) {
             if (other.getId().equals(newItemId)) {
                 continue;
             }
-            linkPair(self, other, vectors.get(newItemId), vectors.get(other.getId()));
+            linkPair(self, other, vectors.get(newItemId), vectors.get(other.getId()), existingPairs);
         }
     }
 
@@ -424,11 +453,15 @@ public class KnowledgeService {
         }
         Map<Long, float[]> vectors = loadFirstChunkVectors(
                 items.stream().map(KnowledgeItem::getId).toList());
+        // 现存关系一次预载（原来每对 selectCount → O(n²) 查询），内存集合判断
+        Set<String> existingPairs = loadExistingRelations(
+                items.stream().map(KnowledgeItem::getId).toList());
         int created = 0;
         for (int i = 0; i < items.size(); i++) {
             for (int j = i + 1; j < items.size(); j++) {
                 if (linkPair(items.get(i), items.get(j),
-                        vectors.get(items.get(i).getId()), vectors.get(items.get(j).getId()))) {
+                        vectors.get(items.get(i).getId()), vectors.get(items.get(j).getId()),
+                        existingPairs)) {
                     created++;
                 }
             }
@@ -467,7 +500,8 @@ public class KnowledgeService {
         return vectors;
     }
 
-    private boolean linkPair(KnowledgeItem a, KnowledgeItem b, float[] vecA, float[] vecB) {
+    private boolean linkPair(KnowledgeItem a, KnowledgeItem b, float[] vecA, float[] vecB,
+                             Set<String> existingPairs) {
         if (a.getId().equals(b.getId())) {
             return false;
         }
@@ -484,7 +518,7 @@ public class KnowledgeService {
         } else {
             return false;
         }
-        if (relationExists(a.getId(), b.getId())) {
+        if (existingPairs.contains(pairKey(a.getId(), b.getId()))) {
             return false;
         }
         KnowledgeRelation r = new KnowledgeRelation();
@@ -495,6 +529,7 @@ public class KnowledgeService {
         r.setSource(source);
         r.setCreatedAt(LocalDateTime.now());
         relationMapper.insert(r);
+        existingPairs.add(pairKey(a.getId(), b.getId()));
         return true;
     }
 
@@ -510,11 +545,24 @@ public class KnowledgeService {
         return kwA.stream().anyMatch(kwB::contains);
     }
 
-    private boolean relationExists(Long idA, Long idB) {
+    /** 批量预载条目间现存关系（subject/object 任一方向），返回规范化 pair key 集合 */
+    private Set<String> loadExistingRelations(Collection<Long> itemIds) {
+        if (itemIds.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> pairs = new HashSet<>();
         QueryWrapper<KnowledgeRelation> wrapper = new QueryWrapper<>();
-        wrapper.eq("subject_id", idA).eq("object_id", idB)
-                .or().eq("subject_id", idB).eq("object_id", idA);
-        return relationMapper.selectCount(wrapper) > 0;
+        wrapper.in("subject_id", itemIds).or().in("object_id", itemIds);
+        for (KnowledgeRelation r : relationMapper.selectList(wrapper)) {
+            if (r.getSubjectId() != null && r.getObjectId() != null) {
+                pairs.add(pairKey(r.getSubjectId(), r.getObjectId()));
+            }
+        }
+        return pairs;
+    }
+
+    private static String pairKey(Long a, Long b) {
+        return a < b ? a + "|" + b : b + "|" + a;
     }
 
     public boolean existsBySourceUrl(String sourceUrlHash) {

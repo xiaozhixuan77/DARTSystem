@@ -741,7 +741,9 @@ public class ChatService {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < urls.size(); i++) {
             if (i > 0) sb.append(",");
-            sb.append("\"").append(urls.get(i).replace("\"", "\\\"")).append("\"");
+            // 先转义反斜杠再转义引号，防 URL 含 \ 时产出非法 JSON
+            sb.append("\"").append(urls.get(i)
+                    .replace("\\", "\\\\").replace("\"", "\\\"")).append("\"");
         }
         sb.append("]");
         return sb.toString();
