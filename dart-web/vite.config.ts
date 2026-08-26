@@ -42,7 +42,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           echarts: ['echarts'],
-          codemirror: ['codemirror', '@codemirror/lang-markdown'],
           markdown: ['markdown-it', 'highlight.js'],
         },
       },

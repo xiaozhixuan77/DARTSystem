@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
-import { GraphChart } from 'echarts/charts'
-import { TooltipComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
 import type { EChartsType } from 'echarts/core'
+import { buildGraphOption } from '@/utils/knowledgeGraph'
 import { useKnowledgeStore } from '@/stores/knowledge'
-
-echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
 const emit = defineEmits<{ 'select-item': [id: number] }>()
 
@@ -26,29 +22,7 @@ function renderGraph() {
       }
     })
   }
-  chart.setOption({
-    tooltip: {},
-    legend: { show: false },
-    series: [{
-      type: 'graph',
-      layout: 'force',
-      roam: true,
-      draggable: true,
-      label: { show: true, position: 'right', fontSize: 12 },
-      force: { repulsion: 150, edgeLength: 120 },
-      data: store.globalGraph.nodes.map((n) => ({
-        id: n.id,
-        name: n.label,
-        itemStyle: { color: '#5B5FEB' }
-      })),
-      links: store.globalGraph.edges.map((e) => ({
-        source: e.source,
-        target: e.target,
-        label: { show: true, formatter: e.label, fontSize: 10 }
-      })),
-      categories: [{ name: 'knowledge' }]
-    }]
-  })
+  chart.setOption(buildGraphOption(store.globalGraph.nodes, store.globalGraph.edges))
 }
 
 function handleResize() {

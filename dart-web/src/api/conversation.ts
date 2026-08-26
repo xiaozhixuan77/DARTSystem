@@ -1,5 +1,5 @@
 import client from './client'
-import type { ApiResponse, PageResult } from '@/types/api'
+import type { ApiResponse } from '@/types/api'
 import type { ConversationVO, MessageVO } from '@/types/chat'
 
 export async function listConversations(): Promise<ApiResponse<ConversationVO[]>> {
@@ -9,14 +9,6 @@ export async function listConversations(): Promise<ApiResponse<ConversationVO[]>
 
 export async function createConversation(): Promise<ApiResponse<ConversationVO>> {
   const { data } = await client.post<ApiResponse<ConversationVO>>('/conversations', {})
-  return data
-}
-
-export async function updateConversation(
-  id: number,
-  body: { title?: string; tags?: string }
-): Promise<ApiResponse<void>> {
-  const { data } = await client.put<ApiResponse<void>>(`/conversations/${id}`, body)
   return data
 }
 

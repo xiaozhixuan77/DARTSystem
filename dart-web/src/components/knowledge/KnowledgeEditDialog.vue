@@ -1,17 +1,13 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue'
 import * as echarts from 'echarts/core'
-import { GraphChart } from 'echarts/charts'
-import { TooltipComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
 import type { EChartsType } from 'echarts/core'
 import { ElMessageBox } from 'element-plus'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useMarkdown } from '@/composables/useMarkdown'
 import { buildMarkdownExport, downloadMarkdown } from '@/composables/useMarkdownExport'
+import { buildGraphOption } from '@/utils/knowledgeGraph'
 import type { KnowledgeItemDetail, GraphData } from '@/types/knowledge'
-
-echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
 const props = withDefaults(defineProps<{
   visible: boolean
@@ -112,32 +108,7 @@ function renderGraph() {
   if (!graphEl.value || !store.graphData) return
   const data: GraphData = store.graphData
   chart = echarts.init(graphEl.value)
-  chart.setOption({
-    tooltip: {},
-    legend: { show: false },
-    series: [{
-      type: 'graph',
-      layout: 'force',
-      roam: true,
-      draggable: true,
-      label: { show: true, position: 'right', fontSize: 12 },
-      force: { repulsion: 120, edgeLength: 100 },
-      data: data.nodes.map((n) => ({
-        id: n.id,
-        name: n.label,
-        category: n.category,
-        itemStyle: n.category === 'external'
-          ? { color: '#ffa94d' }
-          : { color: '#5B5FEB' }
-      })),
-      links: data.edges.map((e) => ({
-        source: e.source,
-        target: e.target,
-        label: { show: true, formatter: e.label, fontSize: 10 }
-      })),
-      categories: [{ name: 'knowledge' }, { name: 'external' }]
-    }]
-  })
+  chart.setOption(buildGraphOption(data.nodes, data.edges, { repulsion: 120, edgeLength: 100 }))
 }
 
 function disposeChart() {
