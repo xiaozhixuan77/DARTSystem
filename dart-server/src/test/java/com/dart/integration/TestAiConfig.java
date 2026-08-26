@@ -4,6 +4,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 
 import static org.mockito.Mockito.mock;
 
@@ -14,11 +15,13 @@ import static org.mockito.Mockito.mock;
 public class TestAiConfig {
 
     @Bean
+    @Primary
     public ChatModel chatModel() {
         return mock(ChatModel.class);
     }
 
     @Bean
+    @Primary
     public EmbeddingModel embeddingModel() {
         return mock(EmbeddingModel.class);
     }

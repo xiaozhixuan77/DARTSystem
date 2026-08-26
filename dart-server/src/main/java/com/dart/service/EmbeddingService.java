@@ -215,8 +215,7 @@ public class EmbeddingService {
     }
 
     public float[] embed(String text) {
-        var options = org.springframework.ai.embedding.DefaultEmbeddingOptions.builder().build();
-        var request = new org.springframework.ai.embedding.EmbeddingRequest(List.of(text), options);
+        var request = new org.springframework.ai.embedding.EmbeddingRequest(List.of(text), null);
         var response = embeddingModel.call(request);
         return response.getResult().getOutput();
     }
@@ -227,12 +226,11 @@ public class EmbeddingService {
      */
     public List<float[]> embedBatch(List<String> texts) {
         List<float[]> results = new ArrayList<>(texts.size());
-        var options = org.springframework.ai.embedding.DefaultEmbeddingOptions.builder().build();
         for (int i = 0; i < texts.size(); i += EMBED_BATCH_SIZE) {
             List<String> batch = texts.subList(i, Math.min(i + EMBED_BATCH_SIZE, texts.size()));
             List<float[]> vecs;
             try {
-                var request = new org.springframework.ai.embedding.EmbeddingRequest(batch, options);
+                var request = new org.springframework.ai.embedding.EmbeddingRequest(batch, null);
                 vecs = embeddingModel.call(request).getResults().stream()
                         .map(org.springframework.ai.embedding.Embedding::getOutput).toList();
             } catch (Exception e) {

@@ -12,13 +12,6 @@ spring:
       request-timeout: 180000
   autoconfigure:
     exclude:
-      # Spring AI 2.0.0 auto-config（RetryTemplate/RetryPolicy/RetryListener 类路径问题 + Jackson 3.x 不兼容）
-      # 由 AiModelConfig 手动创建 ChatModel / EmbeddingModel Bean
-      - org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration
-      - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
-      - org.springframework.ai.model.embedding.observation.autoconfigure.EmbeddingObservationAutoConfiguration
-      - org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration
-      - org.springframework.ai.autoconfigure.vectorstore.redis.RedisVectorStoreAutoConfiguration
       # Spring Boot 3.4.1 新包路径（与旧路径 autoconfigure 类冲突）
       - org.springframework.boot.http.client.autoconfigure.reactive.ReactiveHttpClientAutoConfiguration
       - org.springframework.boot.http.client.autoconfigure.HttpClientAutoConfiguration

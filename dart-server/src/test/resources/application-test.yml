@@ -13,12 +13,6 @@ spring:
 
   autoconfigure:
     exclude:
-      # Spring AI 2.0.0 自动配置（RetryTemplate 类路径问题）
-      - org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration
-      - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
-      - org.springframework.ai.model.embedding.observation.autoconfigure.EmbeddingObservationAutoConfiguration
-      - org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration
-      - org.springframework.ai.autoconfigure.vectorstore.redis.RedisVectorStoreAutoConfiguration
       # Spring Boot 3.4.1 新包路径自动配置（jar hell）
       - org.springframework.boot.http.client.autoconfigure.reactive.ReactiveHttpClientAutoConfiguration
       - org.springframework.boot.http.client.autoconfigure.HttpClientAutoConfiguration

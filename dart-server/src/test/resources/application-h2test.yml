@@ -11,11 +11,6 @@ spring:
 
   autoconfigure:
     exclude:
-      - org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatAutoConfiguration
-      - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
-      - org.springframework.ai.model.embedding.observation.autoconfigure.EmbeddingObservationAutoConfiguration
-      - org.springframework.ai.retry.autoconfigure.SpringAiRetryAutoConfiguration
-      - org.springframework.ai.autoconfigure.vectorstore.redis.RedisVectorStoreAutoConfiguration
       - org.springframework.boot.http.client.autoconfigure.reactive.ReactiveHttpClientAutoConfiguration
       - org.springframework.boot.http.client.autoconfigure.HttpClientAutoConfiguration
       - org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration
