@@ -3,6 +3,7 @@ package com.dart.controller;
 import com.dart.dto.request.KnowledgeUpdateRequest;
 import com.dart.dto.response.ApiResponse;
 import com.dart.dto.response.KnowledgeDetailVO;
+import com.dart.dto.response.KnowledgeEntityVO;
 import com.dart.dto.response.KnowledgeGraphDTO;
 import com.dart.dto.response.KnowledgeItemVO;
 import com.dart.dto.response.PageResult;
@@ -25,15 +26,22 @@ public class KnowledgeController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String tag,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String entity) {
         Long userId = SecurityUtils.getCurrentUserId();
-        return ApiResponse.ok(knowledgeService.listUserKnowledge(userId, page, size, tag, keyword));
+        return ApiResponse.ok(knowledgeService.listUserKnowledge(userId, page, size, tag, keyword, entity));
     }
 
     @GetMapping("/tags")
     public ApiResponse<List<String>> tags() {
         Long userId = SecurityUtils.getCurrentUserId();
         return ApiResponse.ok(knowledgeService.aggregateTags(userId));
+    }
+
+    @GetMapping("/entities")
+    public ApiResponse<List<KnowledgeEntityVO>> entities() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        return ApiResponse.ok(knowledgeService.listEntities(userId));
     }
 
     @GetMapping("/graph")

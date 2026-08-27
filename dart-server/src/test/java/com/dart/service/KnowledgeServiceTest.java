@@ -8,6 +8,8 @@ import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
 import com.dart.entity.KnowledgeRelation;
 import com.dart.mapper.KnowledgeChunkMapper;
+import com.dart.mapper.KnowledgeEntityMapper;
+import com.dart.mapper.KnowledgeItemEntityMapper;
 import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.KnowledgeRelationMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -89,7 +91,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        var result = knowledgeService.listUserKnowledge(1L, 1, 10, null, null);
+        var result = knowledgeService.listUserKnowledge(1L, 1, 10, null, null, null);
         assertThat(result.getRecords()).hasSize(1);
         assertThat(result.getRecords().get(0).getTitle()).isEqualTo("Spring Guide");
         assertThat(result.getTotal()).isEqualTo(0L);
@@ -102,7 +104,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        knowledgeService.listUserKnowledge(1L, 1, 10, "Go", null);
+        knowledgeService.listUserKnowledge(1L, 1, 10, "Go", null, null);
 
         ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
@@ -135,7 +137,8 @@ class KnowledgeServiceTest {
         ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
         assertThat(captor.getValue().getCustomSqlSegment()).contains("knowledge_item_entity");
-        assertThat(captor.getValue().getCustomSqlSegment()).contains("Redis");
+        // ke.name 值参数化（懒绑定），断言参数值而非 SQL 字面量
+        assertThat(captor.getValue().getParamNameValuePairs().values()).contains("Redis");
     }
 
     @Test
@@ -148,7 +151,6 @@ class KnowledgeServiceTest {
         assertThat(result).hasSize(1);
         assertThat(result.getFirst().name()).isEqualTo("Redis");
     }
-    }
 
     @Test
     void listUserKnowledge_withKeyword_appliesLikeAndExists() {
@@ -157,7 +159,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        knowledgeService.listUserKnowledge(1L, 1, 10, null, "Spring");
+        knowledgeService.listUserKnowledge(1L, 1, 10, null, "Spring", null);
 
         ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
@@ -173,7 +175,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        knowledgeService.listUserKnowledge(1L, 1, 10, "Go", "Spring");
+        knowledgeService.listUserKnowledge(1L, 1, 10, "Go", "Spring", null);
 
         ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
@@ -189,7 +191,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        knowledgeService.listUserKnowledge(1L, 1, 10, null, "100%_真");
+        knowledgeService.listUserKnowledge(1L, 1, 10, null, "100%_真", null);
 
         ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
@@ -209,7 +211,7 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        knowledgeService.listUserKnowledge(1L, 1, 10, null, "   ");
+        knowledgeService.listUserKnowledge(1L, 1, 10, null, "   ", null);
 
         ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());

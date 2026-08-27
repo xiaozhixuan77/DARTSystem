@@ -115,7 +115,7 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
         KnowledgeItem item = knowledgeItemMapper.selectById(itemId);
         assertThat(item).isNull();
 
-        var page = knowledgeService.listUserKnowledge(testUserId, 1, 20, null, null);
+        var page = knowledgeService.listUserKnowledge(testUserId, 1, 20, null, null, null);
         assertThat(page.getRecords().stream().noneMatch(k -> k.getId().equals(itemId))).isTrue();
     }
 

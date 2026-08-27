@@ -8,11 +8,15 @@ import com.dart.dto.response.KnowledgeGraphDTO;
 import com.dart.dto.response.KnowledgeItemVO;
 import com.dart.dto.response.PageResult;
 import com.dart.entity.KnowledgeChunk;
+import com.dart.entity.KnowledgeEntity;
 import com.dart.entity.KnowledgeItem;
+import com.dart.entity.KnowledgeItemEntity;
 import com.dart.entity.KnowledgeRelation;
 import com.dart.exception.BusinessException;
 import com.dart.exception.ErrorCode;
 import com.dart.mapper.KnowledgeChunkMapper;
+import com.dart.mapper.KnowledgeEntityMapper;
+import com.dart.mapper.KnowledgeItemEntityMapper;
 import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.KnowledgeRelationMapper;
 import com.dart.util.TextUtils;
@@ -53,12 +57,15 @@ public class KnowledgeService {
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final KnowledgeRelationMapper relationMapper;
     private final EmbeddingService embeddingService;
+    private final EntityService entityService;
+    private final KnowledgeEntityMapper entityMapper;
+    private final KnowledgeItemEntityMapper itemEntityMapper;
 
     @Value("${agent.graph.link-similarity-threshold:0.75}")
     private double linkSimilarityThreshold = 0.75;
 
     public PageResult<KnowledgeItemVO> listUserKnowledge(Long userId, int page, int size,
-                                                         String tag, String keyword) {
+                                                         String tag, String keyword, String entity) {
         Page<KnowledgeItem> p = new Page<>(page, size);
         QueryWrapper<KnowledgeItem> query = new QueryWrapper<>();
         query.eq("user_id", userId)
@@ -76,11 +83,24 @@ public class KnowledgeService {
                             + "WHERE kc.knowledge_item_id = knowledge_item.id "
                             + "AND kc.chunk_text LIKE {0})", "%" + kw + "%"));
         }
+        if (entity != null && !entity.isBlank()) {
+            query.apply("EXISTS (SELECT 1 FROM knowledge_item_entity kie "
+                    + "JOIN knowledge_entity ke ON kie.entity_id = ke.id "
+                    + "WHERE kie.item_id = knowledge_item.id "
+                    + "AND ke.user_id = {0} AND ke.name = {1})", userId, entity.trim());
+        }
         p = knowledgeItemMapper.selectPage(p, query);
         List<KnowledgeItemVO> records = p.getRecords().stream()
                 .map(this::toVO)
                 .toList();
         return new PageResult<>(records, p.getTotal());
+    }
+
+    /** 实体列表（委托 EntityService）：知识库页实体云/筛选数据源。 */
+    public List<com.dart.dto.response.KnowledgeEntityVO> listEntities(Long userId) {
+        return entityService.listEntities(userId, null).stream()
+                .map(v -> new com.dart.dto.response.KnowledgeEntityVO(v.id(), v.name(), v.type(), v.itemCount()))
+                .toList();
     }
 
     /** MySQL LIKE 通配符转义（默认 ESCAPE '\'）：防 %/_ 篡改匹配语义（先转义反斜杠再转义通配符） */
@@ -328,6 +348,9 @@ public class KnowledgeService {
             }
         }
         ensureItemNodes(nodes, level2ItemIds);
+
+        // 中心条目关联实体节点（entity 类别）
+        addEntityNodes(userId, Set.of(knowledgeId), nodes, edges);
         return new KnowledgeGraphDTO(new ArrayList<>(nodes.values()), new ArrayList<>(edges.values()));
     }
 
@@ -360,7 +383,41 @@ public class KnowledgeService {
             }
             addEdge(nodes, edges, r);
         }
+        addEntityNodes(userId, itemIds, nodes, edges);
         return new KnowledgeGraphDTO(new ArrayList<>(nodes.values()), new ArrayList<>(edges.values()));
+    }
+
+    /**
+     * 实体节点加入全局图谱：条目 ↔ 实体边（label 取实体 type）。
+     * 实体单独成节点（category=entity），前端第三色渲染。
+     */
+    private void addEntityNodes(Long userId, Set<Long> itemIds,
+                                Map<String, KnowledgeGraphDTO.GraphNode> nodes,
+                                Map<String, KnowledgeGraphDTO.GraphEdge> edges) {
+        if (itemIds.isEmpty()) {
+            return;
+        }
+        List<KnowledgeEntity> entities = entityMapper.selectList(
+                new QueryWrapper<KnowledgeEntity>().eq("user_id", userId));
+        if (entities.isEmpty()) {
+            return;
+        }
+        Map<Long, KnowledgeEntity> entityById = entities.stream()
+                .collect(Collectors.toMap(KnowledgeEntity::getId, e -> e));
+        List<KnowledgeItemEntity> links = itemEntityMapper.selectList(
+                new QueryWrapper<KnowledgeItemEntity>().in("item_id", itemIds));
+        for (KnowledgeItemEntity link : links) {
+            KnowledgeEntity entity = entityById.get(link.getEntityId());
+            if (entity == null) {
+                continue;
+            }
+            String entityNodeId = "ent:" + entity.getId();
+            nodes.putIfAbsent(entityNodeId,
+                    new KnowledgeGraphDTO.GraphNode(entityNodeId, entity.getName(), "entity"));
+            String key = nodeId(link.getItemId()) + "|" + entityNodeId;
+            edges.putIfAbsent(key, new KnowledgeGraphDTO.GraphEdge(
+                    nodeId(link.getItemId()), entityNodeId, entity.getType()));
+        }
     }
 
     private List<KnowledgeRelation> relationsOf(Long itemId) {
@@ -604,6 +661,18 @@ public class KnowledgeService {
         vo.setChunks(chunks.stream()
                 .map(c -> new KnowledgeDetailVO.ChunkVO(c.getChunkIndex(), c.getChunkText()))
                 .toList());
+        vo.setEntityNames(loadEntityNames(item.getId()));
         return vo;
+    }
+
+    private List<String> loadEntityNames(Long itemId) {
+        List<KnowledgeItemEntity> links = itemEntityMapper.selectList(
+                new QueryWrapper<KnowledgeItemEntity>().eq("item_id", itemId));
+        if (links.isEmpty()) {
+            return List.of();
+        }
+        List<KnowledgeEntity> entities = entityMapper.selectBatchIds(
+                links.stream().map(KnowledgeItemEntity::getEntityId).toList());
+        return entities.stream().map(KnowledgeEntity::getName).toList();
     }
 }

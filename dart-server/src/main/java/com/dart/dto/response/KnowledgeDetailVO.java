@@ -20,6 +20,7 @@ public class KnowledgeDetailVO {
     private Integer scoreM;
     private BigDecimal weightedScore;
     private List<ChunkVO> chunks;
+    private List<String> entityNames;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
