@@ -28,6 +28,7 @@ public class RagService {
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final KnowledgeRelationMapper relationMapper;
+    private final EntityService entityService;
     private final double similarityThreshold;
     private final int topK;
 
@@ -35,6 +36,7 @@ public class RagService {
                       KnowledgeItemMapper knowledgeItemMapper,
                       KnowledgeChunkMapper knowledgeChunkMapper,
                       KnowledgeRelationMapper relationMapper,
+                      EntityService entityService,
                       @Value("${agent.rag.similarity-threshold:0.80}") double similarityThreshold,
                       @Value("${agent.rag.top-k:5}") int topK) {
         this.embeddingService = embeddingService;
@@ -42,6 +44,7 @@ public class RagService {
         this.knowledgeItemMapper = knowledgeItemMapper;
         this.knowledgeChunkMapper = knowledgeChunkMapper;
         this.relationMapper = relationMapper;
+        this.entityService = entityService;
         this.similarityThreshold = similarityThreshold;
         this.topK = topK;
     }
@@ -100,6 +103,11 @@ public class RagService {
                 }
             }
 
+            // 实体通道：实体名精确匹配 + 概念向量匹配 → 命中条目的 chunk 免阈值入池
+            // （实体命中是强信号，防"概念命中但段落表述不同"漏检；topK 截断兜底）
+            Set<Long> entityHitItemIds = new HashSet<>(entityService.findItemsByEntityName(userId, query));
+            entityHitItemIds.addAll(entityService.matchEntitiesByVector(userId, queryVec));
+
             // 用 MySQL 中存储的向量计算余弦相似度（避免重复 Embedding API 调用）
             List<RagChunk> matched = new ArrayList<>();
             for (KnowledgeChunk c : chunks) {
@@ -108,7 +116,8 @@ public class RagService {
                 float[] chunkVec = com.dart.util.VectorUtils.bytesToFloatArray(
                         java.util.Base64.getDecoder().decode(c.getEmbedding()));
                 double similarity = com.dart.util.VectorUtils.cosineSimilarity(queryVec, chunkVec);
-                if (similarity >= similarityThreshold) {
+                if (similarity >= similarityThreshold
+                        || entityHitItemIds.contains(c.getKnowledgeItemId())) {
                     matched.add(new RagChunk(c.getChunkText(), item.getTitle(),
                             item.getSourceUrl(), similarity));
                 }
