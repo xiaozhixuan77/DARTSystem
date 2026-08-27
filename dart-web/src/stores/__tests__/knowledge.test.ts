@@ -9,10 +9,11 @@ vi.mock('@/api/knowledge', () => ({
   getKnowledgeGraph: vi.fn(),
   updateKnowledge: vi.fn(),
   getKnowledgeTags: vi.fn(),
-  getGlobalKnowledgeGraph: vi.fn()
+  getGlobalKnowledgeGraph: vi.fn(),
+  fetchEntities: vi.fn()
 }))
 
-import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, updateKnowledge, getKnowledgeTags, getGlobalKnowledgeGraph } from '@/api/knowledge'
+import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, updateKnowledge, getKnowledgeTags, getGlobalKnowledgeGraph, fetchEntities } from '@/api/knowledge'
 
 function mockKnowledgeItem(overrides: Record<string, unknown> = {}) {
   return {
@@ -195,6 +196,48 @@ describe('useKnowledgeStore', () => {
     await store.loadTags()
 
     expect(store.tags).toEqual([])
+  })
+
+  it('加载实体填充 entities', async () => {
+    vi.mocked(fetchEntities).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: [
+        { id: 1, name: 'Redis', type: 'concept', itemCount: 3 },
+        { id: 2, name: 'Spring', type: 'topic', itemCount: 2 }
+      ]
+    })
+
+    const store = useKnowledgeStore()
+    await store.loadEntities()
+
+    expect(store.entities).toHaveLength(2)
+    expect(store.entities[0].name).toBe('Redis')
+  })
+
+  it('实体筛选时 listKnowledge 携带 entity 参数', async () => {
+    vi.mocked(listKnowledge).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: { records: [mockKnowledgeItem()], total: 1 }
+    })
+
+    const store = useKnowledgeStore()
+    await store.setEntityFilter('Redis')
+
+    expect(store.entityFilter).toBe('Redis')
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, undefined, 'Redis')
+  })
+
+  it('实体筛选清空时不携带 entity 参数', async () => {
+    vi.mocked(listKnowledge).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: { records: [], total: 0 }
+    })
+
+    const store = useKnowledgeStore()
+    await store.setEntityFilter(undefined)
+
+    expect(store.entityFilter).toBeUndefined()
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, undefined, undefined)
   })
 
   it('保存条目更新 items 和 selectedItem', async () => {
