@@ -51,7 +51,7 @@ class EntityServiceTest {
             KnowledgeEntity e = inv.getArgument(0);
             e.setId(e.getType().equals("topic") ? 98L : 99L);
             return 1;
-        }).when(entityMapper).insert(any());
+        }).when(entityMapper).insert(any(com.dart.entity.KnowledgeEntity.class));
 
         EntityExtractionService.ExtractedEntities extracted =
                 new EntityExtractionService.ExtractedEntities(List.of("Spring"), List.of("Redis"));
@@ -78,7 +78,7 @@ class EntityServiceTest {
 
         // Redis 复用已有 7；LRU 新插（无 embedding mock 时返回 null 向量 → 不设 embedding）
         assertThat(ids).contains(7L);
-        verify(entityMapper, atMostOnce()).insert(any());
+        verify(entityMapper, atMostOnce()).insert(any(com.dart.entity.KnowledgeEntity.class));
         verify(embeddingService, atMostOnce()).embed("LRU");
     }
 
@@ -88,7 +88,7 @@ class EntityServiceTest {
 
         service.linkItems(1L, 10L, List.of(5L, 6L));
 
-        verify(itemEntityMapper, never()).insert(any());
+        verify(itemEntityMapper, never()).insert(any(com.dart.entity.KnowledgeItemEntity.class));
     }
 
     @Test
@@ -97,7 +97,7 @@ class EntityServiceTest {
 
         service.linkItems(1L, 10L, List.of(5L, 6L));
 
-        verify(itemEntityMapper, times(2)).insert(any());
+        verify(itemEntityMapper, times(2)).insert(any(com.dart.entity.KnowledgeItemEntity.class));
     }
 
     @Test
@@ -118,10 +118,9 @@ class EntityServiceTest {
     void findItemsByEntityName_matchesCaseInsensitiveContains() {
         when(entityMapper.selectList(any())).thenReturn(List.of(
                 entity(1L, "Redis", "concept"), entity(2L, "LRU", "concept")));
-        when(itemEntityMapper.selectList(any())).thenReturn(List.of(
-                assoc(10L, 1L), assoc(11L, 2L)));
+        when(itemEntityMapper.selectList(any())).thenReturn(List.of(assoc(10L, 1L)));
 
-        // 查询词含 redis（大小写不敏感）→ 只命中 Redis 实体 → 条目 10
+        // 查询词含 redis（大小写不敏感）→ 只命中 Redis 实体 → 条目 10（LRU 未命中，其关联不被查询）
         assertThat(service.findItemsByEntityName(1L, "redis 缓存淘汰策略")).containsExactly(10L);
     }
 
