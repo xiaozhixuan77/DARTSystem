@@ -11,12 +11,13 @@ vi.mock('@/api/knowledge', () => ({
   getKnowledgeGraph: vi.fn(),
   getGlobalKnowledgeGraph: vi.fn(),
   updateKnowledge: vi.fn(),
-  getKnowledgeTags: vi.fn()
+  getKnowledgeTags: vi.fn(),
+  fetchEntities: vi.fn()
 }))
 
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 
-import { listKnowledge, getKnowledgeDetail, getKnowledgeTags } from '@/api/knowledge'
+import { listKnowledge, getKnowledgeDetail, getKnowledgeTags, fetchEntities } from '@/api/knowledge'
 
 function mockList(records: any[] = [], total = 0) {
   vi.mocked(listKnowledge).mockResolvedValue({
@@ -151,6 +152,45 @@ describe('KnowledgeView.vue', () => {
     const store = useKnowledgeStore()
     expect(store.selectedItem).not.toBeNull()
     expect(wrapper.find('.dialog-overlay').exists()).toBe(true)
+  })
+
+  it('实体较多时默认折叠，点击按钮展开全部', async () => {
+    vi.mocked(fetchEntities).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: Array.from({ length: 8 }, (_, i) => ({
+        id: i + 1, name: `实体${i + 1}`, type: 'concept', itemCount: 1
+      }))
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    // 默认折叠：展开按钮可见，实体栏 collapsed
+    const toggle = wrapper.find('.entity-toggle')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.text()).toContain('显示全部')
+    expect(wrapper.find('.entity-bar').classes()).toContain('collapsed')
+
+    // 点击展开
+    await toggle.trigger('click')
+    expect(wrapper.find('.entity-bar').classes()).not.toContain('collapsed')
+    expect(wrapper.find('.entity-toggle').text()).toContain('收起')
+  })
+
+  it('实体较少时不显示展开按钮', async () => {
+    vi.mocked(fetchEntities).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: [
+        { id: 1, name: 'Redis', type: 'concept', itemCount: 1 },
+        { id: 2, name: 'Spring', type: 'topic', itemCount: 1 }
+      ]
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.entity-toggle').exists()).toBe(false)
+    expect(wrapper.find('.entity-bar').classes()).not.toContain('collapsed')
   })
 
   it('视图切换按钮切换列表/图谱视图', async () => {
