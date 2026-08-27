@@ -135,7 +135,7 @@ public class RagService {
 
             // 1-hop 知识图谱扩展：命中条目的关联知识拼入生成上下文
             List<String> relatedContext = loadRelatedContexts(itemMap);
-            String answer = generateAnswer(query, matched, relatedContext);
+            String answer = generateAnswer(query, matched, relatedContext, !entityHitItemIds.isEmpty());
             List<String> sources = matched.stream().map(RagChunk::sourceUrl).distinct().toList();
             return Optional.of(new RagResult(answer, sources, matched.getFirst().similarity()));
 
@@ -150,6 +150,11 @@ public class RagService {
     }
 
     public String generateAnswer(String query, List<RagChunk> chunks, List<String> relatedContext) {
+        return generateAnswer(query, chunks, relatedContext, false);
+    }
+
+    public String generateAnswer(String query, List<RagChunk> chunks, List<String> relatedContext,
+                                 boolean strongEntityHit) {
         StringBuilder context = new StringBuilder();
         for (RagChunk c : chunks) {
             context.append("<source>\n");
@@ -168,7 +173,8 @@ public class RagService {
 
         double maxSimilarity = chunks.stream()
                 .mapToDouble(RagChunk::similarity).max().orElse(0.0);
-        String insufficiencyInstruction = maxSimilarity < STRONG_MATCH_THRESHOLD
+        // 实体命中是强信号（查询词含实体名 = 明确意图），即使相似度擦线也不判"材料不足"
+        String insufficiencyInstruction = (maxSimilarity < STRONG_MATCH_THRESHOLD && !strongEntityHit)
                 ? "如果参考材料不足以完整回答用户问题，请只输出 " + RAG_INSUFFICIENT_MARKER
                 + "（不要输出其他任何内容）。"
                 : "如果参考材料不足以回答问题，请如实说明。";
