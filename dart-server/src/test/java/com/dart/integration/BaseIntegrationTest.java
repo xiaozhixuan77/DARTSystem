@@ -41,7 +41,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 public abstract class BaseIntegrationTest {
 
     private static final List<String> TABLES = List.of(
-            "knowledge_relation", "knowledge_chunk", "knowledge_item", "search_trace", "message",
+            // 外键子表在前：knowledge_item_entity 依赖 knowledge_item/entity；
+            // knowledge_entity 无外键可任意位置（放最前）
+            "knowledge_entity", "knowledge_item_entity", "knowledge_relation",
+            "knowledge_chunk", "knowledge_item", "search_trace", "message",
             "refresh_token", "conversation", "`user`"
     );
 

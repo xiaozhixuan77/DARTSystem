@@ -10,6 +10,8 @@ import com.dart.entity.Conversation;
 import com.dart.mapper.ConversationMapper;
 import com.dart.service.ChatService;
 import com.dart.service.EmbeddingService;
+import com.dart.service.EntityExtractionService;
+import com.dart.service.EntityService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,9 +51,56 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private ConversationMapper conversationMapper;
 
+    @Autowired
+    private com.dart.mapper.KnowledgeEntityMapper entityMapper;
+
+    @Autowired
+    private com.dart.mapper.KnowledgeItemEntityMapper itemEntityMapper;
+
+    @Autowired
+    private com.dart.mapper.KnowledgeItemMapper knowledgeItemMapper;
+
+    @Autowired
+    private EntityService entityService;
+
     @AfterEach
     void resetMocks() {
         Mockito.reset(chatModel, embeddingModel, bingSearchClient, pageFetcher);
+    }
+
+    @Test
+    @DisplayName("实体 upsert 同名聚合、关联幂等、列表计数（真实 DB）")
+    void entityUpsertLinkAndListOnRealDb() {
+        Long userId = createTestUser();
+
+        EntityExtractionService.ExtractedEntities extracted =
+                new EntityExtractionService.ExtractedEntities(List.of("Spring"), List.of("Redis", "LRU"));
+        List<Long> ids1 = entityService.upsertEntities(userId, extracted);
+        // 同名再次 upsert → 复用不新增
+        List<Long> ids2 = entityService.upsertEntities(userId, extracted);
+        assertThat(ids2).containsExactlyElementsOf(ids1);
+        assertThat(entityMapper.selectCount(null)).isEqualTo(3);
+
+        Long itemId = createKnowledgeItem(userId, "Redis 缓存淘汰策略");
+        entityService.linkItems(userId, itemId, ids1);
+        entityService.linkItems(userId, itemId, ids1); // 幂等
+        assertThat(itemEntityMapper.selectCount(null)).isEqualTo(3);
+
+        // 列表计数：Redis 关联 1 条
+        var vos = entityService.listEntities(userId, null);
+        assertThat(vos).anyMatch(v -> v.name().equals("Redis") && v.itemCount() == 1);
+        // 名称匹配检索
+        assertThat(entityService.findItemsByEntityName(userId, "redis 缓存策略")).contains(itemId);
+    }
+
+    private Long createKnowledgeItem(Long userId, String title) {
+        com.dart.entity.KnowledgeItem item = new com.dart.entity.KnowledgeItem();
+        item.setUserId(userId);
+        item.setTitle(title);
+        item.setIsDeleted(0);
+        item.setCreatedAt(LocalDateTime.now());
+        knowledgeItemMapper.insert(item);
+        return item.getId();
     }
 
     @Test
