@@ -41,13 +41,19 @@ class KnowledgeServiceTest {
     private KnowledgeRelationMapper relationMapper;
     @Mock
     private EmbeddingService embeddingService;
+    @Mock
+    private EntityService entityService;
+    @Mock
+    private KnowledgeEntityMapper entityMapper;
+    @Mock
+    private KnowledgeItemEntityMapper itemEntityMapper;
 
     private KnowledgeService knowledgeService;
 
     @BeforeEach
     void setUp() {
         knowledgeService = new KnowledgeService(knowledgeItemMapper, knowledgeChunkMapper,
-                relationMapper, embeddingService);
+                relationMapper, embeddingService, entityService, entityMapper, itemEntityMapper);
     }
 
     private static KnowledgeRelation relation(Long subjectId, String predicate, Long objectId, String objectLabel) {
@@ -110,11 +116,38 @@ class KnowledgeServiceTest {
         when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
                 .thenReturn(mockPage);
 
-        knowledgeService.listUserKnowledge(1L, 1, 10, null, null);
+        knowledgeService.listUserKnowledge(1L, 1, 10, null, null, null);
 
         ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
         verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
         assertThat(captor.getValue().getCustomSqlSegment()).doesNotContain("FIND_IN_SET");
+    }
+
+    @Test
+    void listUserKnowledge_withEntity_appliesEntityExists() {
+        Page<KnowledgeItem> mockPage = new Page<>(1, 10);
+        mockPage.setRecords(List.of(createItem(1L, 1L, "Redis Guide")));
+        when(knowledgeItemMapper.selectPage(any(Page.class), any(QueryWrapper.class)))
+                .thenReturn(mockPage);
+
+        knowledgeService.listUserKnowledge(1L, 1, 10, null, null, "Redis");
+
+        ArgumentCaptor<QueryWrapper<KnowledgeItem>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(knowledgeItemMapper).selectPage(any(Page.class), captor.capture());
+        assertThat(captor.getValue().getCustomSqlSegment()).contains("knowledge_item_entity");
+        assertThat(captor.getValue().getCustomSqlSegment()).contains("Redis");
+    }
+
+    @Test
+    void listEntities_delegatesToEntityService() {
+        when(entityService.listEntities(1L, null)).thenReturn(List.of(
+                new EntityService.EntityVO(1L, "Redis", "concept", 3)));
+
+        var result = knowledgeService.listEntities(1L);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().name()).isEqualTo("Redis");
+    }
     }
 
     @Test
@@ -692,6 +725,42 @@ class KnowledgeServiceTest {
         assertThat(graph.edges()).hasSize(2);
         assertThat(graph.edges()).extracting(KnowledgeGraphDTO.GraphEdge::label)
                 .containsExactly("related_to", "related_to");
+    }
+
+    @Test
+    void getGlobalGraph_includesEntityNodes() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(1L, 1L, "Spring")));
+        when(relationMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(entityMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(
+                entityOf(10L, "Redis", "concept"), entityOf(11L, "Spring", "topic")));
+        when(itemEntityMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of(
+                assocOf(1L, 10L), assocOf(1L, 11L)));
+
+        KnowledgeGraphDTO graph = knowledgeService.getGlobalGraph(1L);
+
+        assertThat(graph.nodes()).extracting(KnowledgeGraphDTO.GraphNode::id)
+                .contains("item:1", "ent:10", "ent:11");
+        KnowledgeGraphDTO.GraphNode entityNode = graph.nodes().stream()
+                .filter(n -> n.id().equals("ent:10")).findFirst().orElseThrow();
+        assertThat(entityNode.category()).isEqualTo("entity");
+        assertThat(entityNode.label()).isEqualTo("Redis");
+        assertThat(graph.edges()).anyMatch(e -> e.source().equals("item:1") && e.target().equals("ent:10"));
+    }
+
+    private static com.dart.entity.KnowledgeEntity entityOf(Long id, String name, String type) {
+        com.dart.entity.KnowledgeEntity e = new com.dart.entity.KnowledgeEntity();
+        e.setId(id);
+        e.setName(name);
+        e.setType(type);
+        return e;
+    }
+
+    private static com.dart.entity.KnowledgeItemEntity assocOf(Long itemId, Long entityId) {
+        com.dart.entity.KnowledgeItemEntity a = new com.dart.entity.KnowledgeItemEntity();
+        a.setItemId(itemId);
+        a.setEntityId(entityId);
+        return a;
     }
 
     @Test

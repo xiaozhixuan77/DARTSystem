@@ -82,7 +82,7 @@ class KnowledgeControllerTest {
 
     @Test
     void listKnowledge_returnsList() throws Exception {
-        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), any(), any()))
+        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), any(), any(), any()))
                 .thenReturn(new PageResult<>(List.of(createItem(1L, "Spring Guide")), 1));
 
         mockMvc.perform(get("/api/knowledge")
@@ -93,7 +93,7 @@ class KnowledgeControllerTest {
 
     @Test
     void listKnowledge_withTag_forwardsTag() throws Exception {
-        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), eq("Go"), any()))
+        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), eq("Go"), any(), any()))
                 .thenReturn(new PageResult<>(List.of(createItem(1L, "Go Guide")), 1));
 
         mockMvc.perform(get("/api/knowledge").param("tag", "Go")
@@ -104,13 +104,38 @@ class KnowledgeControllerTest {
 
     @Test
     void listKnowledge_withKeyword_forwardsKeyword() throws Exception {
-        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), any(), eq("Spring")))
+        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), any(), eq("Spring"), any()))
                 .thenReturn(new PageResult<>(List.of(createItem(1L, "Spring Guide")), 1));
 
         mockMvc.perform(get("/api/knowledge").param("keyword", "Spring")
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.records[0].title").value("Spring Guide"));
+    }
+
+    @Test
+    void listKnowledge_withEntity_forwardsEntity() throws Exception {
+        when(knowledgeService.listUserKnowledge(eq(1L), anyInt(), anyInt(), any(), any(), eq("Redis")))
+                .thenReturn(new PageResult<>(List.of(createItem(1L, "Redis Guide")), 1));
+
+        mockMvc.perform(get("/api/knowledge").param("entity", "Redis")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[0].title").value("Redis Guide"));
+    }
+
+    @Test
+    void listEntities_returnsList() throws Exception {
+        when(knowledgeService.listEntities(1L)).thenReturn(List.of(
+                new com.dart.dto.response.KnowledgeEntityVO(1L, "Redis", "concept", 3),
+                new com.dart.dto.response.KnowledgeEntityVO(2L, "Spring", "topic", 2)));
+
+        mockMvc.perform(get("/api/knowledge/entities")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].name").value("Redis"))
+                .andExpect(jsonPath("$.data[0].itemCount").value(3))
+                .andExpect(jsonPath("$.data[1].type").value("topic"));
     }
 
     @Test
