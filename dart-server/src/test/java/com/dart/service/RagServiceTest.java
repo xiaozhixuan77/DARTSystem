@@ -51,6 +51,9 @@ class RagServiceTest {
     void setUp() {
         ragService = new RagService(embeddingService, chatModel, knowledgeItemMapper,
                 knowledgeChunkMapper, relationMapper, entityService, 0.80, 5);
+        // 实体通道默认无命中（lenient：纯 generateAnswer 用例不触发 retrieve）
+        lenient().when(entityService.findItemsByEntityName(any(), any())).thenReturn(java.util.Set.of());
+        lenient().when(entityService.matchEntitiesByVector(any(), any())).thenReturn(java.util.Set.of());
     }
 
     @Test
@@ -201,6 +204,23 @@ class RagServiceTest {
         RagService.RagChunk chunk = new RagService.RagChunk("Content", "Title", "https://x.com", 0.90);
         String answer = ragService.generateAnswer("query", List.of(chunk));
         assertThat(answer).contains("query");
+    }
+
+    @Test
+    void generateAnswer_entityHit_skipsInsufficiencyInstruction() {
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("综合回答"))));
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+
+        // 实体命中（强信号）+ 低相似度 chunk（0.71 < 强相关阈值）→ 不注入材料不足指令
+        RagService.RagChunk chunk = new RagService.RagChunk("Content", "Title", "https://x.com", 0.71);
+        ragService.generateAnswer("query", List.of(chunk), List.of(), true);
+
+        verify(chatModel).call(captor.capture());
+        assertThat(captor.getValue().getInstructions().getFirst().getText())
+                .doesNotContain(RagService.RAG_INSUFFICIENT_MARKER);
     }
 
     @Test
