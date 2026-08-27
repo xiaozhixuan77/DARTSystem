@@ -80,6 +80,8 @@ class ChatServiceTest {
 
     private ChatService chatService;
     private SseSink sink;
+    private EntityExtractionService entityExtractionService;
+    private EntityService entityService;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     // insert 快照：mock insert 后对象可能被复用修改（草稿 insert 后 completeAssistantMessage
     // 写回同一引用），断言 insert 时的内容须用快照
@@ -92,8 +94,15 @@ class ChatServiceTest {
         MessagePersistenceService messagePersistenceService =
                 new MessagePersistenceService(messageMapper, transactionTemplate);
         ChatCacheService chatCacheService = new ChatCacheService(redisTemplate, messagePersistenceService);
+        entityExtractionService = mock(EntityExtractionService.class);
+        entityService = mock(EntityService.class);
+        lenient().when(entityExtractionService.extract(any(), any()))
+                .thenReturn(EntityExtractionService.ExtractedEntities.empty());
+        lenient().when(entityService.upsertEntities(anyLong(), any()))
+                .thenReturn(List.of());
         SedimentService sedimentService = new SedimentService(embeddingService,
-                knowledgeItemMapper, knowledgeService, relationExtractionService);
+                knowledgeItemMapper, knowledgeService, relationExtractionService,
+                entityExtractionService, entityService);
         MemoryAnswerService memoryAnswerService =
                 new MemoryAnswerService(chatModel, summaryService, messageMapper);
         chatService = new ChatService(searchAgent, curatorAgent, ragService, summaryService,
@@ -1810,6 +1819,35 @@ class ChatServiceTest {
         };
         verify(embeddingService, timeout(3000))
                 .embedAndPersist(eq(1L), any(), any(), any(), any(), eq(expectedTag));
+    }
+
+    @Test
+    void executeSearchAndCurate_sedimentLinksExtractedEntities() {
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
+        when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any())).thenReturn(report);
+        when(chatResponse.getResults()).thenReturn(List.of(new Generation(new AssistantMessage(
+                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\",\"variants\":[\"sb\"],\"intent\":\"how_to\"}"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenReturn(chatResponse)
+                .thenThrow(new RuntimeException("timeout"));
+        when(entityExtractionService.extract(any(), any()))
+                .thenReturn(new EntityExtractionService.ExtractedEntities(
+                        List.of("Spring"), List.of("Redis", "缓存淘汰策略")));
+        when(entityService.upsertEntities(eq(1L), any())).thenReturn(List.of(98L, 99L, 100L));
+        when(embeddingService.embedAndPersist(anyLong(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(42L));
+
+        chatService.executeSearchAndCurate("Spring Boot 配置", 1L, 100L, sink);
+
+        // 沉淀后实体抽取 → upsert → 关联新条目
+        verify(entityService, timeout(3000)).upsertEntities(eq(1L), any());
+        verify(entityService, timeout(3000)).linkItems(eq(1L), eq(42L),
+                argThat(ids -> ids.containsAll(List.of(98L, 99L, 100L))));
     }
 
     @Test
