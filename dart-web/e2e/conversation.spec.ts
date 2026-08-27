@@ -17,6 +17,19 @@ test.describe('会话管理', () => {
     await expect(page.locator('.welcome-screen')).toBeVisible()
   })
 
+  test('新会话发消息后侧栏标题自动更新', async ({ page }) => {
+    await page.locator('.new-session-btn').click()
+    await expect(page.locator('.welcome-screen')).toBeVisible()
+
+    const input = page.locator('.chat-input textarea, textarea')
+    await input.fill('今天天气怎么样')
+    await input.press('Enter')
+
+    // 非技术查询快速返回（error + done），完成后侧栏标题应为消息内容
+    await expect(page.locator('.session-title').first())
+      .toContainText('今天天气怎么样', { timeout: 30000 })
+  })
+
   test('会话列表显示无会话状态', async ({ page }) => {
     const emptyState = page.locator('.session-empty')
     if (await emptyState.isVisible()) {
