@@ -81,19 +81,22 @@ function nextPage() {
       >{{ tag }}</button>
     </div>
 
-    <div v-if="store.entities.length > 0" class="entity-bar" :class="{ collapsed: !entityExpanded && store.entities.length > 4 }">
-      <button
-        class="entity-chip"
-        :class="{ active: !store.entityFilter }"
-        @click="store.setEntityFilter(undefined)"
-      >全部实体</button>
-      <button
-        v-for="e in store.entities"
-        :key="e.id"
-        class="entity-chip"
-        :class="{ active: store.entityFilter === e.name, topic: e.type === 'topic' }"
-        @click="store.setEntityFilter(store.entityFilter === e.name ? undefined : e.name)"
-      >{{ e.name }}<span class="entity-count">{{ e.itemCount }}</span></button>
+    <div v-if="store.entities.length > 0" class="entity-section">
+      <div class="entity-bar" :class="{ collapsed: !entityExpanded && store.entities.length > 4 }">
+        <button
+          class="entity-chip"
+          :class="{ active: !store.entityFilter }"
+          @click="store.setEntityFilter(undefined)"
+        >全部实体</button>
+        <button
+          v-for="e in store.entities"
+          :key="e.id"
+          class="entity-chip"
+          :class="{ active: store.entityFilter === e.name, topic: e.type === 'topic' }"
+          @click="store.setEntityFilter(store.entityFilter === e.name ? undefined : e.name)"
+        >{{ e.name }}<span class="entity-count">{{ e.itemCount }}</span></button>
+      </div>
+      <!-- 按钮在折叠容器外：折叠裁剪不影响其可见性 -->
       <button v-if="store.entities.length > 4" class="entity-toggle" @click="entityExpanded = !entityExpanded">
         {{ entityExpanded ? '收起' : `显示全部 ${store.entities.length} 个实体` }}
       </button>
@@ -203,13 +206,17 @@ function nextPage() {
     border-color: $color-accent;
   }
 }
+.entity-section {
+  position: relative;
+  border-bottom: 1px solid $color-border;
+  background: $color-surface;
+  padding-right: 120px; // 右侧留位给展开按钮
+}
 .entity-bar {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   padding: 10px 24px;
-  border-bottom: 1px solid $color-border;
-  background: $color-surface;
   &.collapsed {
     max-height: 46px;
     overflow: hidden;
@@ -236,13 +243,19 @@ function nextPage() {
   opacity: 0.7;
 }
 .entity-toggle {
-  border: none;
-  background: transparent;
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 1px solid $color-border;
+  background: $color-surface;
   color: $color-accent;
+  border-radius: 999px;
   font-size: 13px;
   cursor: pointer;
-  padding: 4px 6px;
-  &:hover { text-decoration: underline; }
+  padding: 4px 12px;
+  white-space: nowrap;
+  &:hover { border-color: $color-accent; }
 }
 .page-body {
   flex: 1;
