@@ -51,9 +51,9 @@ describe('AppSidebar.vue', () => {
     expect(wrapper.find('.brand-sub').text()).toContain('检索')
   })
 
-  it('渲染"新搜索"按钮', () => {
+  it('渲染"新会话"按钮', () => {
     const wrapper = mount(AppSidebar)
-    expect(wrapper.find('.new-session-btn').text()).toContain('新搜索')
+    expect(wrapper.find('.new-session-btn').text()).toContain('新会话')
   })
 
   it('无会话时显示空状态', () => {
@@ -86,7 +86,7 @@ describe('AppSidebar.vue', () => {
     expect(selectSpy).toHaveBeenCalledWith(1)
   })
 
-  it('点击"新搜索"创建会话', async () => {
+  it('点击"新会话"创建会话', async () => {
     const store = useChatStore()
     const newSpy = vi.spyOn(store, 'newConversation')
 

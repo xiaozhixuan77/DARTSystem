@@ -93,7 +93,7 @@ function handleLogout() {
         width="18" height="18" style="margin-right:6px">
         <path d="M12 5v14m-7-7h14"/>
       </svg>
-      新搜索
+      新会话
     </button>
 
     <div class="session-list" @scroll="closeContextMenu">

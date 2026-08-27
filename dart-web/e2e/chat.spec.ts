@@ -20,7 +20,7 @@ test.describe('聊天页面', () => {
   test('会话列表加载与切换', async ({ page }) => {
     await expect(page.locator('.brand-name')).toContainText('DART')
     await expect(page.locator('.new-session-btn')).toBeVisible()
-    await expect(page.locator('.new-session-btn')).toContainText('新搜索')
+    await expect(page.locator('.new-session-btn')).toContainText('新会话')
   })
 
   test('输入框 Enter 发送消息', async ({ page }) => {

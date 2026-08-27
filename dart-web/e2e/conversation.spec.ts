@@ -8,7 +8,7 @@ test.describe('会话管理', () => {
     await gotoChat(page)
   })
 
-  test('"新搜索"按钮创建会话', async ({ page }) => {
+  test('"新会话"按钮创建会话', async ({ page }) => {
     const newBtn = page.locator('.new-session-btn')
     await expect(newBtn).toBeVisible()
     await newBtn.click()
