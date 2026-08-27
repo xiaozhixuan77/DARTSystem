@@ -13,6 +13,7 @@ const store = useKnowledgeStore()
 const searchText = ref('')
 const searchDebounced = useDebounce(() => searchText.value, 400)
 const view = ref<'list' | 'graph'>('list')
+const entityExpanded = ref(false)
 const dialogVisible = ref(false)
 const dialogInitialTab = ref<'content' | 'detail' | 'graph'>('content')
 
@@ -80,7 +81,7 @@ function nextPage() {
       >{{ tag }}</button>
     </div>
 
-    <div v-if="store.entities.length > 0" class="entity-bar">
+    <div v-if="store.entities.length > 0" class="entity-bar" :class="{ collapsed: !entityExpanded && store.entities.length > 4 }">
       <button
         class="entity-chip"
         :class="{ active: !store.entityFilter }"
@@ -93,6 +94,9 @@ function nextPage() {
         :class="{ active: store.entityFilter === e.name, topic: e.type === 'topic' }"
         @click="store.setEntityFilter(store.entityFilter === e.name ? undefined : e.name)"
       >{{ e.name }}<span class="entity-count">{{ e.itemCount }}</span></button>
+      <button v-if="store.entities.length > 4" class="entity-toggle" @click="entityExpanded = !entityExpanded">
+        {{ entityExpanded ? '收起' : `显示全部 ${store.entities.length} 个实体` }}
+      </button>
     </div>
 
     <main class="page-body">
@@ -206,6 +210,10 @@ function nextPage() {
   padding: 10px 24px;
   border-bottom: 1px solid $color-border;
   background: $color-surface;
+  &.collapsed {
+    max-height: 46px;
+    overflow: hidden;
+  }
 }
 .entity-chip {
   padding: 3px 12px;
@@ -226,6 +234,15 @@ function nextPage() {
   margin-left: 4px;
   font-size: 11px;
   opacity: 0.7;
+}
+.entity-toggle {
+  border: none;
+  background: transparent;
+  color: $color-accent;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 6px;
+  &:hover { text-decoration: underline; }
 }
 .page-body {
   flex: 1;
