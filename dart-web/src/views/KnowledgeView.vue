@@ -23,6 +23,7 @@ watch(searchDebounced, (val) => store.setKeyword(val.trim()))
 onMounted(() => {
   store.loadItems()
   store.loadTags()
+  store.loadEntities()
 })
 
 async function openDetail(id: number, initialTab: 'content' | 'detail' | 'graph' = 'content') {
@@ -77,6 +78,21 @@ function nextPage() {
         :class="{ active: store.filter === tag }"
         @click="store.setFilter(tag)"
       >{{ tag }}</button>
+    </div>
+
+    <div v-if="store.entities.length > 0" class="entity-bar">
+      <button
+        class="entity-chip"
+        :class="{ active: !store.entityFilter }"
+        @click="store.setEntityFilter(undefined)"
+      >全部实体</button>
+      <button
+        v-for="e in store.entities"
+        :key="e.id"
+        class="entity-chip"
+        :class="{ active: store.entityFilter === e.name, topic: e.type === 'topic' }"
+        @click="store.setEntityFilter(store.entityFilter === e.name ? undefined : e.name)"
+      >{{ e.name }}<span class="entity-count">{{ e.itemCount }}</span></button>
     </div>
 
     <main class="page-body">
@@ -182,6 +198,34 @@ function nextPage() {
     color: white;
     border-color: $color-accent;
   }
+}
+.entity-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 24px;
+  border-bottom: 1px solid $color-border;
+  background: $color-surface;
+}
+.entity-chip {
+  padding: 3px 12px;
+  border: 1px dashed $color-border;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+  color: $color-fg;
+  &.topic { border-color: #67C23A; color: #67C23A; }
+  &.active {
+    background: #67C23A;
+    color: white;
+    border-style: solid;
+  }
+}
+.entity-count {
+  margin-left: 4px;
+  font-size: 11px;
+  opacity: 0.7;
 }
 .page-body {
   flex: 1;

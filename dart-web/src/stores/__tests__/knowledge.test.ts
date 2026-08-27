@@ -135,7 +135,7 @@ describe('useKnowledgeStore', () => {
 
     expect(store.filter).toBe('Go')
     expect(store.page).toBe(1)
-    expect(listKnowledge).toHaveBeenCalledWith(1, 12, 'Go', undefined)
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, 'Go', undefined, undefined)
   })
 
   it('全部标签不携带过滤参数', async () => {
@@ -147,7 +147,7 @@ describe('useKnowledgeStore', () => {
     const store = useKnowledgeStore()
     store.setFilter('全部')
 
-    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, undefined)
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, undefined, undefined)
   })
 
   it('设置搜索关键词重置分页并携带 keyword 加载', async () => {
@@ -162,7 +162,7 @@ describe('useKnowledgeStore', () => {
 
     expect(store.keyword).toBe('Spring')
     expect(store.page).toBe(1)
-    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, 'Spring')
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, 'Spring', undefined)
   })
 
   it('空搜索关键词不携带 keyword 参数', async () => {
@@ -174,7 +174,7 @@ describe('useKnowledgeStore', () => {
     const store = useKnowledgeStore()
     store.setKeyword('')
 
-    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, undefined)
+    expect(listKnowledge).toHaveBeenCalledWith(1, 12, undefined, undefined, undefined)
   })
 
   it('加载标签填充 tags', async () => {

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, getGlobalKnowledgeGraph, getKnowledgeTags, updateKnowledge } from '@/api/knowledge'
-import type { KnowledgeItemVO, KnowledgeItemDetail, GraphData } from '@/types/knowledge'
+import { listKnowledge, getKnowledgeDetail, deleteKnowledge, getKnowledgeGraph, getGlobalKnowledgeGraph, getKnowledgeTags, updateKnowledge, fetchEntities } from '@/api/knowledge'
+import type { KnowledgeItemVO, KnowledgeItemDetail, GraphData, KnowledgeEntityVO } from '@/types/knowledge'
 
 export const ALL_TAG = '全部'
 
@@ -19,17 +19,32 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   const globalGraph = ref<GraphData | null>(null)
   const globalGraphLoading = ref(false)
   const tags = ref<string[]>([])
+  const entities = ref<KnowledgeEntityVO[]>([])
+  const entityFilter = ref<string | undefined>(undefined)
 
   async function loadItems() {
     loading.value = true
     try {
-      const res = await listKnowledge(page.value, size.value, filter.value === ALL_TAG ? undefined : filter.value, keyword.value || undefined)
+      const res = await listKnowledge(page.value, size.value, filter.value === ALL_TAG ? undefined : filter.value, keyword.value || undefined, entityFilter.value)
       if (res.code === 200) {
         items.value = res.data.records
         total.value = res.data.total
       }
     } catch { /* ignore */ }
     finally { loading.value = false }
+  }
+
+  async function loadEntities() {
+    try {
+      const res = await fetchEntities()
+      if (res.code === 200) entities.value = res.data
+    } catch { /* ignore */ }
+  }
+
+  async function setEntityFilter(entity: string | undefined) {
+    entityFilter.value = entity
+    page.value = 1
+    await loadItems()
   }
 
   async function loadTags() {
@@ -107,7 +122,8 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   return {
     items, total, page, size, selectedItem, filter, keyword,
     loading, graphData, graphLoading, globalGraph, globalGraphLoading, tags,
+    entities, entityFilter,
     loadItems, loadTags, loadDetail, removeItem, loadGraph, loadGlobalGraph, saveItem,
-    setFilter, setKeyword
+    setFilter, setKeyword, loadEntities, setEntityFilter
   }
 })

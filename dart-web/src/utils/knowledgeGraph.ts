@@ -46,7 +46,9 @@ export function buildGraphOption(
         category: n.category,
         itemStyle: n.category === 'external'
           ? { color: '#ffa94d' }
-          : { color: '#5B5FEB' }
+          : n.category === 'entity'
+            ? { color: '#67C23A' }
+            : { color: '#5B5FEB' }
       })),
       links: edges.map((e) => ({
         source: e.source,

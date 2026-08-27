@@ -23,8 +23,16 @@ export interface KnowledgeItemDetail {
   scoreM: number
   notes: string
   chunks: KnowledgeChunk[]
+  entityNames?: string[]
   createdAt: string
   updatedAt: string
+}
+
+export interface KnowledgeEntityVO {
+  id: number
+  name: string
+  type: 'topic' | 'concept'
+  itemCount: number
 }
 
 export interface KnowledgeChunk {

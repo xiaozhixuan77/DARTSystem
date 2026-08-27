@@ -1,16 +1,21 @@
 import client from './client'
 import type { ApiResponse } from '@/types/api'
-import type { KnowledgeItemVO, KnowledgeItemDetail, GraphData } from '@/types/knowledge'
+import type { KnowledgeItemVO, KnowledgeItemDetail, GraphData, KnowledgeEntityVO } from '@/types/knowledge'
 
-export async function listKnowledge(page: number = 1, size: number = 12, tag?: string, keyword?: string): Promise<ApiResponse<{ records: KnowledgeItemVO[]; total: number }>> {
+export async function listKnowledge(page: number = 1, size: number = 12, tag?: string, keyword?: string, entity?: string): Promise<ApiResponse<{ records: KnowledgeItemVO[]; total: number }>> {
   const { data } = await client.get<ApiResponse<{ records: KnowledgeItemVO[]; total: number }>>('/knowledge', {
-    params: { page, size, tag, keyword }
+    params: { page, size, tag, keyword, entity }
   })
   return data
 }
 
 export async function getKnowledgeTags(): Promise<ApiResponse<string[]>> {
   const { data } = await client.get<ApiResponse<string[]>>('/knowledge/tags')
+  return data
+}
+
+export async function fetchEntities(): Promise<ApiResponse<KnowledgeEntityVO[]>> {
+  const { data } = await client.get<ApiResponse<KnowledgeEntityVO[]>>('/knowledge/entities')
   return data
 }
 

@@ -106,7 +106,7 @@ describe('KnowledgeView.vue', () => {
 
     const store = useKnowledgeStore()
     expect(store.filter).toBe('Go')
-    expect(listKnowledge).toHaveBeenLastCalledWith(1, 12, 'Go', undefined)
+    expect(listKnowledge).toHaveBeenLastCalledWith(1, 12, 'Go', undefined, undefined)
   })
 
   it('搜索输入防抖 400ms 后触发 setKeyword', async () => {
@@ -114,12 +114,12 @@ describe('KnowledgeView.vue', () => {
     await flushPromises()
 
     await wrapper.find('.search-input').setValue('Spring')
-    expect(listKnowledge).not.toHaveBeenLastCalledWith(1, 12, undefined, 'Spring')
+    expect(listKnowledge).not.toHaveBeenLastCalledWith(1, 12, undefined, 'Spring', undefined)
 
     await vi.advanceTimersByTimeAsync(400)
     await flushPromises()
 
-    expect(listKnowledge).toHaveBeenLastCalledWith(1, 12, undefined, 'Spring')
+    expect(listKnowledge).toHaveBeenLastCalledWith(1, 12, undefined, 'Spring', undefined)
   })
 
   it('总分页数超过一页时显示分页并支持翻页', async () => {
@@ -129,7 +129,7 @@ describe('KnowledgeView.vue', () => {
 
     expect(wrapper.find('.knowledge-pager').exists()).toBe(true)
     await wrapper.find('.pager-next').trigger('click')
-    expect(listKnowledge).toHaveBeenLastCalledWith(2, 12, undefined, undefined)
+    expect(listKnowledge).toHaveBeenLastCalledWith(2, 12, undefined, undefined, undefined)
   })
 
   it('点击卡片加载详情并打开弹窗', async () => {
