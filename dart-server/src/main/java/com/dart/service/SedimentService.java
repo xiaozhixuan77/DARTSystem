@@ -41,6 +41,8 @@ public class SedimentService {
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final KnowledgeService knowledgeService;
     private final RelationExtractionService relationExtractionService;
+    private final EntityExtractionService entityExtractionService;
+    private final EntityService entityService;
 
     @Value("${agent.sediment.enabled:true}")
     private boolean sedimentEnabled;
@@ -51,11 +53,15 @@ public class SedimentService {
     public SedimentService(EmbeddingService embeddingService,
                            KnowledgeItemMapper knowledgeItemMapper,
                            KnowledgeService knowledgeService,
-                           RelationExtractionService relationExtractionService) {
+                           RelationExtractionService relationExtractionService,
+                           EntityExtractionService entityExtractionService,
+                           EntityService entityService) {
         this.embeddingService = embeddingService;
         this.knowledgeItemMapper = knowledgeItemMapper;
         this.knowledgeService = knowledgeService;
         this.relationExtractionService = relationExtractionService;
+        this.entityExtractionService = entityExtractionService;
+        this.entityService = entityService;
     }
 
     public void sedimentReport(Long userId, String title, String query, String markdown,
@@ -80,6 +86,10 @@ public class SedimentService {
             String finalTitle = title == null || title.isBlank() ? query : title;
             Thread.startVirtualThread(() -> {
                 try {
+                    // 实体抽取（topic + concept）：LLM 失败返回空，不影响沉淀
+                    EntityExtractionService.ExtractedEntities extracted =
+                            entityExtractionService.extract(finalTitle, markdown);
+                    List<Long> entityIds = entityService.upsertEntities(userId, extracted);
                     // 相似条目合并：近似重复（关键词全等/向量 ≥0.85）更新旧条目而非新增，防知识库膨胀
                     Optional<KnowledgeItem> similar = knowledgeService.findSimilarItem(
                             userId, finalTitle, markdown);
@@ -88,6 +98,7 @@ public class SedimentService {
                         knowledgeService.mergeItem(userId, itemId, finalTitle, markdown);
                         embeddingService.rebuildChunksForItem(itemId, markdown);
                         relationExtractionService.extractAndPersist(userId, itemId, markdown);
+                        entityService.linkItems(userId, itemId, entityIds);
                         try {
                             knowledgeService.linkRelatedItems(userId, itemId);
                         } catch (Exception e) {
@@ -102,6 +113,7 @@ public class SedimentService {
                     if (itemIds != null && !itemIds.isEmpty()) {
                         Long itemId = itemIds.getFirst();
                         relationExtractionService.extractAndPersist(userId, itemId, markdown);
+                        entityService.linkItems(userId, itemId, entityIds);
                         // 与现有条目建立跨条目关联（标题子串/向量相似度双通道）
                         try {
                             knowledgeService.linkRelatedItems(userId, itemId);
