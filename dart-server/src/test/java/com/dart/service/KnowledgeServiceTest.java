@@ -46,6 +46,8 @@ class KnowledgeServiceTest {
     @Mock
     private EntityService entityService;
     @Mock
+    private EntityExtractionService entityExtractionService;
+    @Mock
     private KnowledgeEntityMapper entityMapper;
     @Mock
     private KnowledgeItemEntityMapper itemEntityMapper;
@@ -55,7 +57,8 @@ class KnowledgeServiceTest {
     @BeforeEach
     void setUp() {
         knowledgeService = new KnowledgeService(knowledgeItemMapper, knowledgeChunkMapper,
-                relationMapper, embeddingService, entityService, entityMapper, itemEntityMapper);
+                relationMapper, embeddingService, entityService, entityExtractionService,
+                entityMapper, itemEntityMapper);
     }
 
     private static KnowledgeRelation relation(Long subjectId, String predicate, Long objectId, String objectLabel) {
@@ -748,6 +751,47 @@ class KnowledgeServiceTest {
         assertThat(entityNode.category()).isEqualTo("entity");
         assertThat(entityNode.label()).isEqualTo("Redis");
         assertThat(graph.edges()).anyMatch(e -> e.source().equals("item:1") && e.target().equals("ent:10"));
+    }
+
+    @Test
+    void rebuildEntities_linksOnlyMissingEntities() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(1L, 1L, "A"), createItem(2L, 1L, "B"), createItem(3L, 1L, "C")));
+        // item 1 已有关联 → 跳过；2/3 需回填
+        when(itemEntityMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(assocOf(1L, 10L)));
+        when(entityExtractionService.extract(any(), any()))
+                .thenReturn(new EntityExtractionService.ExtractedEntities(
+                        List.of("Java"), List.of("Redis")));
+        when(entityService.upsertEntities(eq(1L), any())).thenReturn(List.of(98L, 99L));
+
+        int processed = knowledgeService.rebuildEntities(1L);
+
+        assertThat(processed).isEqualTo(2);
+        verify(entityService).linkItems(eq(1L), eq(2L), any());
+        verify(entityService).linkItems(eq(1L), eq(3L), any());
+        verify(entityService, never()).linkItems(eq(1L), eq(1L), any());
+    }
+
+    @Test
+    void rebuildEntities_skipsWhenExtractEmpty() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class)))
+                .thenReturn(List.of(createItem(1L, 1L, "A")));
+        when(itemEntityMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(entityExtractionService.extract(any(), any()))
+                .thenReturn(EntityExtractionService.ExtractedEntities.empty());
+
+        int processed = knowledgeService.rebuildEntities(1L);
+
+        assertThat(processed).isZero();
+        verify(entityService, never()).linkItems(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void rebuildEntities_noItems_returnsZero() {
+        when(knowledgeItemMapper.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+
+        assertThat(knowledgeService.rebuildEntities(1L)).isZero();
     }
 
     private static com.dart.entity.KnowledgeEntity entityOf(Long id, String name, String type) {

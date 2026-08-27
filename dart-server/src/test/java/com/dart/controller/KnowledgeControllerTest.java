@@ -196,6 +196,17 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void rebuildEntities_returnsProcessedCount() throws Exception {
+        when(knowledgeService.rebuildEntities(1L)).thenReturn(5);
+
+        mockMvc.perform(post("/api/knowledge/rebuild-entities")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(5));
+        verify(knowledgeService).rebuildEntities(1L);
+    }
+
+    @Test
     void getDetail_returnsDetail() throws Exception {
         KnowledgeDetailVO detail = new KnowledgeDetailVO();
         detail.setId(1L);
