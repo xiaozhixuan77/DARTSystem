@@ -42,13 +42,15 @@ class RagServiceTest {
     private KnowledgeChunkMapper knowledgeChunkMapper;
     @Mock
     private KnowledgeRelationMapper relationMapper;
+    @Mock
+    private EntityService entityService;
 
     private RagService ragService;
 
     @BeforeEach
     void setUp() {
         ragService = new RagService(embeddingService, chatModel, knowledgeItemMapper,
-                knowledgeChunkMapper, relationMapper, 0.80, 5);
+                knowledgeChunkMapper, relationMapper, entityService, 0.80, 5);
     }
 
     @Test
@@ -62,6 +64,73 @@ class RagServiceTest {
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of());
 
         Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void retrieve_entityNameHit_includesLowSimilarityChunk() {
+        float[] emb = new float[1024];
+        java.util.Arrays.fill(emb, 1.0f);
+        when(embeddingService.embed(anyString())).thenReturn(emb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("Redis 缓存淘汰策略");
+        item.setSourceUrl("https://redis.io");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
+
+        // chunk 向量全 0（与查询全 1 余弦 = 0，低于 0.80 阈值）
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("缓存淘汰策略内容");
+        chunk.setChunkIndex(0);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(new float[1024])));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        // 实体名"Redis"命中条目 1 → 其 chunk 免阈值入池
+        when(entityService.findItemsByEntityName(1L, "Redis 缓存淘汰策略"))
+                .thenReturn(java.util.Set.of(1L));
+        when(entityService.matchEntitiesByVector(eq(1L), any())).thenReturn(java.util.Set.of());
+
+        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().sourceUrls()).containsExactly("https://redis.io");
+    }
+
+    @Test
+    void retrieve_noEntityHit_lowSimilarityChunkExcluded() {
+        float[] emb = new float[1024];
+        java.util.Arrays.fill(emb, 1.0f);
+        when(embeddingService.embed(anyString())).thenReturn(emb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("Redis 缓存淘汰策略");
+        item.setSourceUrl("https://redis.io");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
+
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("缓存淘汰策略内容");
+        chunk.setChunkIndex(0);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(new float[1024])));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        // 无实体命中 → 低相似度 chunk 按原阈值过滤
+        when(entityService.findItemsByEntityName(any(), anyString())).thenReturn(java.util.Set.of());
+        when(entityService.matchEntitiesByVector(any(), any())).thenReturn(java.util.Set.of());
+
+        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
+
         assertThat(result).isEmpty();
     }
 
