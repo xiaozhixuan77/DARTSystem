@@ -6,6 +6,8 @@ import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.BingSearchClient;
 import com.dart.agent.search.PageFetcher;
 import com.dart.agent.search.SearchResult;
+import com.dart.entity.Conversation;
+import com.dart.mapper.ConversationMapper;
 import com.dart.service.ChatService;
 import com.dart.service.EmbeddingService;
 import org.junit.jupiter.api.AfterEach;
@@ -21,6 +23,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import static org.mockito.Mockito.mock;
 import reactor.core.publisher.Flux;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,9 +46,55 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
     @MockBean
     private PageFetcher pageFetcher;
 
+    @Autowired
+    private ConversationMapper conversationMapper;
+
     @AfterEach
     void resetMocks() {
         Mockito.reset(chatModel, embeddingModel, bingSearchClient, pageFetcher);
+    }
+
+    @Test
+    @DisplayName("首条消息将默认标题会话更新为消息内容")
+    void firstMessage_updatesDefaultTitleConversation() {
+        Long userId = createTestUser();
+        Long convId = insertConversation(userId, "新对话");
+
+        when(chatModel.call(any(Prompt.class)))
+                .thenReturn(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage(
+                                "{\"isTech\":false,\"optimized\":\"\"}")))));
+
+        chatService.executeSearchAndCurate("Spring Boot 入门", userId, convId, mock(SseSink.class));
+
+        assertThat(conversationMapper.selectById(convId).getTitle()).isEqualTo("Spring Boot 入门");
+    }
+
+    @Test
+    @DisplayName("首条消息不覆盖用户自定义标题")
+    void firstMessage_doesNotOverwriteCustomTitle() {
+        Long userId = createTestUser();
+        Long convId = insertConversation(userId, "我的自定义会话");
+
+        when(chatModel.call(any(Prompt.class)))
+                .thenReturn(new ChatResponse(
+                        List.of(new Generation(new AssistantMessage(
+                                "{\"isTech\":false,\"optimized\":\"\"}")))));
+
+        chatService.executeSearchAndCurate("Spring Boot 入门", userId, convId, mock(SseSink.class));
+
+        assertThat(conversationMapper.selectById(convId).getTitle()).isEqualTo("我的自定义会话");
+    }
+
+    private Long insertConversation(Long userId, String title) {
+        Conversation conv = new Conversation();
+        conv.setUserId(userId);
+        conv.setTitle(title);
+        conv.setIsDeleted(0);
+        conv.setCreatedAt(LocalDateTime.now());
+        conv.setUpdatedAt(LocalDateTime.now());
+        conversationMapper.insert(conv);
+        return conv.getId();
     }
 
     @Test

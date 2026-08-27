@@ -4,9 +4,11 @@ import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.curator.CuratorAgent;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
+import com.dart.entity.Conversation;
 import com.dart.entity.KnowledgeItem;
 import com.dart.entity.Message;
 import com.dart.entity.SearchTrace;
+import com.dart.mapper.ConversationMapper;
 import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.MessageMapper;
 import com.dart.mapper.SearchTraceMapper;
@@ -66,6 +68,8 @@ class ChatServiceTest {
     @Mock
     private SearchTraceMapper searchTraceMapper;
     @Mock
+    private ConversationMapper conversationMapper;
+    @Mock
     private RelationExtractionService relationExtractionService;
     @Mock
     private KnowledgeService knowledgeService;
@@ -93,7 +97,7 @@ class ChatServiceTest {
         MemoryAnswerService memoryAnswerService =
                 new MemoryAnswerService(chatModel, summaryService, messageMapper);
         chatService = new ChatService(searchAgent, curatorAgent, ragService, summaryService,
-                messageMapper, searchTraceMapper, transactionTemplate,
+                messageMapper, searchTraceMapper, conversationMapper, transactionTemplate,
                 queryPreProcessor, chatCacheService, messagePersistenceService,
                 sedimentService, memoryAnswerService);
         sink = mock(SseSink.class);
@@ -160,6 +164,46 @@ class ChatServiceTest {
         verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
         verify(chatModel, never()).call(any(org.springframework.ai.chat.prompt.Prompt.class));
         verify(messageMapper, times(2)).insert(any(Message.class));
+    }
+
+    @Test
+    void executeSearchAndCurate_newConversation_updatesTitleToFirstMessageTruncated() throws Exception {
+        String cachedJson = OBJECT_MAPPER.writeValueAsString(
+                java.util.Map.of("markdown", "# 缓存报告", "sources", List.of()));
+        when(valueOps.get(anyString())).thenReturn(cachedJson);
+        String longQuery = "如何配置Spring Boot多数据源JPA与MyBatis-Plus共存并处理分布式事务回滚问题的完整实践指南"
+                + "x".repeat(40);
+
+        chatService.executeSearchAndCurate(longQuery, 1L, 100L, sink);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Conversation>> captor =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        verify(conversationMapper).update(isNull(), captor.capture());
+        com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Conversation> wrapper = captor.getValue();
+        // 标题 = 首条消息截断 50 字符（与 ChatController 自动建会规则一致）
+        assertThat(wrapper.getParamNameValuePairs().values())
+                .contains(longQuery.substring(0, 50));
+        // 条件更新：id + 仅默认标题"新对话"（eq 值为懒绑定，sqlSegment 占位符存在即条件生效；
+        // "仅默认标题才更新"的完整行为由 AgentFlowIntegrationTest 在真实 DB 验证）
+        assertThat(wrapper.getSqlSegment()).contains("id = #{").contains("title = #{");
+    }
+
+    @Test
+    void executeSearchAndCurate_shortMessage_titleIsFullMessage() throws Exception {
+        String cachedJson = OBJECT_MAPPER.writeValueAsString(
+                java.util.Map.of("markdown", "# 缓存报告", "sources", List.of()));
+        when(valueOps.get(anyString())).thenReturn(cachedJson);
+
+        chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Conversation>> captor =
+                ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class);
+        verify(conversationMapper).update(isNull(), captor.capture());
+        com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Conversation> wrapper = captor.getValue();
+        // 短消息不截断，标题 = 消息全文
+        assertThat(wrapper.getParamNameValuePairs().values()).contains("Spring Boot");
     }
 
     @Test

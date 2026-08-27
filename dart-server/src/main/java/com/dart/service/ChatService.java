@@ -7,9 +7,11 @@ import com.dart.agent.curator.CuratorAgent;
 import com.dart.agent.curator.CuratorTools;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
+import com.dart.entity.Conversation;
 import com.dart.entity.Message;
 import com.dart.entity.SearchTrace;
 import com.dart.exception.ErrorCode;
+import com.dart.mapper.ConversationMapper;
 import com.dart.mapper.MessageMapper;
 import com.dart.mapper.SearchTraceMapper;
 import com.dart.util.SseEvents;
@@ -47,6 +49,7 @@ public class ChatService {
     private final ConversationSummaryService conversationSummaryService;
     private final MessageMapper messageMapper;
     private final SearchTraceMapper searchTraceMapper;
+    private final ConversationMapper conversationMapper;
     private final TransactionTemplate transactionTemplate;
     private final QueryPreProcessor queryPreProcessor;
     private final ChatCacheService chatCacheService;
@@ -57,7 +60,7 @@ public class ChatService {
     public ChatService(SearchAgent searchAgent, CuratorAgent curatorAgent, RagService ragService,
                        ConversationSummaryService conversationSummaryService,
                        MessageMapper messageMapper, SearchTraceMapper searchTraceMapper,
-                       TransactionTemplate transactionTemplate,
+                       ConversationMapper conversationMapper, TransactionTemplate transactionTemplate,
                        QueryPreProcessor queryPreProcessor, ChatCacheService chatCacheService,
                        MessagePersistenceService messagePersistenceService,
                        SedimentService sedimentService, MemoryAnswerService memoryAnswerService) {
@@ -67,6 +70,7 @@ public class ChatService {
         this.conversationSummaryService = conversationSummaryService;
         this.messageMapper = messageMapper;
         this.searchTraceMapper = searchTraceMapper;
+        this.conversationMapper = conversationMapper;
         this.transactionTemplate = transactionTemplate;
         this.queryPreProcessor = queryPreProcessor;
         this.chatCacheService = chatCacheService;
@@ -120,7 +124,18 @@ public class ChatService {
         userMsg.setRole("user");
         userMsg.setContent(query);
         userMsg.setCreatedAt(LocalDateTime.now());
-        transactionTemplate.executeWithoutResult(status -> messageMapper.insert(userMsg));
+        transactionTemplate.executeWithoutResult(status -> {
+            messageMapper.insert(userMsg);
+            // 新会话标题 = 首条用户消息（截断规则与 ChatController 自动建会一致：
+            // >50 字符截断；仅默认标题"新对话"时更新——用户自定义标题不被覆盖，
+            // 条件更新避免先查后改竞态；"新对话"与 ConversationService 创建默认值/DB 默认值同源）
+            String title = query.length() > 50 ? query.substring(0, 50) : query;
+            conversationMapper.update(null,
+                    new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Conversation>()
+                            .eq("id", conversationId)
+                            .eq("title", "新对话")
+                            .set("title", title));
+        });
 
         // 1.5 查询缓存检查（原始查询规范化 key；命中直接返回，跳过全流程，不记链路）
         SearchResult cached = chatCacheService.tryCache(userId, query, conversationId, sink);
