@@ -194,3 +194,34 @@ CREATE TABLE IF NOT EXISTS `knowledge_relation` (
     CONSTRAINT `fk_kr_subject` FOREIGN KEY (`subject_id`) REFERENCES `knowledge_item` (`id`)
         ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- ============================================================
+-- 10. knowledge_entity — 知识实体表（topic 白名单主题 / concept 自由概念）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `knowledge_entity` (
+    `id`            BIGINT          NOT NULL AUTO_INCREMENT,
+    `user_id`       BIGINT          NOT NULL COMMENT '所属用户（user.id）',
+    `name`          VARCHAR(100)    NOT NULL COMMENT '实体名（Redis/缓存淘汰策略…）',
+    `type`          VARCHAR(20)     NOT NULL COMMENT 'topic=白名单主题 / concept=自由概念',
+    `description`   VARCHAR(500)    DEFAULT NULL COMMENT 'LLM 一句话说明',
+    `embedding`     TEXT            DEFAULT NULL COMMENT 'Base64编码的1024维向量（concept 语义）',
+    `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_name` (`user_id`, `name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- ============================================================
+-- 11. knowledge_item_entity — 知识条目-实体关联表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `knowledge_item_entity` (
+    `id`            BIGINT          NOT NULL AUTO_INCREMENT,
+    `item_id`       BIGINT          NOT NULL COMMENT 'knowledge_item.id',
+    `entity_id`     BIGINT          NOT NULL COMMENT 'knowledge_entity.id',
+    `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_item_entity` (`item_id`, `entity_id`),
+    KEY `idx_entity` (`entity_id`),
+    CONSTRAINT `fk_ie_item` FOREIGN KEY (`item_id`) REFERENCES `knowledge_item` (`id`)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;

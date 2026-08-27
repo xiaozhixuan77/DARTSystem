@@ -145,3 +145,26 @@ CREATE TABLE IF NOT EXISTS `knowledge_relation` (
     KEY `idx_predicate` (`predicate`),
     CONSTRAINT `fk_kr_subject` FOREIGN KEY (`subject_id`) REFERENCES `knowledge_item` (`id`) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS `knowledge_entity` (
+    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
+    `user_id`       BIGINT       NOT NULL,
+    `name`          VARCHAR(100) NOT NULL,
+    `type`          VARCHAR(20)  NOT NULL,
+    `description`   VARCHAR(500) DEFAULT NULL,
+    `embedding`     TEXT         DEFAULT NULL,
+    `created_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_name` (`user_id`, `name`)
+);
+
+CREATE TABLE IF NOT EXISTS `knowledge_item_entity` (
+    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
+    `item_id`       BIGINT       NOT NULL,
+    `entity_id`     BIGINT       NOT NULL,
+    `created_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_item_entity` (`item_id`, `entity_id`),
+    CONSTRAINT `fk_ie_item` FOREIGN KEY (`item_id`) REFERENCES `knowledge_item` (`id`) ON DELETE CASCADE
+);
