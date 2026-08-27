@@ -58,6 +58,7 @@ public class KnowledgeService {
     private final KnowledgeRelationMapper relationMapper;
     private final EmbeddingService embeddingService;
     private final EntityService entityService;
+    private final EntityExtractionService entityExtractionService;
     private final KnowledgeEntityMapper entityMapper;
     private final KnowledgeItemEntityMapper itemEntityMapper;
 
@@ -503,6 +504,38 @@ public class KnowledgeService {
      *
      * @return 本次新增的关系条数
      */
+    /**
+     * 存量条目实体回填：实体化功能上线前沉淀的条目无实体关联，遍历补齐。
+     * 已有关联的条目跳过（幂等）；extract 失败/无实体跳过该条目。
+     * 返回实际处理（新建立关联）的条目数。
+     */
+    public int rebuildEntities(Long userId) {
+        List<KnowledgeItem> items = loadItems(userId);
+        if (items.isEmpty()) {
+            return 0;
+        }
+        List<Long> itemIds = items.stream().map(KnowledgeItem::getId).toList();
+        Set<Long> linkedItemIds = itemEntityMapper.selectList(
+                        new QueryWrapper<KnowledgeItemEntity>().in("item_id", itemIds))
+                .stream().map(KnowledgeItemEntity::getItemId).collect(Collectors.toSet());
+        int processed = 0;
+        for (KnowledgeItem item : items) {
+            if (linkedItemIds.contains(item.getId())) {
+                continue;
+            }
+            EntityExtractionService.ExtractedEntities extracted =
+                    entityExtractionService.extract(item.getTitle(), item.getContent());
+            if (extracted.isEmpty()) {
+                continue;
+            }
+            List<Long> entityIds = entityService.upsertEntities(userId, extracted);
+            entityService.linkItems(userId, item.getId(), entityIds);
+            processed++;
+        }
+        log.info("存量条目实体回填完成: userId={}, processed={}", userId, processed);
+        return processed;
+    }
+
     public int rebuildLinks(Long userId) {
         List<KnowledgeItem> items = loadItems(userId);
         if (items.size() < 2) {

@@ -85,4 +85,13 @@ public class KnowledgeController {
         Long userId = SecurityUtils.getCurrentUserId();
         return ApiResponse.ok(knowledgeService.rebuildLinks(userId));
     }
+
+    /**
+     * 存量条目实体回填：实体化功能上线前沉淀的条目补齐实体抽取与关联（幂等）。
+     */
+    @PostMapping("/rebuild-entities")
+    public ApiResponse<Integer> rebuildEntities() {
+        Long userId = SecurityUtils.getCurrentUserId();
+        return ApiResponse.ok(knowledgeService.rebuildEntities(userId));
+    }
 }
