@@ -48,6 +48,16 @@ public class SettingsController {
         return ApiResponse.ok(null);
     }
 
+    @PostMapping("/test")
+    public ApiResponse<SwitchableChatModel.ConnectionResult> test(@RequestBody ApiConfigRequest request) {
+        SwitchableChatModel switcher = switchableChatModelProvider.getIfAvailable();
+        if (switcher == null) {
+            return ApiResponse.ok(new SwitchableChatModel.ConnectionResult(false, 0, "连接测试不可用"));
+        }
+        return ApiResponse.ok(switcher.testConnection(
+                request.baseUrl(), request.model(), request.apiKey()));
+    }
+
     @GetMapping("/balance")
     public ApiResponse<BalanceResponse> balance() {
         ApiConfigService.BalanceResult result = apiConfigService.queryBalance();

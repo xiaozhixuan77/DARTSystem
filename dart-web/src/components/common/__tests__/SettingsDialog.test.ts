@@ -7,6 +7,7 @@ vi.mock('@/api/client', () => ({
   default: {
     get: vi.fn(),
     put: vi.fn(),
+    post: vi.fn(),
     interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } }
   },
   getPoolUserId: vi.fn(() => 3),
@@ -56,7 +57,10 @@ describe('SettingsDialog.vue', () => {
       .toBe('sk-ab****2345')
   })
 
-  it('保存设置调用 PUT', async () => {
+  it('保存设置先测连接成功再调 PUT', async () => {
+    ;(client.post as any).mockResolvedValue({
+      data: { code: 200, data: { ok: true, latencyMs: 112, error: null } }
+    })
     ;(client.put as any).mockResolvedValue({ data: { code: 200 } })
 
     const wrapper = mountDialog()
@@ -64,7 +68,26 @@ describe('SettingsDialog.vue', () => {
     await wrapper.find('.btn-primary').trigger('click')
     await flushPromises()
 
+    // 先 POST /settings/test，成功后才 PUT
+    expect(client.post).toHaveBeenCalledWith('/settings/test', expect.any(Object))
+    await new Promise((r) => setTimeout(r, 900))
+    await flushPromises()
     expect(client.put).toHaveBeenCalled()
+    expect(wrapper.find('.test-result.success').text()).toContain('连接成功')
+  })
+
+  it('连接测试失败时不保存并展示错误', async () => {
+    ;(client.post as any).mockResolvedValue({
+      data: { code: 200, data: { ok: false, latencyMs: 0, error: '连接失败：API Key 无效（HTTP 401）' } }
+    })
+
+    const wrapper = mountDialog()
+    await flushPromises()
+    await wrapper.find('.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(client.put).not.toHaveBeenCalled()
+    expect(wrapper.find('.test-result.error').text()).toContain('连接失败')
   })
 
   it('URL 非 HTTPS 时校验失败不发请求', async () => {

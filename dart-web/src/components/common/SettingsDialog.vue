@@ -11,6 +11,8 @@ const baseUrl = ref('')
 const model = ref('')
 const apiKey = ref('')
 const saving = ref(false)
+const testing = ref(false)
+const testResult = ref<{ ok: boolean; text: string } | null>(null)
 const balanceValue = ref('')
 const balanceUnit = ref('')
 const balanceError = ref('')
@@ -46,6 +48,12 @@ async function loadApiConfig() {
   } catch { /* 保持空表单 */ }
 }
 
+interface TestResultData {
+  ok: boolean
+  latencyMs: number
+  error: string | null
+}
+
 async function saveApi() {
   if (urlError.value) {
     ElMessage.error('请输入有效的 HTTPS 服务地址')
@@ -55,6 +63,30 @@ async function saveApi() {
     ElMessage.error('模型名称与 API Key 不能为空')
     return
   }
+  // 先测连接（真实模型调用）：成功才保存并生效，失败保留弹窗供修正（兜底）
+  testing.value = true
+  testResult.value = null
+  try {
+    const { data } = await client.post<ApiResponse<TestResultData>>('/settings/test', {
+      baseUrl: baseUrl.value.trim(),
+      model: model.value.trim(),
+      apiKey: apiKey.value.trim()
+    })
+    if (data.code === 200 && data.data.ok) {
+      testResult.value = { ok: true, text: `连接成功 · ${data.data.latencyMs}ms` }
+      await new Promise((r) => setTimeout(r, 800))
+      await saveConfig()
+    } else {
+      testResult.value = { ok: false, text: data.data?.error ?? '连接测试失败' }
+    }
+  } catch {
+    testResult.value = { ok: false, text: '连接测试失败（网络错误）' }
+  } finally {
+    testing.value = false
+  }
+}
+
+async function saveConfig() {
   saving.value = true
   try {
     const { data } = await client.put<ApiResponse<void>>('/settings/api', {
@@ -176,11 +208,17 @@ watch(() => props.visible, (v) => {
         </section>
       </div>
 
+      <div class="test-result" :class="{ success: testResult?.ok, error: testResult && !testResult.ok }" v-if="testResult">
+        <svg v-if="testResult.ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M20 6 9 17l-5-5"/></svg>
+        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+        {{ testResult.text }}
+      </div>
+
       <footer class="settings-footer">
         <button class="btn btn-secondary" @click="emit('close')">取消</button>
-        <button class="btn btn-primary" :class="{ 'is-loading': saving }" :disabled="saving" @click="saveApi">
+        <button class="btn btn-primary" :class="{ 'is-loading': testing }" :disabled="testing || saving" @click="saveApi">
           <span class="spinner" aria-hidden="true"></span>
-          <span>{{ saving ? '保存中' : '保存设置' }}</span>
+          <span>{{ testing ? '测试连接中...' : (saving ? '保存中...' : '保存设置') }}</span>
         </button>
       </footer>
     </div>
@@ -339,6 +377,15 @@ watch(() => props.visible, (v) => {
 .form-group.has-error {
   .form-error { display: block; }
   .form-input { border-color: #d66; }
+}
+.test-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 24px;
+  font-size: 13px;
+  &.success { background: $color-success-soft; color: $color-success; }
+  &.error { background: $color-warning-soft; color: $color-warning; }
 }
 .settings-footer {
   padding: 16px 24px;

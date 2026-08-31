@@ -2,6 +2,7 @@ package com.dart.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -73,6 +74,46 @@ public class SwitchableChatModel implements ChatModel {
     /** 直接替换委托（测试与切换共用）。 */
     public void switchDelegate(ChatModel model) {
         this.delegate = model;
+    }
+    public record ConnectionResult(boolean ok, long latencyMs, String error) {}
+
+    /**
+     * 连接测试：用给定配置临时构建模型并真实调用一次（"ping"），
+     * 不切换当前委托——供保存前验证连通性（失败则前端口不保存，兜底防配置损坏）。
+     */
+    public ConnectionResult testConnection(String baseUrl, String model, String apiKey) {
+        long start = System.nanoTime();
+        try {
+            ChatModel testModel = buildOpenAiModel(baseUrl, model, apiKey);
+            String resp = testModel.call(new Prompt(new UserMessage("ping")))
+                    .getResults().getFirst().getOutput().getText();
+            long ms = (System.nanoTime() - start) / 1_000_000;
+            log.info("连接测试成功: model={}, latency={}ms, resp={}", model, ms,
+                    resp == null ? "null" : resp.substring(0, Math.min(20, resp.length())));
+            return new ConnectionResult(true, ms, null);
+        } catch (Exception e) {
+            log.warn("连接测试失败: model={} ({})", model, e.getMessage());
+            return new ConnectionResult(false, 0, friendlyConnectionError(e));
+        }
+    }
+
+    /** 连接测试异常 → 用户可读文案（不泄露 HTTP body 堆）。 */
+    static String friendlyConnectionError(Throwable e) {
+        if (e instanceof org.springframework.web.client.HttpClientErrorException http) {
+            return switch (http.getStatusCode().value()) {
+                case 401, 403 -> "连接失败：API Key 无效（HTTP " + http.getStatusCode().value() + "）";
+                case 404 -> "连接失败：服务地址不正确（HTTP 404）";
+                default -> "连接失败（HTTP " + http.getStatusCode().value() + "）";
+            };
+        }
+        String msg = e.getMessage() == null ? "" : e.getMessage();
+        if (msg.contains("timed out") || msg.contains("timeout")) {
+            return "连接失败：请求超时（请检查网络或服务地址）";
+        }
+        if (msg.contains("Connection refused") || msg.contains("Failed to connect")) {
+            return "连接失败：无法连接到服务地址（请检查 URL）";
+        }
+        return "连接失败：" + msg;
     }
 
     private ChatModel buildOpenAiModel(String baseUrl, String model, String apiKey) {
