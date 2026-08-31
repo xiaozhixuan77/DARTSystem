@@ -1,14 +1,22 @@
 package com.dart.util;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SecurityUtilsTest {
+
+    @BeforeEach
+    void init() {
+        // static 字段可能被其他测试类修改，本测试类自设基线
+        ReflectionTestUtils.setField(SecurityUtils.class, "defaultUserId", 3L);
+    }
 
     @AfterEach
     void cleanup() {
