@@ -47,7 +47,7 @@ public class SwitchableChatModel implements ChatModel {
         // 持久化配置存在 → 用之构建；否则用自动配置默认 bean（读取启动 yml/.env）
         var cfg = apiConfigService.get();
         if (cfg != null) {
-            delegate = buildOpenAiModel(cfg.baseUrl(), cfg.model(), cfg.apiKey());
+            delegate = buildOpenAiModel(normalizeBaseUrl(cfg.baseUrl()), cfg.model(), cfg.apiKey());
             log.info("chat 模型从持久化配置加载: baseUrl={}, model={}", cfg.baseUrl(), cfg.model());
         } else {
             delegate = findDefaultChatModel();
@@ -67,7 +67,7 @@ public class SwitchableChatModel implements ChatModel {
     }
 
     public void switchTo(String baseUrl, String model, String apiKey) {
-        delegate = buildOpenAiModel(baseUrl, model, apiKey);
+        delegate = buildOpenAiModel(normalizeBaseUrl(baseUrl), model, apiKey);
         log.info("chat 模型已切换: baseUrl={}, model={}", baseUrl, model);
     }
 
@@ -83,8 +83,9 @@ public class SwitchableChatModel implements ChatModel {
      */
     public ConnectionResult testConnection(String baseUrl, String model, String apiKey) {
         long start = System.nanoTime();
+        String normalized = normalizeBaseUrl(baseUrl);
         try {
-            ChatModel testModel = buildOpenAiModel(baseUrl, model, apiKey);
+            ChatModel testModel = buildOpenAiModel(normalized, model, apiKey);
             String resp = testModel.call(new Prompt(new UserMessage("ping")))
                     .getResults().getFirst().getOutput().getText();
             long ms = (System.nanoTime() - start) / 1_000_000;
@@ -102,7 +103,7 @@ public class SwitchableChatModel implements ChatModel {
         if (e instanceof org.springframework.web.client.HttpClientErrorException http) {
             return switch (http.getStatusCode().value()) {
                 case 401, 403 -> "连接失败：API Key 无效（HTTP " + http.getStatusCode().value() + "）";
-                case 404 -> "连接失败：服务地址不正确（HTTP 404）";
+                case 404 -> "连接失败：服务地址不正确（请填写服务根地址，不要带 /anthropic 等路径后缀）";
                 default -> "连接失败（HTTP " + http.getStatusCode().value() + "）";
             };
         }
@@ -112,7 +113,7 @@ public class SwitchableChatModel implements ChatModel {
             return "连接失败：API Key 无效（请检查 Key）";
         }
         if (msg.contains("404") || msg.contains("url_not_found")) {
-            return "连接失败：服务地址不正确（请检查 URL）";
+            return "连接失败：服务地址不正确（请填写服务根地址，不要带 /anthropic 等路径后缀）";
         }
         if (msg.contains("timed out") || msg.contains("timeout")) {
             return "连接失败：请求超时（请检查网络或服务地址）";
@@ -121,6 +122,19 @@ public class SwitchableChatModel implements ChatModel {
             return "连接失败：无法连接到服务地址（请检查 URL）";
         }
         return "连接失败：请检查服务地址与 API Key";
+    }
+
+    /** 剥去 Anthropic 兼容路径后缀（DeepSeek/Moonshot 官方 /anthropic 端点），
+     *  底层同一服务走 OpenAI 协议用根地址——用户填官方 Anthropic 地址也能适配。 */
+    static String normalizeBaseUrl(String url) {
+        if (url == null) {
+            return null;
+        }
+        String trimmed = url.trim().replaceAll("/+$", "");
+        if (trimmed.toLowerCase().endsWith("/anthropic")) {
+            return trimmed.substring(0, trimmed.length() - "/anthropic".length());
+        }
+        return trimmed;
     }
 
     private ChatModel buildOpenAiModel(String baseUrl, String model, String apiKey) {

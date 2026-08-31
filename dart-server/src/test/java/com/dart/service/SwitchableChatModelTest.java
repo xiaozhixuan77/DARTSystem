@@ -65,6 +65,25 @@ class SwitchableChatModelTest {
     }
 
     @Test
+    void normalizeBaseUrl_stripsAnthropicSuffix() {
+        assertThat(SwitchableChatModel.normalizeBaseUrl("https://api.deepseek.com/anthropic"))
+                .isEqualTo("https://api.deepseek.com");
+        assertThat(SwitchableChatModel.normalizeBaseUrl("https://api.deepseek.com/anthropic/"))
+                .isEqualTo("https://api.deepseek.com");
+        assertThat(SwitchableChatModel.normalizeBaseUrl("https://api.deepseek.com"))
+                .isEqualTo("https://api.deepseek.com");
+        assertThat(SwitchableChatModel.normalizeBaseUrl("https://api.siliconflow.cn/v1"))
+                .isEqualTo("https://api.siliconflow.cn/v1");
+    }
+
+    @Test
+    void connectionError_wrapped404_mapsToRootUrlHint() {
+        assertThat(SwitchableChatModel.friendlyConnectionError(
+                new RuntimeException("404 - {\"code\":\"url_not_found\"}")))
+                .isEqualTo("连接失败：服务地址不正确（请填写服务根地址，不要带 /anthropic 等路径后缀）");
+    }
+
+    @Test
     void connectionError_springAiWrapped401_bodyNotLeaked() {
         // Spring AI 调用层包装异常：message 为 "401 - {body JSON}"
         assertThat(SwitchableChatModel.friendlyConnectionError(
