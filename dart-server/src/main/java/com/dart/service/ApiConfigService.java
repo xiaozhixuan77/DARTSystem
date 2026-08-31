@@ -93,8 +93,23 @@ public class ApiConfigService {
             return parseBalance(body);
         } catch (Exception e) {
             log.warn("余额查询失败: {}", e.getMessage());
-            return new BalanceResult(false, null, null, "余额查询失败：" + e.getMessage());
+            return new BalanceResult(false, null, null, friendlyBalanceError(e));
         }
+    }
+
+    /**
+     * 余额查询异常 → 友好文案（不泄露响应 body JSON 堆）。
+     * 余额为 DeepSeek 专用 /user/balance 端点；其他兼容 API（Kimi/OpenAI 等）无该端点。
+     */
+    static String friendlyBalanceError(Throwable e) {
+        if (e instanceof org.springframework.web.client.HttpClientErrorException http) {
+            return switch (http.getStatusCode().value()) {
+                case 401, 403 -> "API Key 无效（HTTP " + http.getStatusCode().value() + "）";
+                case 404 -> "该服务地址无余额查询端点（仅 DeepSeek /user/balance 支持）";
+                default -> "余额查询失败（HTTP " + http.getStatusCode().value() + "）";
+            };
+        }
+        return "余额查询失败（网络错误）";
     }
 
     private BalanceResult parseBalance(String body) {
