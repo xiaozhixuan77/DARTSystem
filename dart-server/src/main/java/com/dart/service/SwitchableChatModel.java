@@ -97,7 +97,7 @@ public class SwitchableChatModel implements ChatModel {
         }
     }
 
-    /** 连接测试异常 → 用户可读文案（不泄露 HTTP body 堆）。 */
+    /** 连接测试异常 → 用户可读文案（绝不泄露响应 body JSON 堆）。 */
     static String friendlyConnectionError(Throwable e) {
         if (e instanceof org.springframework.web.client.HttpClientErrorException http) {
             return switch (http.getStatusCode().value()) {
@@ -106,14 +106,21 @@ public class SwitchableChatModel implements ChatModel {
                 default -> "连接失败（HTTP " + http.getStatusCode().value() + "）";
             };
         }
+        // Spring AI 调用层异常 message 形如 "401 - {body}"——字符串识别后映射，body 不回流
         String msg = e.getMessage() == null ? "" : e.getMessage();
+        if (msg.contains("401") || msg.contains("Authentication Fails") || msg.contains("invalid")) {
+            return "连接失败：API Key 无效（请检查 Key）";
+        }
+        if (msg.contains("404") || msg.contains("url_not_found")) {
+            return "连接失败：服务地址不正确（请检查 URL）";
+        }
         if (msg.contains("timed out") || msg.contains("timeout")) {
             return "连接失败：请求超时（请检查网络或服务地址）";
         }
         if (msg.contains("Connection refused") || msg.contains("Failed to connect")) {
             return "连接失败：无法连接到服务地址（请检查 URL）";
         }
-        return "连接失败：" + msg;
+        return "连接失败：请检查服务地址与 API Key";
     }
 
     private ChatModel buildOpenAiModel(String baseUrl, String model, String apiKey) {

@@ -65,6 +65,14 @@ class SwitchableChatModelTest {
     }
 
     @Test
+    void connectionError_springAiWrapped401_bodyNotLeaked() {
+        // Spring AI 调用层包装异常：message 为 "401 - {body JSON}"
+        assertThat(SwitchableChatModel.friendlyConnectionError(
+                new RuntimeException("401 - {\"error\":{\"message\":\"Authentication Fails\"}}")))
+                .isEqualTo("连接失败：API Key 无效（请检查 Key）");
+    }
+
+    @Test
     void connectionError_connectionRefused_mapsToUnreachable() {
         assertThat(SwitchableChatModel.friendlyConnectionError(
                 new RuntimeException("Connection refused")))
@@ -81,6 +89,6 @@ class SwitchableChatModelTest {
     @Test
     void connectionError_other_mapsToGeneric() {
         assertThat(SwitchableChatModel.friendlyConnectionError(new RuntimeException("boom")))
-                .isEqualTo("连接失败：boom");
+                .isEqualTo("连接失败：请检查服务地址与 API Key");
     }
 }
