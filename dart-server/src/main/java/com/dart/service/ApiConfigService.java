@@ -105,7 +105,7 @@ public class ApiConfigService {
         if (e instanceof org.springframework.web.client.HttpClientErrorException http) {
             return switch (http.getStatusCode().value()) {
                 case 401, 403 -> "API Key 无效（HTTP " + http.getStatusCode().value() + "）";
-                case 404 -> "该服务地址无余额查询端点（仅 DeepSeek /user/balance 支持）";
+                case 404 -> "当前 API 服务不支持余额查询（仅 DeepSeek 官方 API 支持此功能）";
                 default -> "余额查询失败（HTTP " + http.getStatusCode().value() + "）";
             };
         }

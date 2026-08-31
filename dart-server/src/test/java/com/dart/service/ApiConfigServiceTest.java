@@ -13,7 +13,7 @@ class ApiConfigServiceTest {
                 "{\"error\":\"not found\"}", org.springframework.http.HttpStatus.NOT_FOUND,
                 "Not Found", null, null, null);
         assertThat(ApiConfigService.friendlyBalanceError(e))
-                .isEqualTo("该服务地址无余额查询端点（仅 DeepSeek /user/balance 支持）");
+                .isEqualTo("当前 API 服务不支持余额查询（仅 DeepSeek 官方 API 支持此功能）");
     }
 
     @Test
