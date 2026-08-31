@@ -1,10 +1,6 @@
 package com.dart.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.dart.config.PoolInitializer;
 import com.dart.dto.response.ApiResponse;
-import com.dart.entity.User;
-import com.dart.mapper.UserMapper;
 import com.dart.service.ApiConfigService;
 import com.dart.service.SwitchableChatModel;
 import org.springframework.beans.factory.ObjectProvider;
@@ -28,11 +24,8 @@ public class SettingsController {
 
     public record BalanceResponse(boolean isAvailable, String currency, String totalBalance, String error) {}
 
-    public record PoolResponse(String key, long id, String name) {}
-
     private final ApiConfigService apiConfigService;
     private final ObjectProvider<SwitchableChatModel> switchableChatModelProvider;
-    private final UserMapper userMapper;
 
     @GetMapping("/api")
     public ApiResponse<ApiConfigResponse> apiConfig() {
@@ -62,16 +55,4 @@ public class SettingsController {
                 result.isAvailable(), result.currency(), result.totalBalance(), result.error()));
     }
 
-    @GetMapping("/pools")
-    public ApiResponse<List<PoolResponse>> pools() {
-        List<PoolResponse> pools = new ArrayList<>();
-        pools.add(new PoolResponse("user", PoolInitializer.USER_POOL_USER_ID, "用户数据"));
-        // 测试数据池仅开发期存在（pool_test 用户未创建则不返回，生产无此池）
-        User testUser = userMapper.selectOne(
-                new QueryWrapper<User>().eq("username", PoolInitializer.TEST_POOL_USERNAME));
-        if (testUser != null) {
-            pools.add(new PoolResponse("test", testUser.getId(), "测试数据"));
-        }
-        return ApiResponse.ok(pools);
-    }
 }

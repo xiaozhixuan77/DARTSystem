@@ -20,7 +20,6 @@ describe('SettingsDialog.vue', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     mockGet({
-      '/settings/pools': { data: [{ key: 'user', id: 3, name: '用户数据' }] },
       '/settings/api': { data: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash', apiKey: 'sk-ab****2345' } },
       '/settings/balance': { data: null }
     })
@@ -36,11 +35,11 @@ describe('SettingsDialog.vue', () => {
     return mount(SettingsDialog, { props: { visible: true } })
   }
 
-  it('渲染三个区块：数据池/API 配置/余额', () => {
+  it('渲染两个区块：API 配置/余额', () => {
     const wrapper = mountDialog()
-    expect(wrapper.find('.pool-section').exists()).toBe(true)
     expect(wrapper.find('.api-section').exists()).toBe(true)
     expect(wrapper.find('.balance-section').exists()).toBe(true)
+    expect(wrapper.find('.pool-section').exists()).toBe(false)
   })
 
   it('打开时加载 API 配置并展示脱敏 key', async () => {
@@ -85,7 +84,6 @@ describe('SettingsDialog.vue', () => {
 
   it('余额查询失败展示错误', async () => {
     mockGet({
-      '/settings/pools': { data: [{ key: 'user', id: 3, name: '用户数据' }] },
       '/settings/api': { data: { baseUrl: 'x', model: 'y', apiKey: 'z****' } },
       '/settings/balance': { data: { isAvailable: false, currency: null, totalBalance: null, error: '余额查询失败：401' } }
     })

@@ -1,7 +1,6 @@
 package com.dart.controller;
 
 import com.dart.service.ApiConfigService;
-import com.dart.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,16 +30,13 @@ class SettingsControllerTest {
     private org.springframework.beans.factory.ObjectProvider<com.dart.service.SwitchableChatModel> switchableProvider;
     @Mock
     private com.dart.service.SwitchableChatModel switchableChatModel;
-    @Mock
-    private UserMapper userMapper;
-
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         lenient().when(switchableProvider.getIfAvailable()).thenReturn(switchableChatModel);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new SettingsController(apiConfigService, switchableProvider, userMapper))
+                .standaloneSetup(new SettingsController(apiConfigService, switchableProvider))
                 .build();
     }
 
@@ -91,16 +87,4 @@ class SettingsControllerTest {
                 .andExpect(jsonPath("$.data.error").value("余额查询失败：401"));
     }
 
-    @Test
-    void getPools_returnsExistingPools() throws Exception {
-        // 测试池用户不存在 → 仅用户数据池
-        when(userMapper.selectOne(org.mockito.ArgumentMatchers.any()))
-                .thenReturn(null);
-
-        mockMvc.perform(get("/api/settings/pools"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data[0].name").value("用户数据"))
-                .andExpect(jsonPath("$.data.length()").value(1));
-    }
 }

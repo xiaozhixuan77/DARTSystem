@@ -3,7 +3,6 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
-import { usePoolStore } from '@/stores/pool'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { deleteConversation } from '@/api/conversation'
 import AppSidebar from '../AppSidebar.vue'
@@ -100,13 +99,10 @@ describe('AppSidebar.vue', () => {
     expect(newSpy).toHaveBeenCalled()
   })
 
-  it('显示当前数据池名称和头像', () => {
-    const poolStore = usePoolStore()
-    poolStore.currentId = 3
-
+  it('显示用户数据池名称和头像', () => {
     const wrapper = mount(AppSidebar)
     expect(wrapper.find('.user-name').text()).toBe('用户数据')
-    expect(wrapper.find('.user-avatar').text()).toBe('用')
+    expect(wrapper.find('.user-avatar').text()).toBe('D')
   })
 
   it('设置按钮存在', async () => {

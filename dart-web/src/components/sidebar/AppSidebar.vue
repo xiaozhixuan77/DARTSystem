@@ -2,14 +2,13 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
-import { usePoolStore } from '@/stores/pool'
+
 import { useRouter } from 'vue-router'
 import SessionContextMenu from '@/components/common/SessionContextMenu.vue'
 import SettingsDialog from '@/components/common/SettingsDialog.vue'
 import type { ConversationVO } from '@/types/chat'
 
 const chatStore = useChatStore()
-const poolStore = usePoolStore()
 const settingsVisible = ref(false)
 const router = useRouter()
 
@@ -63,7 +62,6 @@ async function handleDeleteConversation() {
 
 onMounted(() => {
   chatStore.loadConversations()
-  poolStore.loadPools()
   window.addEventListener('click', closeContextMenu)
 })
 
@@ -149,8 +147,8 @@ function openSettings() {
         知识库
       </button>
       <div class="user-area">
-        <span class="user-avatar">{{ poolStore.currentName.charAt(0).toUpperCase() }}</span>
-        <span class="user-name">{{ poolStore.currentName }}</span>
+        <span class="user-avatar">D</span>
+        <span class="user-name">用户数据</span>
         <button class="settings-btn" @click="openSettings" title="设置">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             width="16" height="16">

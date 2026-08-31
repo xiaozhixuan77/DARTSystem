@@ -1,6 +1,9 @@
 import axios, { type AxiosInstance } from 'axios'
 
-/** 当前数据池用户 id：前端池切换写入，缺省 3（xiao 用户数据池） */
+/**
+ * 当前数据池用户 id：产品固定用户数据池（缺省 3）；
+ * localStorage poolUserId 仅作为测试注入通道（E2E 指向 pool_test 防污染），不对用户暴露。
+ */
 export function getPoolUserId(): number {
   const raw = localStorage.getItem('poolUserId')
   const id = Number(raw)

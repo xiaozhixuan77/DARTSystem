@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { usePoolStore } from '@/stores/pool'
 import client from '@/api/client'
 import type { ApiResponse } from '@/types/api'
 
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ close: [] }>()
-
-const poolStore = usePoolStore()
 
 const baseUrl = ref('')
 const model = ref('')
@@ -86,15 +83,7 @@ async function refreshBalance() {
   }
 }
 
-async function switchPool(id: number, name: string) {
-  if (id === poolStore.currentId) return
-  if (!window.confirm(`切换到「${name}」？切换后页面将刷新。`)) return
-  await poolStore.switchPool(id)
-  window.location.reload()
-}
-
 onMounted(() => {
-  poolStore.loadPools()
   if (props.visible) {
     loadApiConfig()
   }
@@ -103,7 +92,6 @@ onMounted(() => {
 watch(() => props.visible, (v) => {
   if (v) {
     loadApiConfig()
-    poolStore.loadPools()
   }
 })
 </script>
@@ -115,21 +103,6 @@ watch(() => props.visible, (v) => {
         <h3>设置</h3>
         <button class="close-btn" @click="emit('close')">×</button>
       </header>
-
-      <section class="pool-section">
-        <h4>数据池</h4>
-        <div class="pool-options">
-          <label v-for="p in poolStore.pools" :key="p.key" class="pool-option">
-            <input
-              type="radio"
-              :checked="poolStore.currentId === p.id"
-              @change="switchPool(p.id, p.name)"
-            />
-            <span>{{ p.name }}</span>
-          </label>
-          <p v-if="poolStore.pools.length === 0" class="pool-empty">加载数据池中...</p>
-        </div>
-      </section>
 
       <section class="api-section">
         <h4>chat API 配置</h4>
@@ -200,16 +173,6 @@ section {
     font-size: 15px;
     border-bottom: 1px solid $color-border;
     padding-bottom: 6px;
-  }
-}
-.pool-options {
-  display: flex;
-  gap: 16px;
-  .pool-option {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
   }
 }
 .form-row {
