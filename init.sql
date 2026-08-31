@@ -225,3 +225,16 @@ CREATE TABLE IF NOT EXISTS `knowledge_item_entity` (
     CONSTRAINT `fk_ie_item` FOREIGN KEY (`item_id`) REFERENCES `knowledge_item` (`id`)
         ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- ============================================================
+-- 12. app_api_config — chat API 运行时配置（设置页更换，单行 id=1）
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS `app_api_config` (
+    `id`            BIGINT       NOT NULL,
+    `chat_base_url` VARCHAR(300) NOT NULL,
+    `chat_model`    VARCHAR(100) NOT NULL,
+    `chat_api_key`  VARCHAR(300) NOT NULL,
+    `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;

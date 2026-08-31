@@ -12,8 +12,9 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 
 /**
- * 无登录模式数据池初始化：确保用户数据池（xiao, id=3）与测试数据池（pool_test）存在，
- * 供 PoolConfig/settings 端点映射。password_hash 为占位值（无密码登录）。
+ * 无登录模式数据池初始化：确保用户数据池（xiao, id=3）存在。
+ * 测试数据池（pool_test）仅开发期使用、不随部署上线——不在启动时创建，
+ * 由 pools 端点动态查询（存在才返回），开发期手动/脚本建库。
  */
 @Slf4j
 @Component
@@ -29,7 +30,6 @@ public class PoolInitializer implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         ensureUser(USER_POOL_USERNAME, USER_POOL_USER_ID);
-        ensureUser(TEST_POOL_USERNAME, null);
     }
 
     private void ensureUser(String username, Long fixedId) {

@@ -27,6 +27,8 @@ class SettingsControllerTest {
     @Mock
     private ApiConfigService apiConfigService;
     @Mock
+    private com.dart.service.SwitchableChatModel switchableChatModel;
+    @Mock
     private UserMapper userMapper;
 
     private MockMvc mockMvc;
@@ -34,7 +36,7 @@ class SettingsControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new SettingsController(apiConfigService, userMapper))
+                .standaloneSetup(new SettingsController(apiConfigService, switchableChatModel, userMapper))
                 .build();
     }
 
@@ -87,11 +89,14 @@ class SettingsControllerTest {
 
     @Test
     void getPools_returnsExistingPools() throws Exception {
-        when(userMapper.selectList(org.mockito.ArgumentMatchers.any()))
-                .thenReturn(List.of());
+        // 测试池用户不存在 → 仅用户数据池
+        when(userMapper.selectOne(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(null);
 
         mockMvc.perform(get("/api/settings/pools"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200));
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data[0].name").value("用户数据"))
+                .andExpect(jsonPath("$.data.length()").value(1));
     }
 }

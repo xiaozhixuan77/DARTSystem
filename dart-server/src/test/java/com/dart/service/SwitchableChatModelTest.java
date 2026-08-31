@@ -6,6 +6,7 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.context.ApplicationContext;
 
 import java.util.List;
 
@@ -19,7 +20,9 @@ class SwitchableChatModelTest {
         ChatModel mock = mock(ChatModel.class);
         ChatResponse resp = new ChatResponse(List.of(new Generation(new AssistantMessage("hi"))));
         when(mock.call(any(Prompt.class))).thenReturn(resp);
-        SwitchableChatModel model = new SwitchableChatModel(mock);
+        SwitchableChatModel model = new SwitchableChatModel(
+                mock(ApiConfigService.class), mock(ApplicationContext.class));
+        model.switchDelegate(mock);
 
         assertThat(model.call(new Prompt("msg"))).isSameAs(resp);
     }
@@ -28,7 +31,9 @@ class SwitchableChatModelTest {
     void stream_delegatesToCurrentModel() {
         ChatModel mock = mock(ChatModel.class);
         when(mock.stream(any(Prompt.class))).thenReturn(reactor.core.publisher.Flux.empty());
-        SwitchableChatModel model = new SwitchableChatModel(mock);
+        SwitchableChatModel model = new SwitchableChatModel(
+                mock(ApiConfigService.class), mock(ApplicationContext.class));
+        model.switchDelegate(mock);
 
         assertThat(model.stream(new Prompt("msg"))).isNotNull();
     }
@@ -41,7 +46,8 @@ class SwitchableChatModelTest {
                 List.of(new Generation(new AssistantMessage("first")))));
         when(second.call(any(Prompt.class))).thenReturn(new ChatResponse(
                 List.of(new Generation(new AssistantMessage("second")))));
-        SwitchableChatModel model = new SwitchableChatModel(first);
+        SwitchableChatModel model = new SwitchableChatModel(
+                mock(ApiConfigService.class), mock(ApplicationContext.class));
 
         // 模拟切换（封装 build 的分叉点：switchTo 内部重建后委托新模型）
         model.switchDelegate(second);
