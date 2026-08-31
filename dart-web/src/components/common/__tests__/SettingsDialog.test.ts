@@ -35,51 +35,62 @@ describe('SettingsDialog.vue', () => {
     return mount(SettingsDialog, { props: { visible: true } })
   }
 
-  it('渲染两个区块：API 配置/余额', () => {
+  it('渲染两个区块：余额/服务配置 + footer 按钮', () => {
     const wrapper = mountDialog()
-    expect(wrapper.find('.api-section').exists()).toBe(true)
     expect(wrapper.find('.balance-section').exists()).toBe(true)
+    expect(wrapper.find('.config-section').exists()).toBe(true)
     expect(wrapper.find('.pool-section').exists()).toBe(false)
+    expect(wrapper.find('.btn-primary').text()).toContain('保存设置')
+    expect(wrapper.find('.btn-secondary').text()).toContain('取消')
   })
 
   it('打开时加载 API 配置并展示脱敏 key', async () => {
     const wrapper = mountDialog()
     await flushPromises()
 
-    expect((wrapper.find('input.api-url').element as HTMLInputElement).value)
+    expect((wrapper.find('#apiUrl').element as HTMLInputElement).value)
       .toBe('https://api.deepseek.com')
-    expect((wrapper.find('input.api-model').element as HTMLInputElement).value)
+    expect((wrapper.find('#modelName').element as HTMLInputElement).value)
       .toBe('deepseek-v4-flash')
-    expect((wrapper.find('input.api-key').element as HTMLInputElement).value)
+    expect((wrapper.find('#apiKey').element as HTMLInputElement).value)
       .toBe('sk-ab****2345')
   })
 
-  it('保存 API 配置调用 PUT', async () => {
+  it('保存设置调用 PUT', async () => {
     ;(client.put as any).mockResolvedValue({ data: { code: 200 } })
 
     const wrapper = mountDialog()
     await flushPromises()
-    await wrapper.find('.api-save').trigger('click')
+    await wrapper.find('.btn-primary').trigger('click')
+    await flushPromises()
 
     expect(client.put).toHaveBeenCalled()
   })
 
-  it('刷新余额展示余额信息', async () => {
-    ;(client.get as any).mockResolvedValue({
-      data: { code: 200, data: { isAvailable: true, currency: 'CNY', totalBalance: '30.13', error: null } }
+  it('URL 非 HTTPS 时校验失败不发请求', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+    await wrapper.find('#apiUrl').setValue('http://plain-http.com')
+    await wrapper.find('.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.form-group.has-error').exists()).toBe(true)
+    expect(client.put).not.toHaveBeenCalled()
+  })
+
+  it('刷新余额展示余额大字', async () => {
+    mockGet({
+      '/settings/api': { data: { baseUrl: 'x', model: 'y', apiKey: 'z****' } },
+      '/settings/balance': { data: { isAvailable: true, currency: 'CNY', totalBalance: '30.13', error: null } }
     })
 
     const wrapper = mountDialog()
     await flushPromises()
-    await wrapper.find('.balance-refresh').trigger('click')
+    await wrapper.find('.refresh-btn').trigger('click')
     await flushPromises()
 
-    console.log('DEBUG get calls:', (client.get as any).mock.calls.map((c: any) => c[0]))
-    await vi.waitFor(() => {
-      expect(wrapper.find('.balance-text').text()).toContain('30.13')
-    }, { timeout: 2000 }).catch(() => {
-      console.log('FALLBACK BALANCE:', wrapper.find('.balance-section').html())
-    })
+    expect(wrapper.find('.balance-value .num').text()).toContain('30.13')
+    expect(wrapper.find('.balance-unit').text()).toContain('CNY')
   })
 
   it('余额查询失败展示错误', async () => {
@@ -90,7 +101,7 @@ describe('SettingsDialog.vue', () => {
 
     const wrapper = mountDialog()
     await flushPromises()
-    await wrapper.find('.balance-refresh').trigger('click')
+    await wrapper.find('.refresh-btn').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.balance-error').text()).toContain('查询失败')
