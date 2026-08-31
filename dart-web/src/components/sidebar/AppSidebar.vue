@@ -5,6 +5,7 @@ import { useChatStore } from '@/stores/chat'
 import { usePoolStore } from '@/stores/pool'
 import { useRouter } from 'vue-router'
 import SessionContextMenu from '@/components/common/SessionContextMenu.vue'
+import SettingsDialog from '@/components/common/SettingsDialog.vue'
 import type { ConversationVO } from '@/types/chat'
 
 const chatStore = useChatStore()
@@ -136,6 +137,8 @@ function openSettings() {
       @delete="handleDeleteConversation"
       @rename="closeContextMenu"
     />
+
+    <SettingsDialog :visible="settingsVisible" @close="settingsVisible = false" />
 
     <div class="sidebar-footer">
       <button class="panel-toggle" @click="router.push('/knowledge')">
