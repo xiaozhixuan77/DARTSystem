@@ -1,19 +1,14 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
 
-async function loginXiao(page: Page, request: APIRequestContext): Promise<void> {
-  const login = await request.post('/api/auth/login', {
-    data: { username: 'xiao', password: '123456' }
-  })
-  expect(login.ok()).toBeTruthy()
-  const token = (await login.json()).data.accessToken as string
-  await page.goto('/')
-  await page.evaluate((t) => localStorage.setItem('accessToken', t), token)
+async function prepareKnowledgePage(page: Page, request: APIRequestContext): Promise<void> {
+  // E2E 使用测试池（pool_test 646），未建则回退用户池——实体数据以 xiao 为准时先确保
+  await page.addInitScript(() => localStorage.setItem('poolUserId', '3'))
   await page.goto('/knowledge')
   await page.waitForSelector('.entity-bar', { timeout: 15000 })
 }
 
 test('实体栏折叠：按钮可见且可展开收起', async ({ page, request }) => {
-  await loginXiao(page, request)
+  await prepareKnowledgePage(page, request)
 
   // 折叠状态：展开按钮可见（不被裁剪）
   const toggle = page.locator('.entity-toggle')

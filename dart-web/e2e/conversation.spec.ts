@@ -26,8 +26,9 @@ test.describe('会话管理', () => {
     await input.press('Enter')
 
     // 非技术查询快速返回（error + done），完成后侧栏标题应为消息内容
-    await expect(page.locator('.session-title').first())
-      .toContainText('今天天气怎么样', { timeout: 30000 })
+    // （定位含消息标题的会话而非 first()——并行用例可能创建其他新会话）
+    await expect(page.locator('.session-title', { hasText: '今天天气怎么样' }).first())
+      .toBeVisible({ timeout: 30000 })
   })
 
   test('会话列表显示无会话状态', async ({ page }) => {
@@ -56,20 +57,20 @@ test.describe('会话管理', () => {
   })
 
   test('右键删除会话', async ({ page }) => {
-    // 新建会话，列表出现一项
+    // 新建会话，列表数量 +1（自洽断言，不假设空库）
+    const before = await page.locator('.session-item').count()
     await page.locator('.new-session-btn').click()
-    await expect(page.locator('.welcome-screen')).toBeVisible()
-    await expect(page.locator('.session-item')).toHaveCount(1)
+    await expect(page.locator('.session-item')).toHaveCount(before + 1)
 
     // 右键呼出菜单 → 删除 → 确认
-    await page.locator('.session-item').click({ button: 'right' })
+    await page.locator('.session-item').first().click({ button: 'right' })
     await expect(page.locator('.context-menu')).toBeVisible()
     await page.locator('.menu-item.danger').click()
     const confirmBox = page.locator('.el-message-box')
     await expect(confirmBox).toBeVisible()
     await confirmBox.locator('.el-button--primary').click()
 
-    // 删除成功 → 空状态
-    await expect(page.locator('.session-empty')).toBeVisible({ timeout: 10000 })
+    // 删除成功 → 列表数量回落
+    await expect(page.locator('.session-item')).toHaveCount(before, { timeout: 10000 })
   })
 })
