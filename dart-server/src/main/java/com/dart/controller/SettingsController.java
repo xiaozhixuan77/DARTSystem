@@ -7,6 +7,7 @@ import com.dart.entity.User;
 import com.dart.mapper.UserMapper;
 import com.dart.service.ApiConfigService;
 import com.dart.service.SwitchableChatModel;
+import org.springframework.beans.factory.ObjectProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,7 +31,7 @@ public class SettingsController {
     public record PoolResponse(String key, long id, String name) {}
 
     private final ApiConfigService apiConfigService;
-    private final SwitchableChatModel switchableChatModel;
+    private final ObjectProvider<SwitchableChatModel> switchableChatModelProvider;
     private final UserMapper userMapper;
 
     @GetMapping("/api")
@@ -46,7 +47,11 @@ public class SettingsController {
     @PutMapping("/api")
     public ApiResponse<Void> updateApi(@RequestBody ApiConfigRequest request) {
         apiConfigService.save(request.baseUrl(), request.model(), request.apiKey());
-        switchableChatModel.switchTo(request.baseUrl(), request.model(), request.apiKey());
+        // 动态模型在 dev 存在；test/perf 等 profile 可能缺失（保存配置仍生效）
+        SwitchableChatModel switcher = switchableChatModelProvider.getIfAvailable();
+        if (switcher != null) {
+            switcher.switchTo(request.baseUrl(), request.model(), request.apiKey());
+        }
         return ApiResponse.ok(null);
     }
 

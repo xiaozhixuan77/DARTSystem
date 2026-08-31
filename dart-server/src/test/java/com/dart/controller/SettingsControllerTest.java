@@ -16,6 +16,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,6 +28,8 @@ class SettingsControllerTest {
     @Mock
     private ApiConfigService apiConfigService;
     @Mock
+    private org.springframework.beans.factory.ObjectProvider<com.dart.service.SwitchableChatModel> switchableProvider;
+    @Mock
     private com.dart.service.SwitchableChatModel switchableChatModel;
     @Mock
     private UserMapper userMapper;
@@ -35,8 +38,9 @@ class SettingsControllerTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(switchableProvider.getIfAvailable()).thenReturn(switchableChatModel);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new SettingsController(apiConfigService, switchableChatModel, userMapper))
+                .standaloneSetup(new SettingsController(apiConfigService, switchableProvider, userMapper))
                 .build();
     }
 

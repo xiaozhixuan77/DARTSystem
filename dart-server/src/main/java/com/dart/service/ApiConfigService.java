@@ -30,6 +30,12 @@ public class ApiConfigService {
 
     private final AppApiConfigMapper configMapper;
 
+    @org.springframework.beans.factory.annotation.Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}")
+    private String defaultBaseUrl;
+
+    @org.springframework.beans.factory.annotation.Value("${spring.ai.deepseek.api-key:}")
+    private String defaultApiKey;
+
     public ApiConfigService(AppApiConfigMapper configMapper) {
         this.configMapper = configMapper;
     }
@@ -63,9 +69,10 @@ public class ApiConfigService {
      * 失败返回 isAvailable=false + error 文案（前端展示"查询失败"原因）。
      */
     public BalanceResult queryBalance() {
+        // 未配置持久化配置时回退启动默认（yml deepseek base-url/api-key）
         ApiConfigView cfg = get();
         if (cfg == null) {
-            return new BalanceResult(false, null, null, "未配置 chat API（使用启动默认配置）");
+            cfg = new ApiConfigView(defaultBaseUrl, "", defaultApiKey);
         }
         try {
             String base = cfg.baseUrl() == null ? "" : cfg.baseUrl().replaceAll("/+$", "");

@@ -15,13 +15,11 @@ import static org.mockito.Mockito.mock;
 public class TestAiConfig {
 
     @Bean
-    @Primary
     public ChatModel chatModel() {
         return mock(ChatModel.class);
     }
 
     @Bean
-    @Primary
     public EmbeddingModel embeddingModel() {
         return mock(EmbeddingModel.class);
     }

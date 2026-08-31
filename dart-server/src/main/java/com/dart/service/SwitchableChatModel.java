@@ -9,6 +9,8 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -21,6 +23,8 @@ import jakarta.annotation.PostConstruct;
  */
 @Slf4j
 @Service
+@Primary
+@Profile("!test")
 @SuppressWarnings("all")
 public class SwitchableChatModel implements ChatModel {
 

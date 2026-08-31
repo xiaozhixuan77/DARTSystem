@@ -168,3 +168,12 @@ CREATE TABLE IF NOT EXISTS `knowledge_item_entity` (
     UNIQUE KEY `uk_item_entity` (`item_id`, `entity_id`),
     CONSTRAINT `fk_ie_item` FOREIGN KEY (`item_id`) REFERENCES `knowledge_item` (`id`) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS `app_api_config` (
+    `id`            BIGINT       NOT NULL,
+    `chat_base_url` VARCHAR(300) NOT NULL,
+    `chat_model`    VARCHAR(100) NOT NULL,
+    `chat_api_key`  VARCHAR(300) NOT NULL,
+    `updated_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`)
+);
