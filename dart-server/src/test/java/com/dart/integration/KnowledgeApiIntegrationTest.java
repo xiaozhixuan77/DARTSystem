@@ -43,16 +43,11 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private UserMapper userMapper;
 
-    private String token;
     private Long testUserId;
 
     @BeforeEach
-    void setUp() throws Exception {
-        String username = "kb_" + System.nanoTime() % 1_000_000;
-        registerUser(username, "pass123");
-        token = loginAndGetAccessToken(username, "pass123");
-        testUserId = userMapper.selectList(new QueryWrapper<User>().eq("username", username))
-                .get(0).getId();
+    void setUp() {
+        testUserId = createTestUser();
     }
 
     private Long createItem(String title, String content) {
@@ -99,7 +94,7 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
         createItem("Go 语言教程", "其他内容");
 
         mockMvc.perform(get("/api/knowledge").param("keyword", "Spring")
-                        .header("Authorization", "Bearer " + token))
+                        .header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.total").value(1))
@@ -113,7 +108,7 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
         addChunk(itemId, "这里提到麒麟处理器架构详解");
 
         mockMvc.perform(get("/api/knowledge").param("keyword", "麒麟处理器")
-                        .header("Authorization", "Bearer " + token))
+                        .header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.records[0].title").value("麒麟文档"));
@@ -125,7 +120,7 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
         createItem("Spring Boot 指南", "正文内容");
 
         mockMvc.perform(get("/api/knowledge").param("keyword", "完全不存在的词")
-                        .header("Authorization", "Bearer " + token))
+                        .header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(0))
                 .andExpect(jsonPath("$.data.records.length()").value(0));
@@ -144,7 +139,7 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
         knowledgeItemMapper.updateById(itemB);
 
         mockMvc.perform(get("/api/knowledge").param("keyword", "Spring").param("tag", "后端")
-                        .header("Authorization", "Bearer " + token))
+                        .header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.records[0].title").value("Spring Boot 指南"));
@@ -160,7 +155,7 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
         createItem("React 入门", "x");
 
         mockMvc.perform(get("/api/knowledge").param("keyword", "Spring").param("size", "2")
-                        .header("Authorization", "Bearer " + token))
+                        .header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(2))
                 .andExpect(jsonPath("$.data.records.length()").value(2));
@@ -180,7 +175,7 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
         String newContent = "新正文内容".repeat(20);
 
         mockMvc.perform(put("/api/knowledge/" + itemId)
-                        .header("Authorization", "Bearer " + token)
+                        .header("X-User-Id", String.valueOf(testUserId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\":\"可编辑条目\",\"tags\":\"测试\",\"notes\":\"\","
                                 + "\"content\":\"" + newContent + "\"}"))
@@ -188,7 +183,7 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.code").value(200));
 
         mockMvc.perform(get("/api/knowledge/" + itemId)
-                        .header("Authorization", "Bearer " + token))
+                        .header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content").value(newContent));
 
@@ -209,7 +204,7 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
         createItem("Spring Boot", "x");
 
         mockMvc.perform(get("/api/knowledge/graph")
-                        .header("Authorization", "Bearer " + token))
+                        .header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.nodes.length()").value(2));
@@ -223,7 +218,7 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
         addRelation(a, b);
 
         mockMvc.perform(get("/api/knowledge/graph")
-                        .header("Authorization", "Bearer " + token))
+                        .header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.nodes.length()").value(2))
                 .andExpect(jsonPath("$.data.edges.length()").value(1))
@@ -232,11 +227,11 @@ class KnowledgeApiIntegrationTest extends BaseIntegrationTest {
         org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder delete =
                 org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .delete("/api/knowledge/" + b);
-        mockMvc.perform(delete.header("Authorization", "Bearer " + token))
+        mockMvc.perform(delete.header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/knowledge/graph")
-                        .header("Authorization", "Bearer " + token))
+                        .header("X-User-Id", String.valueOf(testUserId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.nodes.length()").value(1))
                 .andExpect(jsonPath("$.data.edges.length()").value(0));

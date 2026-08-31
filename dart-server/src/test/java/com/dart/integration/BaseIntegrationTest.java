@@ -19,7 +19,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -70,9 +69,6 @@ public abstract class BaseIntegrationTest {
     private ConversationMapper conversationMapper;
 
     @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    @Autowired
     private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
 
     @BeforeEach
@@ -91,7 +87,7 @@ public abstract class BaseIntegrationTest {
     protected Long createTestUser() {
         User user = new User();
         user.setUsername("test_" + UUID.randomUUID().toString().substring(0, 8));
-        user.setPasswordHash(passwordEncoder.encode("pass123"));
+        user.setPasswordHash("no-auth");
         user.setStatus(User.STATUS_ACTIVE);
         user.setLoginAttempts(0);
         user.setCreatedAt(LocalDateTime.now());
@@ -109,33 +105,6 @@ public abstract class BaseIntegrationTest {
         conv.setUpdatedAt(LocalDateTime.now());
         conversationMapper.insert(conv);
         return conv.getId();
-    }
-
-    protected void registerUser(String username, String password) throws Exception {
-        mockMvc.perform(post("/api/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200));
-    }
-
-    protected String loginAndGetAccessToken(String username, String password) throws Exception {
-        String resp = mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andReturn().getResponse().getContentAsString();
-        return objectMapper.readTree(resp).get("data").get("accessToken").asText();
-    }
-
-    protected String loginAndGetResponse(String username, String password) throws Exception {
-        return mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andReturn().getResponse().getContentAsString();
     }
 
     /**
