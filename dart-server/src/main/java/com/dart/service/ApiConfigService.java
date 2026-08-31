@@ -50,6 +50,10 @@ public class ApiConfigService {
 
     /** 保存配置并立即重建模型（调用方 SwitchableChatModel 提供回切）。 */
     public void save(String baseUrl, String model, String apiKey) {
+        // 外部输入可能带首尾空白（CRLF 文件提取等），trim 防污染
+        baseUrl = baseUrl == null ? null : baseUrl.trim();
+        model = model == null ? null : model.trim();
+        apiKey = apiKey == null ? null : apiKey.trim();
         AppApiConfig cfg = configMapper.selectById(CONFIG_ID);
         if (cfg == null) {
             cfg = new AppApiConfig();
