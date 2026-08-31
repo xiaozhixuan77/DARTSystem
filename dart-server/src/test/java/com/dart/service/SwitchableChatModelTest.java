@@ -55,4 +55,32 @@ class SwitchableChatModelTest {
         assertThat(model.call(new Prompt("x")).getResults().getFirst().getOutput().getText())
                 .isEqualTo("second");
     }
+
+    @Test
+    void connectionError_401_mapsToFriendlyInvalidKey() {
+        var e = org.springframework.web.client.HttpClientErrorException.create(
+                "{}", org.springframework.http.HttpStatus.UNAUTHORIZED, "Unauthorized", null, null, null);
+        assertThat(SwitchableChatModel.friendlyConnectionError(e))
+                .isEqualTo("连接失败：API Key 无效（HTTP 401）");
+    }
+
+    @Test
+    void connectionError_connectionRefused_mapsToUnreachable() {
+        assertThat(SwitchableChatModel.friendlyConnectionError(
+                new RuntimeException("Connection refused")))
+                .isEqualTo("连接失败：无法连接到服务地址（请检查 URL）");
+    }
+
+    @Test
+    void connectionError_timeout_mapsToTimeout() {
+        assertThat(SwitchableChatModel.friendlyConnectionError(
+                new RuntimeException("Read timed out")))
+                .isEqualTo("连接失败：请求超时（请检查网络或服务地址）");
+    }
+
+    @Test
+    void connectionError_other_mapsToGeneric() {
+        assertThat(SwitchableChatModel.friendlyConnectionError(new RuntimeException("boom")))
+                .isEqualTo("连接失败：boom");
+    }
 }
