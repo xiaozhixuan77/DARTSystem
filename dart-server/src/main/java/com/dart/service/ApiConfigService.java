@@ -54,8 +54,12 @@ public class ApiConfigService {
         if (cfg == null) {
             cfg = new AppApiConfig();
             cfg.setId(CONFIG_ID);
+            cfg.setChatBaseUrl(baseUrl);
+            cfg.setChatModel(model);
+            cfg.setChatApiKey(apiKey);
             cfg.setUpdatedAt(LocalDateTime.now());
             configMapper.insert(cfg);
+            return;
         }
         cfg.setChatBaseUrl(baseUrl);
         cfg.setChatModel(model);
