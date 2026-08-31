@@ -9,7 +9,6 @@ import com.dart.entity.User;
 import com.dart.exception.BusinessException;
 import com.dart.exception.ErrorCode;
 import com.dart.exception.GlobalExceptionHandler;
-import com.dart.security.UserPrincipal;
 import com.dart.service.KnowledgeService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,8 +20,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import org.springframework.http.MediaType;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -60,24 +57,15 @@ class KnowledgeControllerTest {
         return vo;
     }
 
-    private UserPrincipal principal;
 
     @BeforeEach
     void setUp() {
-        User user = new User();
-        user.setId(1L);
-        user.setUsername("test");
-        user.setPasswordHash("pass");
-        user.setStatus(User.STATUS_ACTIVE);
-        principal = new UserPrincipal(user);
-
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                com.dart.util.SecurityUtils.class, "defaultUserId", 1L);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new KnowledgeController(knowledgeService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
-
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(principal, null, List.of()));
     }
 
     @Test

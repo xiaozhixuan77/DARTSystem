@@ -7,7 +7,6 @@ import com.dart.entity.User;
 import com.dart.exception.BusinessException;
 import com.dart.exception.ErrorCode;
 import com.dart.exception.GlobalExceptionHandler;
-import com.dart.security.UserPrincipal;
 import com.dart.service.ConversationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -17,8 +16,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -42,29 +39,16 @@ class ConversationControllerTest {
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private UserPrincipal principal;
 
     @BeforeEach
     void setUp() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                com.dart.util.SecurityUtils.class, "defaultUserId", 1L);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new ConversationController(conversationService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
 
-        User user = new User();
-        user.setId(1L);
-        user.setUsername("testuser");
-        user.setPasswordHash("hash");
-        user.setStatus(User.STATUS_ACTIVE);
-        principal = new UserPrincipal(user);
-
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
-    }
-
-    @AfterEach
-    void tearDown() {
-        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -130,12 +114,12 @@ class ConversationControllerTest {
     }
 
     @Test
-    void list_withoutAuthentication_returns401() throws Exception {
-        SecurityContextHolder.clearContext();
+    void list_withoutHeader_fallsBackToDefaultUser() throws Exception {
+        when(conversationService.listConversations(1L)).thenReturn(List.of());
 
         mockMvc.perform(get("/api/conversations"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(401));
+                .andExpect(jsonPath("$.code").value(200));
     }
 
     @Test

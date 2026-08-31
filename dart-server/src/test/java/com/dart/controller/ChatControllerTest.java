@@ -7,7 +7,6 @@ import com.dart.dto.response.ConversationVO;
 import com.dart.entity.User;
 import com.dart.exception.BusinessException;
 import com.dart.exception.ErrorCode;
-import com.dart.security.UserPrincipal;
 import com.dart.service.ChatService;
 import com.dart.service.ConversationService;
 import org.junit.jupiter.api.AfterEach;
@@ -18,8 +17,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -46,21 +43,10 @@ class ChatControllerTest {
 
     @BeforeEach
     void setUp() {
-        User user = new User();
-        user.setId(1L);
-        user.setUsername("testuser");
-        user.setPasswordHash("hash");
-        user.setStatus(User.STATUS_ACTIVE);
-        UserPrincipal principal = new UserPrincipal(user);
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                com.dart.util.SecurityUtils.class, "defaultUserId", 1L);
         mockMvc = MockMvcBuilders.standaloneSetup(
                 new ChatController(chatService, conversationService, broadcasterRegistry)).build();
-    }
-
-    @AfterEach
-    void tearDown() {
-        SecurityContextHolder.clearContext();
     }
 
     @Test
