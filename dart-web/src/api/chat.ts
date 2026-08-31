@@ -1,4 +1,4 @@
-import { getAccessToken } from './client'
+import { getPoolUserId } from './client'
 
 type SSECallback = {
   onStatus?: (status: string, message: string) => void
@@ -43,13 +43,13 @@ function sseRequest(
   errorFallback: string
 ): () => void {
   const abortController = new AbortController()
-  const token = getAccessToken()
+  const userId = getPoolUserId()
 
   fetch(path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: token ? `Bearer ${token}` : ''
+      'X-User-Id': String(userId)
     },
     body: JSON.stringify(body),
     signal: abortController.signal

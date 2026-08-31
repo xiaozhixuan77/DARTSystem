@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
-import { useAuthStore } from '@/stores/auth'
+import { usePoolStore } from '@/stores/pool'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { deleteConversation } from '@/api/conversation'
 import AppSidebar from '../AppSidebar.vue'
@@ -20,7 +20,11 @@ vi.mock('@/api/conversation', () => ({
   getMessages: vi.fn()
 }))
 vi.mock('@/api/chat', () => ({ sendMessage: vi.fn() }))
-vi.mock('@/api/auth', () => ({ login: vi.fn(), register: vi.fn() }))
+vi.mock('@/api/client', () => ({
+  default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } } },
+  getPoolUserId: vi.fn(() => 3),
+  setPoolUserId: vi.fn()
+}))
 vi.mock('@/api/client', () => ({
   saveTokens: vi.fn(),
   clearTokens: vi.fn(),
@@ -96,23 +100,18 @@ describe('AppSidebar.vue', () => {
     expect(newSpy).toHaveBeenCalled()
   })
 
-  it('显示用户名和头像', () => {
-    const authStore = useAuthStore()
-    authStore.user = { userId: 1, username: 'Xiao' }
+  it('显示当前数据池名称和头像', () => {
+    const poolStore = usePoolStore()
+    poolStore.currentId = 3
 
     const wrapper = mount(AppSidebar)
-    expect(wrapper.find('.user-name').text()).toBe('Xiao')
-    expect(wrapper.find('.user-avatar').text()).toBe('X')
+    expect(wrapper.find('.user-name').text()).toBe('用户数据')
+    expect(wrapper.find('.user-avatar').text()).toBe('用')
   })
 
-  it('退出登录跳转到 /login', async () => {
-    const authStore = useAuthStore()
-    authStore.user = { userId: 1, username: 'test' }
-
+  it('设置按钮存在', async () => {
     const wrapper = mount(AppSidebar)
-    await wrapper.find('.logout-btn').trigger('click')
-
-    expect(mockPush).toHaveBeenCalledWith('/login')
+    expect(wrapper.find('.settings-btn').exists()).toBe(true)
   })
 
   it('点击知识库按钮跳转 /knowledge', async () => {

@@ -12,7 +12,6 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AppSidebar: typeof import('./src/components/sidebar/AppSidebar.vue')['default']
-    AuthCard: typeof import('./src/components/auth/AuthCard.vue')['default']
     ChatInput: typeof import('./src/components/chat/ChatInput.vue')['default']
     ChatMessage: typeof import('./src/components/chat/ChatMessage.vue')['default']
     ChatNavigator: typeof import('./src/components/chat/ChatNavigator.vue')['default']

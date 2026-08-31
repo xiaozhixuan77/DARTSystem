@@ -24,7 +24,7 @@ function sseStream(chunks: string[]): ReadableStream<Uint8Array> {
 describe('sendMessage SSE 解析', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
-    vi.stubGlobal('localStorage', { getItem: () => 'test-token' } as any)
+    vi.stubGlobal('localStorage', { getItem: (k: string) => k === 'poolUserId' ? '3' : null } as any)
   })
 
   afterEach(() => {
@@ -103,7 +103,7 @@ describe('sendMessage SSE 解析', () => {
 describe('resumeMessage 恢复续流解析', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
-    vi.stubGlobal('localStorage', { getItem: () => 'test-token' } as any)
+    vi.stubGlobal('localStorage', { getItem: (k: string) => k === 'poolUserId' ? '3' : null } as any)
   })
 
   afterEach(() => {
@@ -123,7 +123,7 @@ describe('resumeMessage 恢复续流解析', () => {
     const [url, init] = vi.mocked(fetch).mock.calls[0]
     expect(url).toBe('/api/chat/resume')
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({ conversationId: 55 })
-    expect((init as RequestInit).headers).toHaveProperty('Authorization', 'Bearer test-token')
+    expect((init as RequestInit).headers).toHaveProperty('X-User-Id', '3')
   })
 
   it('快照 + 实时增量 content 事件路由到 onContent', async () => {

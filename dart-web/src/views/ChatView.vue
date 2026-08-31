@@ -2,7 +2,6 @@
 import { onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
-import { useAuthStore } from '@/stores/auth'
 import AppSidebar from '@/components/sidebar/AppSidebar.vue'
 import ChatMessage from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -12,7 +11,6 @@ import StreamingStatus from '@/components/chat/StreamingStatus.vue'
 
 const route = useRoute()
 const chatStore = useChatStore()
-const authStore = useAuthStore()
 
 const messageListRef = ref<HTMLElement | null>(null)
 let userScrolledUp = false
@@ -81,7 +79,6 @@ watch(() => chatStore.currentId, () => {
 })
 
 onMounted(() => {
-  authStore.initAuth()
   chatStore.loadConversations()
   const id = route.params.id
   if (id) {

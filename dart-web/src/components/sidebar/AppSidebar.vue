@@ -2,13 +2,14 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useChatStore } from '@/stores/chat'
-import { useAuthStore } from '@/stores/auth'
+import { usePoolStore } from '@/stores/pool'
 import { useRouter } from 'vue-router'
 import SessionContextMenu from '@/components/common/SessionContextMenu.vue'
 import type { ConversationVO } from '@/types/chat'
 
 const chatStore = useChatStore()
-const authStore = useAuthStore()
+const poolStore = usePoolStore()
+const settingsVisible = ref(false)
 const router = useRouter()
 
 const menuVisible = ref(false)
@@ -61,6 +62,7 @@ async function handleDeleteConversation() {
 
 onMounted(() => {
   chatStore.loadConversations()
+  poolStore.loadPools()
   window.addEventListener('click', closeContextMenu)
 })
 
@@ -72,9 +74,8 @@ function handleNewSession() {
   chatStore.newConversation()
 }
 
-function handleLogout() {
-  authStore.logout()
-  router.push('/login')
+function openSettings() {
+  settingsVisible.value = true
 }
 </script>
 
@@ -145,12 +146,13 @@ function handleLogout() {
         知识库
       </button>
       <div class="user-area">
-        <span class="user-avatar">{{ authStore.username.charAt(0).toUpperCase() }}</span>
-        <span class="user-name">{{ authStore.username }}</span>
-        <button class="logout-btn" @click="handleLogout" title="退出登录">
+        <span class="user-avatar">{{ poolStore.currentName.charAt(0).toUpperCase() }}</span>
+        <span class="user-name">{{ poolStore.currentName }}</span>
+        <button class="settings-btn" @click="openSettings" title="设置">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             width="16" height="16">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
         </button>
       </div>
@@ -283,7 +285,7 @@ function handleLogout() {
   font-size: 13px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.logout-btn {
+.settings-btn {
   border: none; background: none; cursor: pointer;
   color: $color-muted;
   padding: 4px;
