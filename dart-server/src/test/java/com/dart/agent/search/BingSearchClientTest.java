@@ -20,6 +20,7 @@ class BingSearchClientTest {
     @BeforeEach
     void setUp() {
         client = new FakeBingClient();
+        BingSearchClient.resetRateState();
     }
 
     private static class FakeBingClient extends BingSearchClient {
@@ -29,6 +30,7 @@ class BingSearchClientTest {
         private final AtomicInteger maxConcurrent = new AtomicInteger(0);
         private final AtomicInteger fetchCount = new AtomicInteger(0);
         private boolean failSecondPage;
+        private boolean throwOnFetch;
 
         FakeBingClient withCnPages(List<List<SearchResult>> pages) {
             this.cnPages.clear();
@@ -47,14 +49,22 @@ class BingSearchClientTest {
             return this;
         }
 
+        FakeBingClient throwOnFetch() {
+            this.throwOnFetch = true;
+            return this;
+        }
+
         @Override
         List<SearchResult> fetchPage(String domain, String query, int page) {
             int cur = active.incrementAndGet();
             maxConcurrent.accumulateAndGet(cur, Math::max);
             fetchCount.incrementAndGet();
             try {
-                // 短暂停留，让其他页有机会同时进入，从而观测到并行度
+                // 短暂停留，让其他页有机会同时进入，从而观测到并发度
                 Thread.sleep(50);
+                if (throwOnFetch) {
+                    throw new RuntimeException("模拟限流");
+                }
                 if (failSecondPage && page == 1 && domain.contains("cn.bing.com")) {
                     return List.of();
                 }
@@ -79,7 +89,7 @@ class BingSearchClientTest {
     }
 
     @Test
-    void search_fetchesCnThreePagesAndWwwFirstPageInParallel() {
+    void search_fetchesCnThreePagesAndWwwFirstPage() {
         client.withCnPages(List.of(
                 page(1, "https://a.com/p", 3),
                 page(4, "https://a.com/p", 3),
@@ -88,9 +98,27 @@ class BingSearchClientTest {
         List<SearchResult> results = client.search("java", 10);
 
         assertThat(results).hasSize(8);
-        // cn 3 页 + www 第 1 页共 4 次抓取，并行度 ≥ 2
+        // cn 3 页 + www 第 1 页共 4 次抓取（页串行降载），单词内并发恒为 1
         assertThat(client.fetchCount).hasValue(4);
-        assertThat(client.maxConcurrent).hasValueGreaterThanOrEqualTo(2);
+        assertThat(client.maxConcurrent).hasValue(1);
+    }
+
+    @Test
+    void search_consecutiveFailures_entersCooldownAndTriesSinglePage() {
+        client.throwOnFetch();
+        // 连续失败触发冷却 → 冷却态只抓 cn 第 1 页（1 次试探）
+        for (int i = 0; i < 6; i++) {
+            client.search("java", 10);
+        }
+        assertThat(BingSearchClient.isCooldown()).isTrue();
+
+        client.throwOnFetch = false;
+        client.withCnPages(List.of(page(1, "https://a.com/p", 2)));
+        int before = client.fetchCount.get();
+        List<SearchResult> results = client.search("java", 10);
+
+        assertThat(client.fetchCount).hasValue(before + 1);
+        assertThat(results).hasSize(2);
     }
 
     @Test
