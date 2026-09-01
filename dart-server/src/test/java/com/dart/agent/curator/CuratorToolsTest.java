@@ -30,6 +30,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -694,12 +695,14 @@ class CuratorToolsTest {
     }
 
     @Test
-    void generateReport_singleResource_skipsLLM() {
+    void generateReport_singleResource_stillGeneratesSections() {
+        stubThreeSections();
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "Spring content ".repeat(100), 4.5);
         CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1), mock(SseSink.class), null, null, false, null);
+        // 单资源也走三节 LLM 结构化生成（质量下限：不再输出摘要列表）
         assertThat(report.markdown()).contains("Spring Boot");
-        assertThat(report.markdown()).contains("Spring Official");
-        verify(chatModel, times(0)).stream(any(Prompt.class));
+        assertThat(report.markdown()).contains(SECTION_CONCEPT);
+        verify(chatModel, atLeastOnce()).stream(any(Prompt.class));
     }
 
     // === 验证 ===
