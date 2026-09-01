@@ -40,13 +40,19 @@ public class ConversationService {
 
         Map<Long, Long> countMap = batchCountMessages(conversations);
 
-        return conversations.stream().map(conv -> ConversationVO.builder()
+        return conversations.stream()
+                .map(conv -> toVO(conv, countMap.getOrDefault(conv.getId(), 0L).intValue()))
+                .collect(Collectors.toList());
+    }
+
+    private static ConversationVO toVO(Conversation conv, Integer messageCount) {
+        return ConversationVO.builder()
                 .id(conv.getId())
                 .title(conv.getTitle())
                 .tags(conv.getTags())
-                .messageCount(countMap.getOrDefault(conv.getId(), 0L).intValue())
+                .messageCount(messageCount)
                 .updatedAt(conv.getUpdatedAt())
-                .build()).collect(Collectors.toList());
+                .build();
     }
 
     private Map<Long, Long> batchCountMessages(List<Conversation> conversations) {
@@ -79,13 +85,7 @@ public class ConversationService {
         conversationMapper.insert(conversation);
 
         log.info("Conversation created: id={}, userId={}", conversation.getId(), userId);
-        return ConversationVO.builder()
-                .id(conversation.getId())
-                .title(conversation.getTitle())
-                .tags(conversation.getTags())
-                .messageCount(0)
-                .updatedAt(conversation.getUpdatedAt())
-                .build();
+        return toVO(conversation, 0);
     }
 
     public ConversationVO getConversation(Long userId, Long conversationId) {
@@ -97,12 +97,7 @@ public class ConversationService {
         if (!conversation.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
-        return ConversationVO.builder()
-                .id(conversation.getId())
-                .title(conversation.getTitle())
-                .tags(conversation.getTags())
-                .updatedAt(conversation.getUpdatedAt())
-                .build();
+        return toVO(conversation, null);
     }
 
     @Transactional

@@ -113,8 +113,7 @@ public class RagService {
             for (KnowledgeChunk c : chunks) {
                 KnowledgeItem item = itemMap.get(c.getKnowledgeItemId());
                 if (item == null || c.getEmbedding() == null) continue;
-                float[] chunkVec = com.dart.util.VectorUtils.bytesToFloatArray(
-                        java.util.Base64.getDecoder().decode(c.getEmbedding()));
+                float[] chunkVec = com.dart.util.VectorUtils.decodeFromBase64(c.getEmbedding());
                 double similarity = com.dart.util.VectorUtils.cosineSimilarity(queryVec, chunkVec);
                 if (similarity >= similarityThreshold
                         || entityHitItemIds.contains(c.getKnowledgeItemId())) {

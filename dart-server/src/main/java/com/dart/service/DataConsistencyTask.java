@@ -107,8 +107,7 @@ public class DataConsistencyTask {
                 continue;
             }
             try {
-                float[] vec = com.dart.util.VectorUtils.bytesToFloatArray(
-                        java.util.Base64.getDecoder().decode(chunk.getEmbedding()));
+                float[] vec = com.dart.util.VectorUtils.decodeFromBase64(chunk.getEmbedding());
                 ids.add(chunk.getEmbeddingId());
                 vectors.add(vec);
             } catch (Exception e) {

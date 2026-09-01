@@ -107,7 +107,7 @@ class EntityServiceTest {
         when(itemEntityMapper.selectList(any())).thenReturn(List.of(
                 assoc(10L, 1L), assoc(11L, 1L), assoc(12L, 2L)));
 
-        List<EntityService.EntityVO> result = service.listEntities(1L, null);
+        List<com.dart.dto.response.KnowledgeEntityVO> result = service.listEntities(1L, null);
 
         assertThat(result).hasSize(2);
         assertThat(result).anyMatch(v -> v.name().equals("Redis") && v.itemCount() == 2);

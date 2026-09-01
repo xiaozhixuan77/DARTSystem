@@ -9,6 +9,7 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.context.ApplicationContext;
+import com.dart.util.UrlUtils;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
@@ -123,10 +124,10 @@ public class SwitchableChatModel implements ChatModel {
     /** 剥去 Anthropic 兼容路径后缀（DeepSeek/Moonshot 官方 /anthropic 端点），
      *  底层同一服务走 OpenAI 协议用根地址——用户填官方 Anthropic 地址也能适配。 */
     static String normalizeBaseUrl(String url) {
-        if (url == null) {
+        String trimmed = UrlUtils.trimTrailingSlash(url);
+        if (trimmed == null) {
             return null;
         }
-        String trimmed = url.trim().replaceAll("/+$", "");
         if (trimmed.toLowerCase().endsWith("/anthropic")) {
             return trimmed.substring(0, trimmed.length() - "/anthropic".length());
         }

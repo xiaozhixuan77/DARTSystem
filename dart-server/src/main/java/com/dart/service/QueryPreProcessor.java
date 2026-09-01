@@ -108,7 +108,7 @@ public class QueryPreProcessor {
             String optimized = extractGroup(response, OPTIMIZED_PATTERN, null);
             List<String> variants = parseVariants(response);
             // 非技术查询意图强制归一化为 non_tech（以 isTech 判断为准）
-            String intent = isTech ? extractGroup(response, INTENT_PATTERN, "how_to") : "non_tech";
+            String intent = isTech ? extractGroup(response, INTENT_PATTERN, IntentKeys.HOW_TO) : IntentKeys.NON_TECH;
             // 服务端锚点兜底：LLM 未遵守锚点指令时（抽象词/歧义词无具体技术名），自动补充主流锚点
             String finalOptimized = (optimized == null || optimized.isBlank()) ? query : optimized;
             String optimizedEn = extractGroup(response, OPTIMIZED_EN_PATTERN, null);
@@ -123,7 +123,7 @@ public class QueryPreProcessor {
             return new ChatService.QueryPreProcess(isTech, finalOptimized, variants, intent, followUp, optimizedEn);
         } catch (Exception e) {
             log.warn("LLM 前置判断与提示词优化失败，降级为技术查询+原文", e);
-            return new ChatService.QueryPreProcess(true, query, List.of(), "how_to", false, null);
+            return new ChatService.QueryPreProcess(true, query, List.of(), IntentKeys.HOW_TO, false, null);
         }
     }
 

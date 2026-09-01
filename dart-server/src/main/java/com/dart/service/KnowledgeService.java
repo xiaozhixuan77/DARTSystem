@@ -30,7 +30,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -99,9 +98,7 @@ public class KnowledgeService {
 
     /** 实体列表（委托 EntityService）：知识库页实体云/筛选数据源。 */
     public List<com.dart.dto.response.KnowledgeEntityVO> listEntities(Long userId) {
-        return entityService.listEntities(userId, null).stream()
-                .map(v -> new com.dart.dto.response.KnowledgeEntityVO(v.id(), v.name(), v.type(), v.itemCount()))
-                .toList();
+        return entityService.listEntities(userId, null);
     }
 
     /** MySQL LIKE 通配符转义（默认 ESCAPE '\'）：防 %/_ 篡改匹配语义（先转义反斜杠再转义通配符） */
@@ -173,7 +170,7 @@ public class KnowledgeService {
             knowledgeChunkMapper.delete(wrapper);
             // 异步重建：embedding 远程调用不阻塞保存响应
             String newContent = req.content();
-            runAfterCommit(() -> Thread.startVirtualThread(() -> {
+            com.dart.util.TransactionUtils.afterCommit(() -> Thread.startVirtualThread(() -> {
                 try {
                     embeddingService.rebuildChunksForItem(knowledgeId, newContent);
                 } catch (Exception e) {
@@ -182,28 +179,13 @@ public class KnowledgeService {
             }));
         }
         if (contentChanged || titleChanged) {
-            runAfterCommit(() -> Thread.startVirtualThread(() -> {
+            com.dart.util.TransactionUtils.afterCommit(() -> Thread.startVirtualThread(() -> {
                 try {
                     rebuildLinks(userId);
                 } catch (Exception e) {
                     log.warn("编辑后关联重算失败: userId={}", userId, e);
                 }
             }));
-        }
-    }
-
-    private void runAfterCommit(Runnable action) {
-        if (org.springframework.transaction.support.TransactionSynchronizationManager
-                .isSynchronizationActive()) {
-            org.springframework.transaction.support.TransactionSynchronizationManager
-                    .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            action.run();
-                        }
-                    });
-        } else {
-            action.run();
         }
     }
 
@@ -310,8 +292,7 @@ public class KnowledgeService {
 
         Map<String, KnowledgeGraphDTO.GraphNode> nodes = new LinkedHashMap<>();
         Map<String, KnowledgeGraphDTO.GraphEdge> edges = new LinkedHashMap<>();
-        nodes.put(nodeId(knowledgeId), new KnowledgeGraphDTO.GraphNode(
-                nodeId(knowledgeId), center.getTitle(), "knowledge"));
+        nodes.put(nodeId(knowledgeId), itemNode(knowledgeId, center.getTitle()));
 
         List<KnowledgeRelation> level1 = relationsOf(knowledgeId);
         Set<Long> level1ItemIds = new LinkedHashSet<>();
@@ -373,8 +354,7 @@ public class KnowledgeService {
         Map<String, KnowledgeGraphDTO.GraphNode> nodes = new LinkedHashMap<>();
         Map<String, KnowledgeGraphDTO.GraphEdge> edges = new LinkedHashMap<>();
         for (KnowledgeItem item : items) {
-            nodes.put(nodeId(item.getId()),
-                    new KnowledgeGraphDTO.GraphNode(nodeId(item.getId()), item.getTitle(), "knowledge"));
+            nodes.put(nodeId(item.getId()), itemNode(item.getId(), item.getTitle()));
         }
         QueryWrapper<KnowledgeRelation> wrapper = new QueryWrapper<>();
         wrapper.in("subject_id", itemIds);
@@ -458,8 +438,7 @@ public class KnowledgeService {
         }
         for (KnowledgeItem item : knowledgeItemMapper.selectBatchIds(missing)) {
             if (item != null) {
-                nodes.put(nodeId(item.getId()),
-                        new KnowledgeGraphDTO.GraphNode(nodeId(item.getId()), item.getTitle(), "knowledge"));
+                nodes.put(nodeId(item.getId()), itemNode(item.getId(), item.getTitle()));
             }
         }
     }
@@ -474,6 +453,10 @@ public class KnowledgeService {
 
     private static String nodeId(Long itemId) {
         return "item:" + itemId;
+    }
+
+    private static KnowledgeGraphDTO.GraphNode itemNode(Long itemId, String title) {
+        return new KnowledgeGraphDTO.GraphNode(nodeId(itemId), title, "knowledge");
     }
 
     // === 跨条目关联（双通道：标题子串 + 向量相似度）===
@@ -581,7 +564,7 @@ public class KnowledgeService {
                 continue;
             }
             try {
-                float[] vec = VectorUtils.bytesToFloatArray(Base64.getDecoder().decode(c.getEmbedding()));
+                float[] vec = VectorUtils.decodeFromBase64(c.getEmbedding());
                 vectors.putIfAbsent(c.getKnowledgeItemId(), vec);
             } catch (RuntimeException e) {
                 log.warn("chunk 向量解码失败，跳过: chunkId={}", c.getId());

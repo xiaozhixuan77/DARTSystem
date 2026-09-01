@@ -11,7 +11,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -33,8 +32,6 @@ public class EntityService {
     private static final double ENTITY_VECTOR_THRESHOLD = 0.75;
     /** 名称匹配最小实体名长度：防单字符名（V/C 等）误命中查询词。 */
     private static final int MIN_NAME_LEN = 2;
-
-    public record EntityVO(Long id, String name, String type, int itemCount) {}
 
     private final KnowledgeEntityMapper entityMapper;
     private final KnowledgeItemEntityMapper itemEntityMapper;
@@ -81,8 +78,7 @@ public class EntityService {
                 try {
                     float[] vec = embeddingService.embed(name);
                     if (vec != null) {
-                        entity.setEmbedding(Base64.getEncoder().encodeToString(
-                                VectorUtils.floatArrayToBytes(vec)));
+                        entity.setEmbedding(VectorUtils.encodeToBase64(vec));
                     }
                 } catch (Exception e) {
                     log.warn("实体向量化失败（名称仍入库）: name={}", name, e);
@@ -116,7 +112,7 @@ public class EntityService {
     }
 
     /** 实体列表 + 关联条目数（type 为 null 查全部；单次关联查询内存计数，避免 N+1）。 */
-    public List<EntityVO> listEntities(Long userId, String type) {
+    public List<com.dart.dto.response.KnowledgeEntityVO> listEntities(Long userId, String type) {
         QueryWrapper<KnowledgeEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("user_id", userId);
         if (type != null && !type.isBlank()) {
@@ -133,7 +129,7 @@ public class EntityService {
             countMap.merge(link.getEntityId(), 1, Integer::sum);
         }
         return entities.stream()
-                .map(e -> new EntityVO(e.getId(), e.getName(), e.getType(),
+                .map(e -> new com.dart.dto.response.KnowledgeEntityVO(e.getId(), e.getName(), e.getType(),
                         countMap.getOrDefault(e.getId(), 0)))
                 .toList();
     }
@@ -173,8 +169,7 @@ public class EntityService {
                 continue;
             }
             try {
-                float[] vec = VectorUtils.bytesToFloatArray(
-                        Base64.getDecoder().decode(e.getEmbedding()));
+                float[] vec = VectorUtils.decodeFromBase64(e.getEmbedding());
                 if (VectorUtils.cosineSimilarity(queryVec, vec) >= ENTITY_VECTOR_THRESHOLD) {
                     hitEntityIds.add(e.getId());
                 }

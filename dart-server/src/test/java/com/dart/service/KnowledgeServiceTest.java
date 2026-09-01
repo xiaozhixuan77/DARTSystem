@@ -147,7 +147,7 @@ class KnowledgeServiceTest {
     @Test
     void listEntities_delegatesToEntityService() {
         when(entityService.listEntities(1L, null)).thenReturn(List.of(
-                new EntityService.EntityVO(1L, "Redis", "concept", 3)));
+                new com.dart.dto.response.KnowledgeEntityVO(1L, "Redis", "concept", 3)));
 
         var result = knowledgeService.listEntities(1L);
 

@@ -83,7 +83,7 @@ public class ApiConfigService {
             cfg = new ApiConfigView(defaultBaseUrl, "", defaultApiKey);
         }
         try {
-            String base = cfg.baseUrl() == null ? "" : cfg.baseUrl().replaceAll("/+$", "");
+            String base = cfg.baseUrl() == null ? "" : com.dart.util.UrlUtils.trimTrailingSlash(cfg.baseUrl());
             String body = RestClient.create(base)
                     .get()
                     .uri("/user/balance")

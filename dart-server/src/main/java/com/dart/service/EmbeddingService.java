@@ -109,8 +109,7 @@ public class EmbeddingService {
             kc.setChunkIndex(chunks.get(i).chunkIndex());
             kc.setChunkText(chunks.get(i).chunkText());
             kc.setEmbeddingId(embeddingIds.get(i));
-            kc.setEmbedding(Base64.getEncoder().encodeToString(
-                    com.dart.util.VectorUtils.floatArrayToBytes(embeddings.get(i))));
+            kc.setEmbedding(com.dart.util.VectorUtils.encodeToBase64(embeddings.get(i)));
             kc.setCreatedAt(LocalDateTime.now());
             chunkEntities.add(kc);
         }
@@ -121,19 +120,8 @@ public class EmbeddingService {
         // Step 5: afterCommit 异步写 Redis（需在事务中）
         List<String> finalEmbeddingIds = List.copyOf(embeddingIds);
         List<float[]> finalEmbeddings = List.copyOf(embeddings);
-        if (org.springframework.transaction.support.TransactionSynchronizationManager
-                .isSynchronizationActive()) {
-            org.springframework.transaction.support.TransactionSynchronizationManager
-                    .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            writeToRedisWithRetry(finalEmbeddingIds, finalEmbeddings);
-                        }
-                    });
-        } else {
-            // 无事务时直接写入（测试环境）
-            writeToRedisWithRetry(finalEmbeddingIds, finalEmbeddings);
-        }
+        com.dart.util.TransactionUtils.afterCommit(
+                () -> writeToRedisWithRetry(finalEmbeddingIds, finalEmbeddings));
 
         return List.of(knowledgeItemId);
     }
@@ -154,7 +142,7 @@ public class EmbeddingService {
         knowledgeChunkMapper.delete(wrapper);
 
         if (content == null || content.isBlank()) {
-            runAfterCommit(() -> deleteRedisKeys(oldEmbeddingIds));
+            com.dart.util.TransactionUtils.afterCommit(() -> deleteRedisKeys(oldEmbeddingIds));
             return;
         }
 
@@ -170,8 +158,7 @@ public class EmbeddingService {
             kc.setChunkIndex(chunks.get(i).chunkIndex());
             kc.setChunkText(chunks.get(i).chunkText());
             kc.setEmbeddingId(embeddingIds.get(i));
-            kc.setEmbedding(Base64.getEncoder().encodeToString(
-                    com.dart.util.VectorUtils.floatArrayToBytes(embeddings.get(i))));
+            kc.setEmbedding(com.dart.util.VectorUtils.encodeToBase64(embeddings.get(i)));
             kc.setCreatedAt(LocalDateTime.now());
             knowledgeChunkMapper.insert(kc);
         }
@@ -179,25 +166,10 @@ public class EmbeddingService {
         List<String> finalOldIds = List.copyOf(oldEmbeddingIds);
         List<String> finalNewIds = List.copyOf(embeddingIds);
         List<float[]> finalNewVectors = List.copyOf(embeddings);
-        runAfterCommit(() -> {
+        com.dart.util.TransactionUtils.afterCommit(() -> {
             deleteRedisKeys(finalOldIds);
             writeChunkVectorsToRedis(redisTemplate, finalNewIds, finalNewVectors);
         });
-    }
-
-    private void runAfterCommit(Runnable action) {
-        if (org.springframework.transaction.support.TransactionSynchronizationManager
-                .isSynchronizationActive()) {
-            org.springframework.transaction.support.TransactionSynchronizationManager
-                    .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            action.run();
-                        }
-                    });
-        } else {
-            action.run();
-        }
     }
 
     private void deleteRedisKeys(List<String> embeddingIds) {
