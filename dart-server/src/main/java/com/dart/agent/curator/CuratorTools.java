@@ -4,7 +4,6 @@ import com.dart.broadcast.SseSink;
 import com.dart.agent.IntentKeys;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.util.SseEvents;
-import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
@@ -99,10 +98,6 @@ public class CuratorTools {
     private final double jaccardThreshold;
     private final int deepReadCount;
 
-    public CuratorTools(ChatModel chatModel, double jaccardThreshold) {
-        this(chatModel, jaccardThreshold, 4);
-    }
-
     public CuratorTools(ChatModel chatModel, double jaccardThreshold, int deepReadCount) {
         this.chatModel = chatModel;
         this.jaccardThreshold = jaccardThreshold;
@@ -151,38 +146,10 @@ public class CuratorTools {
      * 分节生成结构化 Markdown 学习报告（三节全部流式输出，打字机效果）：
      * ①核心概念（token 级流式直推）→ ②原理+代码示例（与节 1 并行流式生成进队列，
      * 节 1 完成后实时消费推送）→ ③误区FAQ+进阶+参考文献（流式直推）。
-     */
-    public CuratedReport generateReport(String query, List<ScoredResource> resources, SseSink sink) {
-        return generateReport(query, resources, sink, null);
-    }
-
-    /**
-     * @param styleHint 查询意图（风格要求）；null/未知意图不注入风格句
-     */
-    public CuratedReport generateReport(String query, List<ScoredResource> resources,
-                                        SseSink sink, String styleHint) {
-        return generateReport(query, resources, sink, styleHint, null);
-    }
-
-    /**
+     *
      * @param styleHint 查询意图（风格要求）；null/未知意图不注入风格句
      * @param sessionSummary 会话滚动摘要（长记忆）：注入节 prompt 延续前文叙述；null 表示无历史
-     */
-    public CuratedReport generateReport(String query, List<ScoredResource> resources,
-                                        SseSink sink, String styleHint, String sessionSummary) {
-        return generateReport(query, resources, sink, styleHint, sessionSummary, false);
-    }
-
-    /**
      * @param degraded true = 素材为搜索摘要级（抓取失败兜底），各节注入精简约束防虚构
-     */
-    public CuratedReport generateReport(String query, List<ScoredResource> resources,
-                                        SseSink sink, String styleHint, String sessionSummary,
-                                        boolean degraded) {
-        return generateReport(query, resources, sink, styleHint, sessionSummary, degraded, null);
-    }
-
-    /**
      * @param draftConsumer 报告生成过程中的草稿快照回调（每 5s 节流 + 节完成时触发），
      *                      内容与前端流式推送顺序/内容一致；null 表示不回调。
      *                      用于流式中断后前端直接拉取已生成部分（无感续流）
@@ -635,16 +602,6 @@ public class CuratorTools {
 
         List<String> sources = resources.stream().map(ScoredResource::getUrl).toList();
         return new CuratedReport(query, ensureClosedCodeBlocks(sb.toString()), sources, Instant.now());
-    }
-
-    /**
-     * 计算两个文本的 Jaccard 相似度（基于 3-gram）。
-     */
-    double jaccardSimilarity(String a, String b) {
-        if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
-            return 0.0;
-        }
-        return jaccardSimilarity(shingle(a), shingle(b));
     }
 
     private double jaccardSimilarity(Set<String> shinglesA, Set<String> shinglesB) {

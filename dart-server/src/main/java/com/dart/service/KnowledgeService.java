@@ -655,12 +655,6 @@ public class KnowledgeService {
         return a < b ? a + "|" + b : b + "|" + a;
     }
 
-    public boolean existsBySourceUrl(String sourceUrlHash) {
-        QueryWrapper<KnowledgeItem> query = new QueryWrapper<>();
-        query.eq("source_url_hash", sourceUrlHash).eq("is_deleted", 0);
-        return knowledgeItemMapper.selectCount(query) > 0;
-    }
-
     private KnowledgeItemVO toVO(KnowledgeItem item) {
         KnowledgeItemVO vo = new KnowledgeItemVO();
         vo.setId(item.getId());

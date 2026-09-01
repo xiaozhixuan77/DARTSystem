@@ -30,26 +30,6 @@ CREATE TABLE IF NOT EXISTS `user` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
 -- ============================================================
--- 2. refresh_token — JWT 刷新令牌表
--- ============================================================
-CREATE TABLE IF NOT EXISTS `refresh_token` (
-    `id`            BIGINT          NOT NULL AUTO_INCREMENT,
-    `user_id`       BIGINT          NOT NULL,
-    `token_hash`    VARCHAR(128)    NOT NULL COMMENT 'SHA-256(token原文)',
-    `device_info`   VARCHAR(500)    DEFAULT NULL COMMENT 'User-Agent摘要',
-    `expires_at`    DATETIME        NOT NULL,
-    `revoked`       TINYINT         NOT NULL DEFAULT 0 COMMENT '0=有效, 1=已撤销',
-    `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_token_hash` (`token_hash`),
-    KEY `idx_user_id` (`user_id`),
-    KEY `idx_user_revoked` (`user_id`, `revoked`),
-    KEY `idx_expires` (`expires_at`),
-    CONSTRAINT `fk_rt_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
-        ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
--- ============================================================
 -- 3. conversation — 会话表
 -- ============================================================
 CREATE TABLE IF NOT EXISTS `conversation` (

@@ -145,14 +145,6 @@ public class RagService {
         }
     }
 
-    public String generateAnswer(String query, List<RagChunk> chunks) {
-        return generateAnswer(query, chunks, List.of());
-    }
-
-    public String generateAnswer(String query, List<RagChunk> chunks, List<String> relatedContext) {
-        return generateAnswer(query, chunks, relatedContext, false);
-    }
-
     public String generateAnswer(String query, List<RagChunk> chunks, List<String> relatedContext,
                                  boolean strongEntityHit) {
         StringBuilder context = new StringBuilder();

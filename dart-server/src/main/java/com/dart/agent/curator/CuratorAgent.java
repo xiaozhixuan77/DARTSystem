@@ -4,7 +4,6 @@ import com.dart.broadcast.SseSink;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.exception.ErrorCode;
 import com.dart.util.SseEvents;
-import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,34 +21,6 @@ public class CuratorAgent {
 
     public CuratorAgent(CuratorTools curatorTools) {
         this.curatorTools = curatorTools;
-    }
-
-    public CuratedReport curate(String query, List<ScoredResource> searchResults, SseSink sink) {
-        return curate(query, searchResults, sink, null);
-    }
-
-    public CuratedReport curate(String query, List<ScoredResource> searchResults,
-                                SseSink sink, String intent) {
-        return curate(query, searchResults, sink, intent, null);
-    }
-
-    /**
-     * @param intent 查询意图（quick_fact/how_to/deep_dive/comparison/troubleshooting/non_tech），
-     *               透传给报告生成作为风格要求；null 表示无风格要求
-     * @param sessionSummary 会话滚动摘要（长记忆），供报告延续前文叙述；null 表示无历史
-     */
-    public CuratedReport curate(String query, List<ScoredResource> searchResults,
-                                SseSink sink, String intent, String sessionSummary) {
-        return curate(query, searchResults, sink, intent, sessionSummary, false);
-    }
-
-    /**
-     * @param degraded true = 素材为搜索摘要级（抓取失败兜底），报告精简约束注入
-     */
-    public CuratedReport curate(String query, List<ScoredResource> searchResults,
-                                SseSink sink, String intent, String sessionSummary,
-                                boolean degraded) {
-        return curate(query, searchResults, sink, intent, sessionSummary, degraded, null);
     }
 
     /**

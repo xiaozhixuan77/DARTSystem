@@ -20,10 +20,6 @@ public class QualityScorer {
     private final double weightM;
     private final double threshold;
 
-    public QualityScorer(double weightT, double weightA, double weightD, double weightM) {
-        this(weightT, weightA, weightD, weightM, 3.0);
-    }
-
     public QualityScorer(double weightT, double weightA, double weightD, double weightM, double threshold) {
         this.weightT = weightT;
         this.weightA = weightA;

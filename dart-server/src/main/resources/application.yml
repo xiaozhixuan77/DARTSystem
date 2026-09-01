@@ -80,12 +80,6 @@ conversation:
   cleanup:
     max-conversations-per-user: 50
 
-# JWT
-jwt:
-  secret: ${JWT_SECRET}
-  access-token-expiration: 7200
-  refresh-token-expiration: 604800
-
 # 无登录模式：请求头 X-User-Id 缺省时的用户数据池 user id
 app:
   default-user-id: 3

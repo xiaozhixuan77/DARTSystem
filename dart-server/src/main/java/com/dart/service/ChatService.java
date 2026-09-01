@@ -4,7 +4,6 @@ import com.dart.broadcast.SseSink;
 import com.dart.agent.IntentKeys;
 import com.dart.agent.curator.CuratedReport;
 import com.dart.agent.curator.CuratorAgent;
-import com.dart.agent.curator.CuratorTools;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.agent.search.SearchAgent;
 import com.dart.entity.Conversation;
@@ -95,20 +94,8 @@ public class ChatService {
         }
     }
 
-    public record QueryAnalysis(boolean isTech) {}
-
     public record QueryPreProcess(boolean isTech, String optimized, List<String> variants,
                                   String intent, boolean followUp, String optimizedEn) {}
-
-    /** 委托 QueryPreProcessor（保持对外 API 不变） */
-    public QueryPreProcess preProcessQuery(String query) {
-        return queryPreProcessor.preProcessQuery(query);
-    }
-
-    /** 委托 QueryPreProcessor（保持对外 API 不变） */
-    public QueryPreProcess preProcessQuery(String query, String summary) {
-        return queryPreProcessor.preProcessQuery(query, summary);
-    }
 
     /**
      * 执行完整的搜索-整理流程（供 SSE 端点调用）。

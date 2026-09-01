@@ -17,20 +17,6 @@ CREATE TABLE IF NOT EXISTS `user` (
     UNIQUE KEY `uk_username` (`username`)
 );
 
-CREATE TABLE IF NOT EXISTS `refresh_token` (
-    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
-    `user_id`       BIGINT       NOT NULL,
-    `token_hash`    VARCHAR(128) NOT NULL,
-    `device_info`   VARCHAR(500) DEFAULT NULL,
-    `expires_at`    TIMESTAMP    NOT NULL,
-    `revoked`       TINYINT      NOT NULL DEFAULT 0,
-    `created_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_token_hash` (`token_hash`),
-    KEY `idx_user_id` (`user_id`),
-    CONSTRAINT `fk_rt_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
-);
-
 CREATE TABLE IF NOT EXISTS `conversation` (
     `id`            BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`       BIGINT       NOT NULL,

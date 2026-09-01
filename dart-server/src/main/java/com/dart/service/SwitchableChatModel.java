@@ -71,10 +71,6 @@ public class SwitchableChatModel implements ChatModel {
         log.info("chat 模型已切换: baseUrl={}, model={}", baseUrl, model);
     }
 
-    /** 直接替换委托（测试与切换共用）。 */
-    public void switchDelegate(ChatModel model) {
-        this.delegate = model;
-    }
     public record ConnectionResult(boolean ok, long latencyMs, String error) {}
 
     /**

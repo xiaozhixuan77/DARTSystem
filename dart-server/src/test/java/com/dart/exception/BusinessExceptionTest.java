@@ -8,25 +8,25 @@ class BusinessExceptionTest {
 
     @Test
     void constructor_withErrorCodeOnly() {
-        BusinessException ex = new BusinessException(ErrorCode.USERNAME_EXISTS);
+        BusinessException ex = new BusinessException(ErrorCode.FORBIDDEN);
 
-        assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.USERNAME_EXISTS);
-        assertThat(ex.getMessage()).isEqualTo("用户名已存在");
+        assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.FORBIDDEN);
+        assertThat(ex.getMessage()).isEqualTo("无权访问");
         assertThat(ex.getSuggestion()).isNull();
     }
 
     @Test
     void constructor_withErrorCodeAndSuggestion() {
-        BusinessException ex = new BusinessException(ErrorCode.SEARCH_TIMEOUT, "请检查网络连接后重试");
+        BusinessException ex = new BusinessException(ErrorCode.NO_QUALITY_RESULTS, "请更换关键词后重试");
 
-        assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.SEARCH_TIMEOUT);
-        assertThat(ex.getMessage()).isEqualTo("搜索引擎响应超时，请稍后重试");
-        assertThat(ex.getSuggestion()).isEqualTo("请检查网络连接后重试");
+        assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.NO_QUALITY_RESULTS);
+        assertThat(ex.getMessage()).isEqualTo("未找到高质量资源，请尝试更换关键词");
+        assertThat(ex.getSuggestion()).isEqualTo("请更换关键词后重试");
     }
 
     @Test
     void isRuntimeException_subclass() {
-        BusinessException ex = new BusinessException(ErrorCode.INTERNAL_ERROR);
+        BusinessException ex = new BusinessException(ErrorCode.AGENT_EXECUTION_ERROR);
         assertThat(ex).isInstanceOf(RuntimeException.class);
     }
 }

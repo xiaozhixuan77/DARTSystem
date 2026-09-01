@@ -4,7 +4,6 @@ import com.dart.broadcast.SseSink;
 import com.dart.agent.scoring.ScoredResource;
 import com.dart.exception.ErrorCode;
 import com.dart.util.SseEvents;
-import com.dart.util.SseUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

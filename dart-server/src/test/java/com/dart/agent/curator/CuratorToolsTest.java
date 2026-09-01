@@ -894,7 +894,8 @@ class CuratorToolsTest {
                 .thenReturn(Flux.just(
                         new ChatResponse(List.of(new Generation(new AssistantMessage(SECTION_CONCEPT))))));
 
-        CuratedReport report = curatorTools.generateReport("Spring IoC", fourResources(), mock(SseSink.class));
+        CuratedReport report = curatorTools.generateReport("Spring IoC", fourResources(), mock(SseSink.class),
+                null, null, false, null);
 
         String md = report.markdown();
         // 节 3 标题之前的 fence 数为偶数 → 节 2 的代码块已在节内闭合，FAQ 未被渲染进代码区域

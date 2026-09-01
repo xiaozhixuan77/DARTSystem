@@ -15,20 +15,6 @@ CREATE TABLE IF NOT EXISTS `user` (
     UNIQUE KEY `uk_username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `refresh_token` (
-    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
-    `user_id`       BIGINT       NOT NULL,
-    `token_hash`    VARCHAR(128) NOT NULL COMMENT 'SHA-256(token)',
-    `device_info`   VARCHAR(500) DEFAULT NULL,
-    `expires_at`    DATETIME     NOT NULL,
-    `revoked`       TINYINT      NOT NULL DEFAULT 0 COMMENT '0=有效, 1=已撤销',
-    `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_token_hash` (`token_hash`),
-    KEY `idx_user_id` (`user_id`),
-    CONSTRAINT `fk_rt_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 CREATE TABLE IF NOT EXISTS `conversation` (
     `id`            BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`       BIGINT       NOT NULL,

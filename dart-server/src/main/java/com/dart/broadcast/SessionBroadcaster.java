@@ -37,14 +37,6 @@ public class SessionBroadcaster implements SseSink {
         this.conversationId = conversationId;
     }
 
-    public Long getConversationId() {
-        return conversationId;
-    }
-
-    public boolean isCompleted() {
-        return completed;
-    }
-
     /**
      * 新订阅者加入：重放状态事件序列 + content 快照，随后接收实时增量。
      * 已完成（与生成结束竞态）时直接 complete，不重放（done 事件已广播过）。

@@ -27,7 +27,6 @@ public class SearchTrace {
     private String searchKeywords;
     private Integer totalResults;
     private Integer filteredResults;
-    private String topScoresJson;
     private String curationType;
     private String fallbackReason;
     private Integer processingTimeMs;
