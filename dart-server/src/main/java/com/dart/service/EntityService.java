@@ -30,8 +30,10 @@ public class EntityService {
 
     /** 实体向量匹配阈值：概念向量与查询向量余弦低于此值不视为命中（实测可调）。 */
     private static final double ENTITY_VECTOR_THRESHOLD = 0.75;
-    /** 名称匹配最小实体名长度：防单字符名（V/C 等）误命中查询词。 */
-    private static final int MIN_NAME_LEN = 2;
+    /** 名称匹配最小实体名长度：防单字符（V/C）与 2 字符泛词（网络/网关/其他）误命中查询词。 */
+    private static final int MIN_NAME_LEN = 3;
+    /** 兜底主题（抽取白名单外的杂项分类）：无主题语义，禁止作为检索命中名。 */
+    private static final String FALLBACK_TOPIC = "其他";
 
     private final KnowledgeEntityMapper entityMapper;
     private final KnowledgeItemEntityMapper itemEntityMapper;
@@ -145,7 +147,8 @@ public class EntityService {
         List<Long> hitEntityIds = new ArrayList<>();
         for (KnowledgeEntity e : entities) {
             String name = e.getName();
-            if (name == null || name.length() < MIN_NAME_LEN) {
+            if (name == null || name.length() < MIN_NAME_LEN
+                    || FALLBACK_TOPIC.equals(name)) {
                 continue;
             }
             if (lowerQuery.contains(name.toLowerCase())) {

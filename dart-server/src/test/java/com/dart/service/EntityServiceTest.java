@@ -135,7 +135,8 @@ class EntityServiceTest {
     @Test
     void findItemsByEntityName_twoCharName_notMatched() {
         when(entityMapper.selectList(any())).thenReturn(List.of(entity(1L, "Go", "concept")));
-        when(itemEntityMapper.selectList(any())).thenReturn(List.of(assoc(10L, 1L)));
+        // lenient：实现过滤后不触达关联查询（旧实现命中时用；防 UnnecessaryStubbing）
+        lenient().when(itemEntityMapper.selectList(any())).thenReturn(List.of(assoc(10L, 1L)));
 
         // 2 字符泛词（网络/网关/其他 等）不再作为检索命中名（区分度不足，引发弱相关免阈值灌入）
         assertThat(service.findItemsByEntityName(1L, "go 语言教程 入门")).isEmpty();
@@ -144,7 +145,7 @@ class EntityServiceTest {
     @Test
     void findItemsByEntityName_fallbackTopic_notMatched() {
         when(entityMapper.selectList(any())).thenReturn(List.of(entity(1L, "其他", "topic")));
-        when(itemEntityMapper.selectList(any())).thenReturn(List.of(assoc(10L, 1L)));
+        lenient().when(itemEntityMapper.selectList(any())).thenReturn(List.of(assoc(10L, 1L)));
 
         // 兜底主题"其他"显式排除（无论长度）：泛化路由曾使"C#与其他语言的差别"命中 Java 教程
         assertThat(service.findItemsByEntityName(1L, "C#与其他语言的差别")).isEmpty();

@@ -49,6 +49,11 @@ public class RagService {
         this.topK = topK;
     }
 
+    /** 实体通道 chunk 相关度下限：实体命中的条目仍需 chunk 达到此值才入池（防泛词实体免阈值灌入）。
+     *  字段默认值保证测试直构建（非 Spring 注入）时生效。 */
+    @Value("${agent.rag.entity-chunk-threshold:0.45}")
+    private double entityChunkThreshold = 0.45;
+
     public record RagResult(String answer, List<String> sourceUrls, double maxSimilarity) {
         public RagResult(String answer, List<String> sourceUrls) {
             this(answer, sourceUrls, -1.0);
@@ -109,16 +114,23 @@ public class RagService {
             entityHitItemIds.addAll(entityService.matchEntitiesByVector(userId, queryVec));
 
             // 用 MySQL 中存储的向量计算余弦相似度（避免重复 Embedding API 调用）
+            // 实体命中条目：chunk 仍需 ≥ entityChunkThreshold（相对阈值，非完全免阈值，防泛词实体灌入）；
+            // 实体命中且达正常阈值才算强实体命中（材料充分，无标记直接回答）
             List<RagChunk> matched = new ArrayList<>();
+            boolean entityStrongHit = false;
             for (KnowledgeChunk c : chunks) {
                 KnowledgeItem item = itemMap.get(c.getKnowledgeItemId());
                 if (item == null || c.getEmbedding() == null) continue;
                 float[] chunkVec = com.dart.util.VectorUtils.decodeFromBase64(c.getEmbedding());
                 double similarity = com.dart.util.VectorUtils.cosineSimilarity(queryVec, chunkVec);
+                boolean entityHit = entityHitItemIds.contains(c.getKnowledgeItemId());
                 if (similarity >= similarityThreshold
-                        || entityHitItemIds.contains(c.getKnowledgeItemId())) {
+                        || (entityHit && similarity >= entityChunkThreshold)) {
                     matched.add(new RagChunk(c.getChunkText(), item.getTitle(),
                             item.getSourceUrl(), similarity));
+                    if (entityHit && similarity >= similarityThreshold) {
+                        entityStrongHit = true;
+                    }
                 }
             }
 
@@ -134,7 +146,7 @@ public class RagService {
 
             // 1-hop 知识图谱扩展：命中条目的关联知识拼入生成上下文
             List<String> relatedContext = loadRelatedContexts(itemMap);
-            String answer = generateAnswer(query, matched, relatedContext, !entityHitItemIds.isEmpty());
+            String answer = generateAnswer(query, matched, relatedContext, entityStrongHit);
             List<String> sources = matched.stream().map(RagChunk::sourceUrl).distinct().toList();
             return Optional.of(new RagResult(answer, sources, matched.getFirst().similarity()));
 

@@ -128,6 +128,8 @@ agent:
     deep-read-count: 4
   rag:
     similarity-threshold: 0.60
+    # 实体命中（名称/概念向量）条目的 chunk 仍需达到此相关度才入池（防泛词实体免阈值灌入）
+    entity-chunk-threshold: 0.45
     top-k: 5
   graph:
     # 知识条目跨条目关联的向量相似度阈值（标题子串通道不依赖此阈值）
