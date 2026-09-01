@@ -69,7 +69,7 @@ describe('useKnowledgeStore', () => {
       data: {
         id: 1, title: '详情标题', content: '# Markdown', sourceUrl: 'https://x.com',
         tags: 'Go', scoreT: 4, scoreA: 5, scoreD: 3, scoreM: 4,
-        notes: '', chunks: [], createdAt: '', updatedAt: ''
+        notes: '', createdAt: '', updatedAt: ''
       }
     })
 
@@ -111,7 +111,7 @@ describe('useKnowledgeStore', () => {
       data: {
         id: 1, title: 'x', content: '', sourceUrl: '', tags: '',
         scoreT: 0, scoreA: 0, scoreD: 0, scoreM: 0,
-        notes: '', chunks: [], createdAt: '', updatedAt: ''
+        notes: '', createdAt: '', updatedAt: ''
       }
     })
 
@@ -250,7 +250,7 @@ describe('useKnowledgeStore', () => {
       data: {
         id: 1, title: '旧标题', content: '# Markdown', sourceUrl: 'https://x.com',
         tags: 'Go', scoreT: 4, scoreA: 5, scoreD: 3, scoreM: 4,
-        notes: '', chunks: [], createdAt: '', updatedAt: ''
+        notes: '', createdAt: '', updatedAt: ''
       }
     })
     vi.mocked(updateKnowledge).mockResolvedValue({

@@ -385,7 +385,7 @@ describe('useChatStore', () => {
     }
   })
 
-  it('轮询等待超时后提示回答生成中断', async () => {
+  it('轮询等待超时后停止等待', async () => {
     vi.useFakeTimers()
     try {
       const now = new Date().toISOString()
@@ -397,11 +397,11 @@ describe('useChatStore', () => {
       const store = useChatStore()
       await store.selectConversation(1)
 
-      // 后端完整生成（搜索 + 三节流式 + 追问）实测最长 6.5 分钟：5 分钟时仍在等待不报错
+      // 后端完整生成（搜索 + 三节流式 + 追问）实测最长 6.5 分钟：5 分钟时继续等待
       await vi.advanceTimersByTimeAsync(300_000)
-      expect(store.error).toBeNull()
-      await vi.advanceTimersByTimeAsync(300_000)
-      expect(store.error).toContain('生成中')
+      expect(store.waitingResume).toBe(true)
+      await vi.advanceTimersByTimeAsync(300_001)
+      expect(store.waitingResume).toBe(false)
     } finally {
       vi.useRealTimers()
     }

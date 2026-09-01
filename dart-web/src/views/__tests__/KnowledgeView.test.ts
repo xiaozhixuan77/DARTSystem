@@ -140,7 +140,7 @@ describe('KnowledgeView.vue', () => {
       data: {
         id: 1, title: 'Go 并发模式', content: '# Markdown', sourceUrl: 'https://go.dev',
         tags: 'Go', scoreT: 4, scoreA: 5, scoreD: 4, scoreM: 5,
-        notes: '', chunks: [], createdAt: '', updatedAt: ''
+        notes: '', createdAt: '', updatedAt: ''
       }
     })
     const wrapper = mountView()

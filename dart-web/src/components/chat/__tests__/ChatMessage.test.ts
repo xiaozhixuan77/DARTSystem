@@ -76,6 +76,15 @@ describe('ChatMessage.vue', () => {
     expect(wrapper.find('.generating-badge').exists()).toBe(false)
   })
 
+  it('metadata 含 draft 字样但不为草稿标记时不算草稿', () => {
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: { id: 2, role: 'assistant', content: '完整报告', metadata: '{"foo":"drafting"}' as any, createdAt: '' }
+      }
+    })
+    expect(wrapper.find('.generating-badge').exists()).toBe(false)
+  })
+
   it('助手消息渲染 Markdown', () => {
     const wrapper = mount(ChatMessage, {
       props: {

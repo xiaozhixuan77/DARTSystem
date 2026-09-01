@@ -48,7 +48,7 @@ describe('KnowledgeEditDialog.vue', () => {
     id: 1, title: 'Go 并发', content: '# 内容',
     sourceUrl: 'https://go.dev', tags: 'Go, 并发',
     scoreT: 4, scoreA: 5, scoreD: 3, scoreM: 4,
-    notes: '学习笔记', chunks: [],
+    notes: '学习笔记',
     createdAt: '2026-01-01', updatedAt: '2026-07-01'
   }
 

@@ -31,29 +31,20 @@ describe('SessionContextMenu.vue', () => {
     expect(menu.attributes('style')).toContain('top: 300px')
   })
 
-  it('包含重命名和删除选项', () => {
+  it('包含删除选项', () => {
     const wrapper = mount(SessionContextMenu, {
       props: { visible: true, x: 0, y: 0, conversationTitle: 'Test' }
     })
     const items = wrapper.findAll('.menu-item')
-    expect(items).toHaveLength(2)
-    expect(items[0].text()).toContain('重命名')
-    expect(items[1].text()).toContain('删除')
-  })
-
-  it('点击重命名触发 rename 事件', async () => {
-    const wrapper = mount(SessionContextMenu, {
-      props: { visible: true, x: 0, y: 0, conversationTitle: 'Test' }
-    })
-    await wrapper.findAll('.menu-item')[0].trigger('click')
-    expect(wrapper.emitted('rename')).toBeTruthy()
+    expect(items).toHaveLength(1)
+    expect(items[0].text()).toContain('删除')
   })
 
   it('点击删除触发 delete 事件', async () => {
     const wrapper = mount(SessionContextMenu, {
       props: { visible: true, x: 0, y: 0, conversationTitle: 'Test' }
     })
-    await wrapper.findAll('.menu-item')[1].trigger('click')
+    await wrapper.findAll('.menu-item')[0].trigger('click')
     expect(wrapper.emitted('delete')).toBeTruthy()
   })
 
@@ -61,7 +52,7 @@ describe('SessionContextMenu.vue', () => {
     const wrapper = mount(SessionContextMenu, {
       props: { visible: true, x: 0, y: 0, conversationTitle: 'Test' }
     })
-    const deleteItem = wrapper.findAll('.menu-item')[1]
+    const deleteItem = wrapper.findAll('.menu-item')[0]
     expect(deleteItem.classes()).toContain('danger')
   })
 })

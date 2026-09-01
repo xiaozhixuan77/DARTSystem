@@ -5,7 +5,7 @@ import type { KnowledgeItemDetail } from '@/types/knowledge'
 const item: KnowledgeItemDetail = {
   id: 1, title: 'Go 并发模式', content: '# 正文\n\n内容段落', sourceUrl: 'https://go.dev',
   tags: 'Go,并发', scoreT: 4, scoreA: 5, scoreD: 4, scoreM: 5,
-  notes: '学习笔记', chunks: [], createdAt: '2026-01-01 10:00', updatedAt: ''
+  notes: '学习笔记', createdAt: '2026-01-01 10:00', updatedAt: ''
 }
 
 describe('buildMarkdownExport', () => {
