@@ -78,6 +78,7 @@ class ChatServiceTest {
     @Mock
     private TransactionTemplate transactionTemplate;
 
+    private QueryPreProcessor queryPreProcessor;
     private ChatService chatService;
     private SseSink sink;
     private EntityExtractionService entityExtractionService;
@@ -90,7 +91,7 @@ class ChatServiceTest {
     @BeforeEach
     void setUp() {
         // 职责类传真实实例（内部依赖复用本类 mock），拆分后行为与拆分前一致
-        QueryPreProcessor queryPreProcessor = new QueryPreProcessor(chatModel, embeddingService);
+        queryPreProcessor = new QueryPreProcessor(chatModel, embeddingService);
         MessagePersistenceService messagePersistenceService =
                 new MessagePersistenceService(messageMapper, transactionTemplate);
         ChatCacheService chatCacheService = new ChatCacheService(redisTemplate, messagePersistenceService);
@@ -554,7 +555,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"如何在 Spring Boot 中配置多数据源\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("怎么配多数据源");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("怎么配多数据源");
         assertThat(pre.isTech()).isTrue();
         assertThat(pre.optimized()).isEqualTo("如何在 Spring Boot 中配置多数据源");
         verify(chatModel, times(1)).call(any(org.springframework.ai.chat.prompt.Prompt.class));
@@ -566,7 +567,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":false,\"optimized\":\"\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("今天天气怎么样?");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("今天天气怎么样?");
         assertThat(pre.isTech()).isFalse();
     }
 
@@ -575,7 +576,7 @@ class ChatServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
                 .thenThrow(new RuntimeException("timeout"));
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("query");
         assertThat(pre.isTech()).isTrue();
         assertThat(pre.optimized()).isEqualTo("query");
     }
@@ -586,7 +587,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("query");
         assertThat(pre.isTech()).isTrue();
         assertThat(pre.optimized()).isEqualTo("query");
     }
@@ -597,7 +598,7 @@ class ChatServiceTest {
                 new AssistantMessage("不稳定的输出文本，无法解析"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("query");
         assertThat(pre.isTech()).isTrue();
         assertThat(pre.optimized()).isEqualTo("query");
     }
@@ -609,7 +610,7 @@ class ChatServiceTest {
                         + "\"variants\":[\"Spring Boot 双数据源 教程\",\"Spring Boot DataSource 原理\"]}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("怎么配多数据源");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("怎么配多数据源");
         assertThat(pre.isTech()).isTrue();
         assertThat(pre.variants()).containsExactly("Spring Boot 双数据源 教程", "Spring Boot DataSource 原理");
     }
@@ -621,7 +622,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化后的技术问题描述\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("query");
         assertThat(pre.variants()).isEmpty();
     }
 
@@ -632,7 +633,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化词\",\"variants\":[\"未闭合\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("query");
         assertThat(pre.isTech()).isTrue();
         assertThat(pre.optimized()).isEqualTo("优化词");
         assertThat(pre.variants()).isEmpty();
@@ -645,7 +646,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Java 内存模型");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("Java 内存模型");
         assertThat(pre.intent()).isEqualTo("deep_dive");
     }
 
@@ -656,7 +657,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化后的技术问题描述\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("query");
         assertThat(pre.intent()).isEqualTo("how_to");
     }
 
@@ -667,7 +668,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"优化词\",\"intent\":\"deep_dive}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("query");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("query");
         assertThat(pre.intent()).isEqualTo("how_to");
     }
 
@@ -678,7 +679,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":false,\"optimized\":\"\",\"intent\":\"how_to\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("今天天气怎么样?");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("今天天气怎么样?");
         assertThat(pre.isTech()).isFalse();
         assertThat(pre.intent()).isEqualTo("non_tech");
     }
@@ -693,7 +694,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"how_to\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("学习微服务");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("学习微服务");
         assertThat(pre.optimizedEn()).isEqualTo("microservices learning path Spring Cloud");
     }
 
@@ -704,7 +705,7 @@ class ChatServiceTest {
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"Java 多线程 教程\",\"variants\":[]}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Java 多线程");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("Java 多线程");
         assertThat(pre.optimizedEn()).isNull();
     }
 
@@ -716,7 +717,7 @@ class ChatServiceTest {
                         + "\"optimizedEn\":\"microservices 学习路线\",\"variants\":[]}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("学习微服务");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("学习微服务");
         assertThat(pre.optimizedEn()).isNull();
     }
 
@@ -890,7 +891,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"comparison\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.preProcessQuery("现在主流的Agent系统技术架构", "");
+        queryPreProcessor.preProcessQuery("现在主流的Agent系统技术架构", "");
 
         ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
                 ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
@@ -909,7 +910,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"how_to\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("那个缓存怎么搞", "");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("那个缓存怎么搞", "");
         assertThat(pre.optimized()).contains("Redis");
         assertThat(pre.optimized()).contains("Memcached");
     }
@@ -922,7 +923,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("三级缓存", "");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("三级缓存", "");
         assertThat(pre.optimized()).contains("Spring");
     }
 
@@ -934,7 +935,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("三级缓存", "");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("三级缓存", "");
         assertThat(pre.optimized()).contains("Spring");
         assertThat(pre.optimized()).doesNotContain("Redis");
         assertThat(pre.optimized()).doesNotContain("Memcached");
@@ -948,7 +949,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"comparison\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Redis 和 Memcached 怎么选", "");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("Redis 和 Memcached 怎么选", "");
         assertThat(pre.optimized()).isEqualTo("Redis Memcached 缓存选型 对比");
     }
 
@@ -960,7 +961,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.preProcessQuery("云原生与微服务开发", "");
+        queryPreProcessor.preProcessQuery("云原生与微服务开发", "");
 
         ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
                 ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
@@ -978,7 +979,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":false}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.preProcessQuery("接着讲讲它", "主题：Spring IoC\n已讨论：三级缓存");
+        queryPreProcessor.preProcessQuery("接着讲讲它", "主题：Spring IoC\n已讨论：三级缓存");
 
         ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
                 ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
@@ -996,7 +997,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.preProcessQuery("Spring 三级缓存", "");
+        queryPreProcessor.preProcessQuery("Spring 三级缓存", "");
 
         ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
                 ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
@@ -1013,7 +1014,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"followup\",\"isFollowUp\":true}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("为什么不行", "主题：Spring IoC\n关键结论：三级缓存");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("为什么不行", "主题：Spring IoC\n关键结论：三级缓存");
         assertThat(pre.followUp()).isTrue();
         assertThat(pre.intent()).isEqualTo("followup");
     }
@@ -1026,7 +1027,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Spring 三级缓存", "主题：Spring IoC");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("Spring 三级缓存", "主题：Spring IoC");
         assertThat(pre.followUp()).isFalse();
     }
 
@@ -1038,7 +1039,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":maybe}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Spring 三级缓存", "");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("Spring 三级缓存", "");
         assertThat(pre.followUp()).isFalse();
     }
 
@@ -1049,7 +1050,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":false}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.preProcessQuery("Spring 三级缓存", "");
+        queryPreProcessor.preProcessQuery("Spring 三级缓存", "");
 
         ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
                 ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
@@ -1069,7 +1070,7 @@ class ChatServiceTest {
                         + "\"variants\":[],\"intent\":\"deep_dive\",\"isFollowUp\":false}"))));
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
-        chatService.preProcessQuery("当前构建AI Agent知识库的主流技术架构有哪些？包括RAG流程、向量数据库、Embedding模型等技术选型", "");
+        queryPreProcessor.preProcessQuery("当前构建AI Agent知识库的主流技术架构有哪些？包括RAG流程、向量数据库、Embedding模型等技术选型", "");
 
         ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
                 ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);

@@ -135,7 +135,8 @@ class EvaluationRunnerTest {
             if (results.isEmpty()) {
                 answer = "（无搜索结果）";
             } else {
-                CuratedReport report = curatorAgent.curate(q.query(), results, mock(SseSink.class));
+                CuratedReport report = curatorAgent.curate(q.query(), results, mock(SseSink.class),
+                        null, null, false, null);
                 answer = report.markdown();
             }
         } catch (Exception e) {

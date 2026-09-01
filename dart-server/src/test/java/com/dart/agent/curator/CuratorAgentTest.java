@@ -49,7 +49,7 @@ class CuratorAgentTest {
         when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull())).thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
-        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink);
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, null, null, false, null);
         assertThat(report).isNotNull();
         verify(curatorTools).deduplicate(anyList());
         verify(curatorTools).generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull());
@@ -65,7 +65,7 @@ class CuratorAgentTest {
         when(curatorTools.generateReport(anyString(), anyList(), any(), eq("deep_dive"), isNull(), eq(false), isNull())).thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
-        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, "deep_dive");
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, "deep_dive", null, false, null);
 
         assertThat(report).isNotNull();
         verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("deep_dive"), isNull(), eq(false), isNull());
@@ -81,7 +81,7 @@ class CuratorAgentTest {
         when(curatorTools.validateReport(any())).thenReturn(true);
 
         // 3 参入口 → 4 参委托（styleHint=null, sessionSummary=null）
-        curatorAgent.curate("query", List.of(r1), sink);
+        curatorAgent.curate("query", List.of(r1), sink, null, null, false, null);
 
         verify(curatorTools).generateReport(anyString(), anyList(), any(), isNull(), isNull(), eq(false), isNull());
     }
@@ -96,7 +96,7 @@ class CuratorAgentTest {
                 .thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
-        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, "deep_dive", "主题：Spring IoC");
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, "deep_dive", "主题：Spring IoC", false, null);
 
         assertThat(report).isNotNull();
         verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("deep_dive"), eq("主题：Spring IoC"), eq(false), isNull());
@@ -113,7 +113,7 @@ class CuratorAgentTest {
         when(curatorTools.validateReport(invalidReport)).thenReturn(false);
         when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(fallback);
 
-        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink);
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, null, null, false, null);
         assertThat(report.markdown()).contains("Fallback");
     }
 
@@ -130,7 +130,7 @@ class CuratorAgentTest {
         // 用 record 实例匹配依赖两个 Instant.now() 相等（Windows 时钟粒度侥幸通过，其他平台随机失败）
         when(curatorTools.validateReport(argThat(r -> r.markdown().contains("重写报告")))).thenReturn(true);
 
-        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink);
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, null, null, false, null);
 
         // 重写报告替换无效报告，不再降级纯列表
         assertThat(report.markdown()).contains("重写报告");
@@ -150,7 +150,7 @@ class CuratorAgentTest {
         when(curatorTools.regenerateReport(anyString(), anyList())).thenReturn(null);
         when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(fallback);
 
-        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink);
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, null, null, false, null);
         assertThat(report.markdown()).contains("Fallback");
     }
 
@@ -167,7 +167,7 @@ class CuratorAgentTest {
                 .thenReturn("# 仍然过短");
         when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(fallback);
 
-        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink);
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, null, null, false, null);
         // 重写内容仍校验失败 → 最终降级 fallback
         assertThat(report.markdown()).contains("Fallback");
     }
@@ -179,7 +179,7 @@ class CuratorAgentTest {
         CuratedReport emptyReport = new CuratedReport("query", "无结果", List.of(), Instant.now());
         when(curatorTools.fallbackReport(anyString(), anyList())).thenReturn(emptyReport);
 
-        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink);
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, null, null, false, null);
         assertThat(report).isNotNull();
         verify(curatorTools, never()).generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull());
     }
@@ -193,7 +193,7 @@ class CuratorAgentTest {
         when(curatorTools.generateReport(anyString(), anyList(), any(), any(), isNull(), eq(false), isNull())).thenReturn(expected);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
-        curatorAgent.curate("query", List.of(r1), sink);
+        curatorAgent.curate("query", List.of(r1), sink, null, null, false, null);
         verify(sink, atLeastOnce()).sendEvent(any(), any());
     }
 
@@ -207,7 +207,7 @@ class CuratorAgentTest {
                 .thenReturn(expectedReport);
         when(curatorTools.validateReport(any())).thenReturn(true);
 
-        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, "how_to", null, true);
+        CuratedReport report = curatorAgent.curate("query", List.of(r1), sink, "how_to", null, true, null);
 
         assertThat(report).isNotNull();
         verify(curatorTools).generateReport(anyString(), anyList(), any(), eq("how_to"), isNull(), eq(true), isNull());

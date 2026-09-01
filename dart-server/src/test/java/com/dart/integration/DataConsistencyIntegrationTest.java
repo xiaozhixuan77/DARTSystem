@@ -150,8 +150,8 @@ class DataConsistencyIntegrationTest extends BaseIntegrationTest {
 
         embeddingService.embedAndPersist(testUserId, "Unique", "Content.", sourceUrl, scores, "操作指南");
 
-        boolean exists = knowledgeService.existsBySourceUrl(sha256(sourceUrl));
-        assertThat(exists).isTrue();
+        assertThat(knowledgeItemMapper.selectList(new QueryWrapper<KnowledgeItem>()
+                .eq("source_url", sha256(sourceUrl)))).isNotEmpty();
     }
 
     // ────────── 新增：双写异常场景 ──────────

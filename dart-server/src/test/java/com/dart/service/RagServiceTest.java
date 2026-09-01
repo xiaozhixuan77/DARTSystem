@@ -192,7 +192,7 @@ class RagServiceTest {
         when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
         RagService.RagChunk chunk = new RagService.RagChunk("Content", "Title", "https://x.com", 0.90);
-        String answer = ragService.generateAnswer("什么是Spring Boot?", List.of(chunk));
+        String answer = ragService.generateAnswer("什么是Spring Boot?", List.of(chunk), List.of(), false);
         assertThat(answer).contains("Spring Boot");
     }
 
@@ -202,7 +202,7 @@ class RagServiceTest {
                 .thenThrow(new RuntimeException("timeout"));
 
         RagService.RagChunk chunk = new RagService.RagChunk("Content", "Title", "https://x.com", 0.90);
-        String answer = ragService.generateAnswer("query", List.of(chunk));
+        String answer = ragService.generateAnswer("query", List.of(chunk), List.of(), false);
         assertThat(answer).contains("query");
     }
 
@@ -232,7 +232,7 @@ class RagServiceTest {
         List<RagService.RagChunk> chunks = List.of(
                 new RagService.RagChunk("c1", "t1", "https://a.com", 0.95),
                 new RagService.RagChunk("c2", "t2", "https://b.com", 0.85));
-        String answer = ragService.generateAnswer("query", chunks);
+        String answer = ragService.generateAnswer("query", chunks, List.of(), false);
         assertThat(answer).contains("综合回答");
     }
 
@@ -448,7 +448,7 @@ class RagServiceTest {
 
         RagService.RagChunk chunk = new RagService.RagChunk("c1", "t1", "https://a.com", 0.95);
         String answer = ragService.generateAnswer("query", List.of(chunk),
-                List.of("Spring Framework 原理 | Spring Framework 是 Spring Boot 的基础..."));
+                List.of("Spring Framework 原理 | Spring Framework 是 Spring Boot 的基础..."), false);
 
         assertThat(answer).contains("综合回答");
         ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =

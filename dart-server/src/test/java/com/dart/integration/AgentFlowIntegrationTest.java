@@ -12,6 +12,7 @@ import com.dart.service.ChatService;
 import com.dart.service.EmbeddingService;
 import com.dart.service.EntityExtractionService;
 import com.dart.service.EntityService;
+import com.dart.service.QueryPreProcessor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,9 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private ChatService chatService;
+
+    @Autowired
+    private QueryPreProcessor queryPreProcessor;
 
     @Autowired
     private EmbeddingService embeddingService;
@@ -172,7 +176,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
         when(chatModel.call(any(Prompt.class)))
                 .thenThrow(new RuntimeException("LLM timeout"));
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Spring Boot 配置问题");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("Spring Boot 配置问题");
         assertThat(pre.isTech()).isTrue();
         assertThat(pre.optimized()).isEqualTo("Spring Boot 配置问题");
     }
@@ -185,7 +189,7 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
                         List.of(new Generation(new AssistantMessage(
                                 "{\"isTech\":true,\"optimized\":\"Spring Boot configuration\"}")))));
 
-        ChatService.QueryPreProcess pre = chatService.preProcessQuery("Spring Boot configuration");
+        ChatService.QueryPreProcess pre = queryPreProcessor.preProcessQuery("Spring Boot configuration");
         assertThat(pre.isTech()).isTrue();
         assertThat(pre.optimized()).isEqualTo("Spring Boot configuration");
     }

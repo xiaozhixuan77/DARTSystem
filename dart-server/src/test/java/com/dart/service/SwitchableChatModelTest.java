@@ -7,6 +7,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.context.ApplicationContext;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -22,7 +23,7 @@ class SwitchableChatModelTest {
         when(mock.call(any(Prompt.class))).thenReturn(resp);
         SwitchableChatModel model = new SwitchableChatModel(
                 mock(ApiConfigService.class), mock(ApplicationContext.class));
-        model.switchDelegate(mock);
+        ReflectionTestUtils.setField(model, "delegate", mock);
 
         assertThat(model.call(new Prompt("msg"))).isSameAs(resp);
     }
@@ -33,7 +34,7 @@ class SwitchableChatModelTest {
         when(mock.stream(any(Prompt.class))).thenReturn(reactor.core.publisher.Flux.empty());
         SwitchableChatModel model = new SwitchableChatModel(
                 mock(ApiConfigService.class), mock(ApplicationContext.class));
-        model.switchDelegate(mock);
+        ReflectionTestUtils.setField(model, "delegate", mock);
 
         assertThat(model.stream(new Prompt("msg"))).isNotNull();
     }
@@ -50,7 +51,7 @@ class SwitchableChatModelTest {
                 mock(ApiConfigService.class), mock(ApplicationContext.class));
 
         // 模拟切换（封装 build 的分叉点：switchTo 内部重建后委托新模型）
-        model.switchDelegate(second);
+        ReflectionTestUtils.setField(model, "delegate", second);
 
         assertThat(model.call(new Prompt("x")).getResults().getFirst().getOutput().getText())
                 .isEqualTo("second");

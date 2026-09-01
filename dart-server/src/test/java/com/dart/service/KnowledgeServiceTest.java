@@ -861,16 +861,4 @@ class KnowledgeServiceTest {
         assertThatThrownBy(() -> knowledgeService.getGraphData(1L, 99L))
                 .hasMessageContaining("不存在");
     }
-
-    @Test
-    void existsBySourceUrl_found() {
-        when(knowledgeItemMapper.selectCount(any(QueryWrapper.class))).thenReturn(1L);
-        assertThat(knowledgeService.existsBySourceUrl("abc123")).isTrue();
-    }
-
-    @Test
-    void existsBySourceUrl_notFound() {
-        when(knowledgeItemMapper.selectCount(any(QueryWrapper.class))).thenReturn(0L);
-        assertThat(knowledgeService.existsBySourceUrl("unknown")).isFalse();
-    }
 }

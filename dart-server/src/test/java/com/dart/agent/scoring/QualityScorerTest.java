@@ -16,7 +16,7 @@ class QualityScorerTest {
 
     @BeforeEach
     void setUp() {
-        scorer = new QualityScorer(WT, WA, WD, WM);
+        scorer = new QualityScorer(WT, WA, WD, WM, 3.0);
     }
 
     @Test
