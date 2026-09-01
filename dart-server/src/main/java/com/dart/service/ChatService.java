@@ -83,9 +83,6 @@ public class ChatService {
                                String followUpAnswer) {
         public boolean isRagHit() { return ragAnswer != null; }
         public boolean isFollowUpHit() { return followUpAnswer != null; }
-        public static SearchResult ragHit(RagService.RagResult answer) {
-            return new SearchResult(answer, null, List.of(), null);
-        }
         public static SearchResult searchResult(CuratedReport report, List<ScoredResource> resources) {
             return new SearchResult(null, report, resources, null);
         }
@@ -200,24 +197,17 @@ public class ChatService {
                 log.warn("RAG 检索异常，继续搜索流程", e);
                 ragResult = Optional.empty();
             }
-            if (ragResult.isPresent()
-                    && !ragResult.get().answer().contains(RagService.RAG_INSUFFICIENT_MARKER)) {
-                SearchResult result = SearchResult.ragHit(ragResult.get());
-                sink.sendEvent(SseEvents.CONTENT, result.ragAnswer().answer());
-                messagePersistenceService.persistAssistantMessage(conversationId, result);
-                recordTrace(userId, conversationId, userMsg.getId(), effectiveQuery, pre.intent(),
-                        true, ragResult.get().maxSimilarity(), effectiveQuery,
-                        List.of(), "rag", null, startNanos);
-                // RAG 命中也有问答产生 → 更新会话摘要（异步，不阻塞）
-                conversationSummaryService.updateSummary(userId, conversationId,
-                        query, result.ragAnswer().answer());
-                return result;
-            }
             if (ragResult.isPresent()) {
-                // RAG 命中但回答标记材料不足（弱相关擦线命中）→ 降级用并行搜索的结果，不短路
+                RagService.RagResult hit = ragResult.get();
+                if (!hit.weakHit()) {
+                    // RAG 强命中：知识库材料走 Curator 三节完整生成（输出与搜索路径同构），短路搜索
+                    return completeRagHit(hit, effectiveQuery, query, sink, pre.intent(),
+                            userId, conversationId, userMsg.getId(), startNanos);
+                }
+                // RAG 弱命中（材料不足）→ 降级用并行搜索的结果，不短路
                 ragDegraded = true;
-                log.info("RAG 回答材料不足，降级搜索: query={}, maxSimilarity={}",
-                        effectiveQuery, ragResult.get().maxSimilarity());
+                log.info("RAG 材料不足，降级搜索: query={}, maxSimilarity={}",
+                        effectiveQuery, hit.maxSimilarity());
             }
 
             try {
@@ -301,7 +291,7 @@ public class ChatService {
         // 报告经独立事务落库成功后，直接同步执行追问/缓存/沉淀（保持"落库成功才追问"语义）
         if (assistantMessage != null) {
             generateFollowUpAndUpdate(assistantMessage, report, query, sink,
-                    userId, pre.intent(), degraded);
+                    userId, pre.intent(), degraded, true);
         }
         return result;
     }
@@ -311,9 +301,46 @@ public class ChatService {
      * 整体失败仅告警，不影响报告主流程。degraded（低质兜底）时跳过追问/缓存/沉淀：
      * 低质内容上生成追问=双重低质；低质报告污染知识库与 24h 缓存。
      */
+    /**
+     * RAG 强命中：复用 Curator 三节完整生成（材料=知识库命中条目），输出与搜索路径同构。
+     * 不沉淀/不写缓存（RAG 材料源自知识库自身，回灌无意义）；追问与摘要照常。
+     */
+    private SearchResult completeRagHit(RagService.RagResult hit, String effectiveQuery,
+                                        String userQuery, SseSink sink, String intent,
+                                        Long userId, Long conversationId, Long userMsgId,
+                                        long startNanos) {
+        Message ragDraft = messagePersistenceService.persistAssistantDraft(conversationId);
+        CuratedReport report;
+        try {
+            String sessionSummary = null;
+            try {
+                sessionSummary = conversationSummaryService.getSummary(userId, conversationId);
+            } catch (Exception e) {
+                log.warn("会话摘要读取失败（RAG 路径），报告不带历史上下文: conversationId={}", conversationId, e);
+            }
+            report = curatorAgent.curate(effectiveQuery, hit.materials(), sink,
+                    intent, sessionSummary, false,
+                    draft -> messagePersistenceService.updateAssistantDraft(
+                            ragDraft == null ? null : ragDraft.getId(), draft));
+        } catch (Exception e) {
+            log.error("Curator Agent 异常（RAG 材料）", e);
+            report = buildFallbackReport(effectiveQuery, hit.materials());
+        }
+        SearchResult result = new SearchResult(hit, report, hit.materials(), null);
+        recordTrace(userId, conversationId, userMsgId, effectiveQuery, intent,
+                true, hit.maxSimilarity(), effectiveQuery, hit.materials(), "rag", null, startNanos);
+        Message assistantMessage = messagePersistenceService.completeAssistantMessage(
+                ragDraft, conversationId, result);
+        if (assistantMessage != null) {
+            generateFollowUpAndUpdate(assistantMessage, report, userQuery, sink,
+                    userId, intent, false, false);
+        }
+        return result;
+    }
+
     private void generateFollowUpAndUpdate(Message assistantMessage, CuratedReport report,
                                            String query, SseSink sink, Long userId,
-                                           String intent, boolean degraded) {
+                                           String intent, boolean degraded, boolean persistReport) {
         String markdown = report.markdown();
         try {
             if (!degraded) {
@@ -332,7 +359,7 @@ public class ChatService {
         } catch (Exception e) {
             log.warn("追问生成失败", e);
         } finally {
-            if (!degraded) {
+            if (!degraded && persistReport) {
                 chatCacheService.writeCache(userId, query, markdown, report.sources());
                 sedimentService.sedimentReport(userId, report.title(), query, markdown,
                         report.sources(), intent);

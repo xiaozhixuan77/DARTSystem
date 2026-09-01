@@ -1,5 +1,6 @@
 package com.dart.service;
 
+import com.dart.agent.scoring.ScoredResource;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
 import com.dart.entity.KnowledgeRelation;
@@ -51,7 +52,7 @@ class RagServiceTest {
     void setUp() {
         ragService = new RagService(embeddingService, chatModel, knowledgeItemMapper,
                 knowledgeChunkMapper, relationMapper, entityService, 0.80, 5);
-        // 实体通道默认无命中（lenient：纯 generateAnswer 用例不触发 retrieve）
+        // 实体通道默认无命中（lenient：未声明实体命中的 retrieve 用例不触发）
         lenient().when(entityService.findItemsByEntityName(any(), any())).thenReturn(java.util.Set.of());
         lenient().when(entityService.matchEntitiesByVector(any(), any())).thenReturn(java.util.Set.of());
     }
@@ -134,25 +135,18 @@ class RagServiceTest {
         when(entityService.findItemsByEntityName(1L, "Redis 缓存淘汰策略"))
                 .thenReturn(java.util.Set.of(1L));
         when(entityService.matchEntitiesByVector(eq(1L), any())).thenReturn(java.util.Set.of());
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("基于知识库的回答"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
         Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
 
-        // 实体通道放行（≥0.45）但未达正常阈值（0.80）→ 不算强实体命中：
-        // LLM 被指示输出"材料不足"标记 → ChatService 检测标记后降级搜索（不短路）
+        // 实体通道放行（≥0.45）但未达正常阈值（0.80）→ weakHit=true（材料不足）
+        // ChatService 据此降级搜索（不再短路）
         assertThat(result).isPresent();
-        assertThat(result.get().answer()).isEqualTo("基于知识库的回答");
-        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
-                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-        verify(chatModel).call(captor.capture());
-        assertThat(captor.getValue().getInstructions().getFirst().getText())
-                .contains(RagService.RAG_INSUFFICIENT_MARKER);
+        assertThat(result.get().weakHit()).isTrue();
+        assertThat(result.get().materials()).hasSize(1);
     }
 
     @Test
-    void retrieve_entityHit_strongSimilarity_skipsInsufficiencyInstruction() {
+    void retrieve_entityHit_strongSimilarity_notWeak() {
         float[] emb = new float[1024];
         java.util.Arrays.fill(emb, 1.0f);
         when(embeddingService.embed(anyString())).thenReturn(emb);
@@ -177,19 +171,13 @@ class RagServiceTest {
         when(entityService.findItemsByEntityName(1L, "Redis 缓存淘汰策略"))
                 .thenReturn(java.util.Set.of(1L));
         when(entityService.matchEntitiesByVector(eq(1L), any())).thenReturn(java.util.Set.of());
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("基于知识库的回答"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
 
         Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
 
-        // 实体命中且 chunk 达到正常阈值 → 强实体命中，不注入"材料不足"标记（回归锁定）
+        // 实体命中且 chunk 达到正常阈值 → 强实体命中（weakHit=false，RAG 直答，回归锁定）
         assertThat(result).isPresent();
-        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
-                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-        verify(chatModel).call(captor.capture());
-        assertThat(captor.getValue().getInstructions().getFirst().getText())
-                .doesNotContain(RagService.RAG_INSUFFICIENT_MARKER);
+        assertThat(result.get().weakHit()).isFalse();
+        assertThat(result.get().materials()).hasSize(1);
     }
 
     @Test
@@ -247,10 +235,6 @@ class RagServiceTest {
                 com.dart.util.VectorUtils.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("Spring Boot 是一个框架"))));
-
         Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
         assertThat(result).isPresent();
 
@@ -270,57 +254,6 @@ class RagServiceTest {
 
         Optional<RagService.RagResult> result = ragService.retrieve("unknown query", 1L);
         assertThat(result).isEmpty();
-    }
-
-    @Test
-    void generateAnswer_returnsLLMResponse() {
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("基于知识库内容，Spring Boot 是一个..."))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-
-        RagService.RagChunk chunk = new RagService.RagChunk("Content", "Title", "https://x.com", 0.90);
-        String answer = ragService.generateAnswer("什么是Spring Boot?", List.of(chunk), List.of(), false);
-        assertThat(answer).contains("Spring Boot");
-    }
-
-    @Test
-    void generateAnswer_llmThrows_returnsFallback() {
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
-                .thenThrow(new RuntimeException("timeout"));
-
-        RagService.RagChunk chunk = new RagService.RagChunk("Content", "Title", "https://x.com", 0.90);
-        String answer = ragService.generateAnswer("query", List.of(chunk), List.of(), false);
-        assertThat(answer).contains("query");
-    }
-
-    @Test
-    void generateAnswer_entityHit_skipsInsufficiencyInstruction() {
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("综合回答"))));
-        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
-                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-
-        // 实体命中（强信号）+ 低相似度 chunk（0.71 < 强相关阈值）→ 不注入材料不足指令
-        RagService.RagChunk chunk = new RagService.RagChunk("Content", "Title", "https://x.com", 0.71);
-        ragService.generateAnswer("query", List.of(chunk), List.of(), true);
-
-        verify(chatModel).call(captor.capture());
-        assertThat(captor.getValue().getInstructions().getFirst().getText())
-                .doesNotContain(RagService.RAG_INSUFFICIENT_MARKER);
-    }
-
-    @Test
-    void generateAnswer_withMultipleChunks_includesSources() {
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("综合回答"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-
-        List<RagService.RagChunk> chunks = List.of(
-                new RagService.RagChunk("c1", "t1", "https://a.com", 0.95),
-                new RagService.RagChunk("c2", "t2", "https://b.com", 0.85));
-        String answer = ragService.generateAnswer("query", chunks, List.of(), false);
-        assertThat(answer).contains("综合回答");
     }
 
     @Test
@@ -382,52 +315,13 @@ class RagServiceTest {
         }
         when(knowledgeChunkMapper.selectList(any())).thenReturn(six);
 
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("回答"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
 
-        ragService.retrieve("Spring Boot", 1L);
-
-        // 6 个命中块但 topK=5 → 生成 prompt 只含 5 个 <source>
-        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
-                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-        verify(chatModel).call(captor.capture());
-        String prompt = captor.getValue().getInstructions().getFirst().getText();
-        assertThat(prompt).contains("<source>").doesNotContain("chunk-5");
-    }
-
-    @Test
-    void generateAnswer_weakSimilarity_injectsInsufficientMarkerInstruction() {
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("回答"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-
-        // 最高相似度 0.61（弱相关擦线命中）→ prompt 注入"仅输出 RAG_INSUFFICIENT"指令
-        RagService.RagChunk chunk = new RagService.RagChunk("内容", "标题", "https://x.com", 0.61);
-        ragService.generateAnswer("query", List.of(chunk), List.of(), false);
-
-        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
-                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-        verify(chatModel).call(captor.capture());
-        assertThat(captor.getValue().getInstructions().getFirst().getText())
-                .contains(RagService.RAG_INSUFFICIENT_MARKER);
-    }
-
-    @Test
-    void generateAnswer_strongSimilarity_noMarkerInstruction() {
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("回答"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-
-        // 最高相似度 0.9（强相关）→ 正常 prompt，不含标记指令
-        RagService.RagChunk chunk = new RagService.RagChunk("内容", "标题", "https://x.com", 0.9);
-        ragService.generateAnswer("query", List.of(chunk), List.of(), false);
-
-        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
-                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-        verify(chatModel).call(captor.capture());
-        assertThat(captor.getValue().getInstructions().getFirst().getText())
-                .doesNotContain(RagService.RAG_INSUFFICIENT_MARKER);
+        // 6 个命中块但 topK=5 → 材料只保留最高 5 个（chunk-5 被截断）
+        assertThat(result).isPresent();
+        assertThat(result.get().materials()).hasSize(5);
+        assertThat(result.get().materials())
+                .extracting(ScoredResource::getContent).contains("chunk-0").doesNotContain("chunk-5");
     }
 
     // === 1-hop 知识图谱增强 ===
@@ -475,20 +369,13 @@ class RagServiceTest {
         relation.setObjectId(2L);
         when(relationMapper.selectList(any())).thenReturn(List.of(relation));
 
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("Spring Boot 是一个框架"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-
         Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
         assertThat(result).isPresent();
 
-        // 1-hop 关联内容以 <related> 块拼进生成 prompt
-        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
-                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-        verify(chatModel).call(captor.capture());
-        String prompt = captor.getValue().getInstructions().getFirst().getText();
-        assertThat(prompt).contains("<related>");
-        assertThat(prompt).contains("Spring Framework 原理");
+        // 1-hop 关联内容并入材料的"关联知识"聚合资源（Curator 完整报告可见）
+        assertThat(result.get().materials())
+                .anyMatch(r -> "knowledge://related".equals(r.getUrl())
+                        && r.getContent().contains("Spring Framework 原理"));
     }
 
     @Test
@@ -514,33 +401,11 @@ class RagServiceTest {
                 com.dart.util.VectorUtils.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
-        // 无关系 → 不拼接 related 块
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("Spring Boot 是一个框架"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
 
-        ragService.retrieve("Spring Boot", 1L);
-
-        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
-                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-        verify(chatModel).call(captor.capture());
-        assertThat(captor.getValue().getInstructions().getFirst().getText()).doesNotContain("<related>");
-    }
-
-    @Test
-    void generateAnswer_withRelatedContext_appendsRelatedBlock() {
-        when(chatResponse.getResults()).thenReturn(List.of(
-                new Generation(new AssistantMessage("综合回答"))));
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
-
-        RagService.RagChunk chunk = new RagService.RagChunk("c1", "t1", "https://a.com", 0.95);
-        String answer = ragService.generateAnswer("query", List.of(chunk),
-                List.of("Spring Framework 原理 | Spring Framework 是 Spring Boot 的基础..."), false);
-
-        assertThat(answer).contains("综合回答");
-        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
-                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
-        verify(chatModel).call(captor.capture());
-        assertThat(captor.getValue().getInstructions().getFirst().getText()).contains("<related>");
+        // 无关系 → materials 不包含"关联知识"聚合资源
+        assertThat(result).isPresent();
+        assertThat(result.get().materials())
+                .noneMatch(r -> "knowledge://related".equals(r.getUrl()));
     }
 }

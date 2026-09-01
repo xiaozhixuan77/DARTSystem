@@ -212,21 +212,22 @@ class AgentFlowIntegrationTest extends BaseIntegrationTest {
         Mockito.reset(embeddingModel);
         mockEmbedding(0.02f);
 
-        // ChatModel: 前置合并(JSON) → generateAnswer
+        // ChatModel: 前置合并(JSON)；Curator 三节走 stream（与搜索路径同构）
         when(chatModel.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(
                         List.of(new Generation(new AssistantMessage(
-                                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\"}")))))
-                .thenReturn(new ChatResponse(
-                        List.of(new Generation(new AssistantMessage("基于知识库的 RAG 回答")))));
+                                "{\"isTech\":true,\"optimized\":\"Spring Boot 配置\"}")))));
+        when(chatModel.stream(any(Prompt.class)))
+                .thenReturn(Flux.just(new ChatResponse(List.of(new Generation(
+                        new AssistantMessage("# 核心概念内容\n\n基于知识库材料的完整说明。".repeat(30)))))));
 
         SseSink sink = mock(SseSink.class);
         ChatService.SearchResult result = chatService.executeSearchAndCurate(
                 "技术问题", userId, convId, sink);
 
         assertThat(result.isRagHit()).isTrue();
-        assertThat(result.ragAnswer()).isNotNull();
-        assertThat(result.ragAnswer().answer()).contains("RAG 回答");
+        assertThat(result.curatedReport()).isNotNull();
+        assertThat(result.curatedReport().markdown()).contains("核心概念内容");
     }
 
     @Test

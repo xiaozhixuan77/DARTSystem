@@ -101,7 +101,10 @@ public class MessagePersistenceService {
 
     private void applyResultToMessage(Message msg, ChatService.SearchResult result) {
         if (result.isRagHit()) {
-            msg.setContent(result.ragAnswer().answer());
+            // RAG 命中：Curator 已生成三节完整报告 → 存报告全文；否则（材料不足）取材料摘要
+            String content = result.curatedReport() != null
+                    ? result.curatedReport().markdown() : result.ragAnswer().answer();
+            msg.setContent(content);
             msg.setMetadata("{\"type\":\"rag\"," +
                     "\"sources\":" + toJsonArray(result.ragAnswer().sourceUrls()) + "}");
         } else if (result.isFollowUpHit()) {

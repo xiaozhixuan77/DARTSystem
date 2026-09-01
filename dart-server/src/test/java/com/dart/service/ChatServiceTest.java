@@ -1210,20 +1210,26 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_ragHit_updatesSessionSummary() {
         when(valueOps.get(anyString())).thenReturn(null);
-        RagResult ragAnswer = new RagResult("RAG 回答内容", List.of("https://a.com"), 0.9);
+        RagResult ragAnswer = new RagResult(0.9, false, List.of(
+                new ScoredResource("https://a.com", "RAG 标题", "RAG 回答内容内容", 0, 0, 0, 0, 0.9)));
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
+        CuratedReport report = new CuratedReport("query", "# Report\n\n完整内容 ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any()))
+                .thenReturn(report);
 
         chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
 
-        // RAG 命中也有问答产生 → 更新会话摘要
-        verify(summaryService).updateSummary(eq(1L), eq(100L), eq("Spring Boot"), eq("RAG 回答内容"));
+        // RAG 命中走 Curator 三节完整报告 → 摘要更新输入为报告 markdown
+        ArgumentCaptor<String> mdCaptor = ArgumentCaptor.forClass(String.class);
+        verify(summaryService).updateSummary(eq(1L), eq(100L), eq("Spring Boot"), mdCaptor.capture());
+        assertThat(mdCaptor.getValue()).contains("# Report");
     }
 
     @Test
     void executeSearchAndCurate_ragAnswerInsufficient_fallsBackToSearch() {
         when(valueOps.get(anyString())).thenReturn(null);
-        RagResult ragAnswer = new RagResult(RagService.RAG_INSUFFICIENT_MARKER,
-                List.of("https://a.com"), 0.61);
+        RagResult ragAnswer = new RagResult(0.61, true, List.of());
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
@@ -1242,8 +1248,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_ragAnswerInsufficient_searchFails_returnsError() {
         when(valueOps.get(anyString())).thenReturn(null);
-        RagResult ragAnswer = new RagResult(RagService.RAG_INSUFFICIENT_MARKER,
-                List.of("https://a.com"), 0.61);
+        RagResult ragAnswer = new RagResult(0.61, true, List.of());
         when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
         when(searchAgent.execute(anyList(), anyInt(), any())).thenThrow(new RuntimeException("search down"));
 
@@ -1439,8 +1444,14 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_ragHit_recordsTraceWithScore() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong()))
-                .thenReturn(Optional.of(new RagResult("# Spring Boot 详解", List.of("https://spring.io"), 0.93)));
+        when(ragService.retrieve(anyString(), anyLong())) .thenReturn(Optional.of(
+                new RagResult(0.93, false, List.of(
+                        new ScoredResource("https://spring.io", "Spring Boot 详解",
+                                "内容内容内容", 0, 0, 0, 0, 0.93)))));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nSpring Boot ".repeat(20),
+                List.of("https://spring.io"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any()))
+                .thenReturn(report);
         when(chatResponse.getResults()).thenReturn(List.of(new Generation(
                 new AssistantMessage("{\"isTech\":true,\"optimized\":\"Spring Boot 详解\","
                         + "\"variants\":[],\"intent\":\"deep_dive\"}"))));
@@ -1594,15 +1605,23 @@ class ChatServiceTest {
     }
 
     @Test
-    void executeSearchAndCurate_ragHits_returnsRagAnswer() {
+    void executeSearchAndCurate_ragHits_buildsFullReport() {
         when(ragService.retrieve(eq("Spring Boot"), eq(1L)))
-                .thenReturn(Optional.of(new RagResult("# Spring Boot 详解", List.of("https://spring.io"))));
+                .thenReturn(Optional.of(new RagResult(0.93, false, List.of(
+                        new ScoredResource("https://spring.io", "Spring Boot 详解",
+                                "内容内容内容", 0, 0, 0, 0, 0.93)))));
+        CuratedReport report = new CuratedReport("query", "# Report\n\nSpring Boot ".repeat(20),
+                List.of("https://spring.io"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any()))
+                .thenReturn(report);
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
+
+        // RAG 命中短路搜索，但材料走 Curator 三节完整生成（输出与搜索路径同构）
         assertThat(result.isRagHit()).isTrue();
-        assertThat(result.ragAnswer().answer()).contains("Spring Boot");
-        // RAG 命中短路：不进入 Curator（Search Agent 已并行启动，不做 never 断言）
-        verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
+        assertThat(result.ragAnswer().materials()).hasSize(1);
+        assertThat(result.curatedReport()).isSameAs(report);
+        verify(curatorAgent, atLeastOnce()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
     }
 
     @Test
@@ -1610,8 +1629,13 @@ class ChatServiceTest {
         // RAG 慢响应（500ms）但命中 → 不等 Search Agent 完成直接返回
         when(ragService.retrieve(anyString(), anyLong())).thenAnswer(inv -> {
             Thread.sleep(500);
-            return Optional.of(new RagResult("# 慢查询回答", List.of("https://a.com")));
+            return Optional.of(new RagResult(0.93, false, List.of(
+                    new ScoredResource("https://a.com", "慢查询回答", "内容内容内容", 0, 0, 0, 0, 0.93))));
         });
+        CuratedReport report = new CuratedReport("query", "# Report\n\nSpring Boot ".repeat(20),
+                List.of("https://a.com"), Instant.now());
+        when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any()))
+                .thenReturn(report);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenAnswer(inv -> {
             Thread.sleep(5000); // 模拟慢搜索：若等待则测试耗时 5s+
             return List.of();
@@ -1622,6 +1646,7 @@ class ChatServiceTest {
         long elapsed = System.currentTimeMillis() - start;
 
         assertThat(result.isRagHit()).isTrue();
+        assertThat(result.curatedReport()).isSameAs(report);
         assertThat(elapsed).isLessThan(4000);
     }
 

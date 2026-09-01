@@ -1,6 +1,7 @@
 package com.dart.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.dart.agent.scoring.ScoredResource;
 import com.dart.entity.KnowledgeChunk;
 import com.dart.entity.KnowledgeItem;
 import com.dart.entity.KnowledgeRelation;
@@ -54,17 +55,26 @@ public class RagService {
     @Value("${agent.rag.entity-chunk-threshold:0.45}")
     private double entityChunkThreshold = 0.45;
 
-    public record RagResult(String answer, List<String> sourceUrls, double maxSimilarity) {
-        public RagResult(String answer, List<String> sourceUrls) {
-            this(answer, sourceUrls, -1.0);
+    /**
+     * RAG 命中结果：携带知识库命中材料（转 ScoredResource，供 Curator 生成完整报告）。
+     * weakHit=材料不足（最高相似度低于强匹配阈值且非强实体命中），ChatService 据此降级搜索。
+     */
+    public record RagResult(double maxSimilarity, boolean weakHit, List<ScoredResource> materials) {
+        public List<String> sourceUrls() {
+            return materials.stream().map(ScoredResource::getUrl).distinct().toList();
+        }
+        /** 材料摘要拼接（仅评估框架等离线消费；在线输出由 Curator 生成完整报告）。 */
+        public String answer() {
+            return materials.stream()
+                    .map(r -> "标题: " + r.getTitle() + "\n内容: "
+                            + (r.getContent().length() > 300
+                            ? r.getContent().substring(0, 300) : r.getContent()))
+                    .reduce("", (a, b) -> a + "\n\n" + b);
         }
     }
     public record RagChunk(String content, String title, String sourceUrl, double similarity) {}
 
-    /** 弱相关命中时 LLM 被指示输出的"材料不足"标记；ChatService 检测到即降级搜索。 */
-    public static final String RAG_INSUFFICIENT_MARKER = "RAG_INSUFFICIENT";
-
-    /** 强相关判定阈值：最高相似度低于此值时命中视为弱相关，要求 LLM 用标记报告材料不足。 */
+    /** 强相关判定阈值：最高相似度低于此值时命中视为弱相关（材料不足），ChatService 降级搜索。 */
     private static final double STRONG_MATCH_THRESHOLD = 0.75;
 
     /**
@@ -144,11 +154,17 @@ public class RagService {
                 matched = matched.subList(0, topK);
             }
 
-            // 1-hop 知识图谱扩展：命中条目的关联知识拼入生成上下文
+            // 1-hop 关联知识并入材料（转"关联知识"聚合资源，Curator 完整报告可见）
+            List<ScoredResource> materials = toMaterials(matched);
             List<String> relatedContext = loadRelatedContexts(itemMap);
-            String answer = generateAnswer(query, matched, relatedContext, entityStrongHit);
-            List<String> sources = matched.stream().map(RagChunk::sourceUrl).distinct().toList();
-            return Optional.of(new RagResult(answer, sources, matched.getFirst().similarity()));
+            if (!relatedContext.isEmpty()) {
+                materials = new ArrayList<>(materials);
+                materials.add(new ScoredResource("knowledge://related", "关联知识",
+                        String.join("\n\n", relatedContext), 0, 0, 0, 0, 0.0));
+            }
+            double maxSimilarity = matched.getFirst().similarity();
+            boolean weakHit = maxSimilarity < STRONG_MATCH_THRESHOLD && !entityStrongHit;
+            return Optional.of(new RagResult(maxSimilarity, weakHit, materials));
 
         } catch (Exception e) {
             log.warn("RAG 检索失败: {}", query, e);
@@ -156,57 +172,11 @@ public class RagService {
         }
     }
 
-    public String generateAnswer(String query, List<RagChunk> chunks, List<String> relatedContext,
-                                 boolean strongEntityHit) {
-        StringBuilder context = new StringBuilder();
-        for (RagChunk c : chunks) {
-            context.append("<source>\n");
-            context.append("标题: ").append(c.title()).append("\n");
-            context.append("来源: ").append(c.sourceUrl()).append("\n");
-            context.append("内容: ").append(c.content()).append("\n");
-            context.append("</source>\n\n");
-        }
-        if (relatedContext != null && !relatedContext.isEmpty()) {
-            context.append("<related>\n");
-            for (String r : relatedContext) {
-                context.append(r).append("\n");
-            }
-            context.append("</related>\n\n");
-        }
-
-        double maxSimilarity = chunks.stream()
-                .mapToDouble(RagChunk::similarity).max().orElse(0.0);
-        // 实体命中是强信号（查询词含实体名 = 明确意图），即使相似度擦线也不判"材料不足"
-        String insufficiencyInstruction = (maxSimilarity < STRONG_MATCH_THRESHOLD && !strongEntityHit)
-                ? "如果参考材料不足以完整回答用户问题，请只输出 " + RAG_INSUFFICIENT_MARKER
-                + "（不要输出其他任何内容）。"
-                : "如果参考材料不足以回答问题，请如实说明。";
-        String prompt = """
-                你是一个技术问答助手。请基于以下参考材料回答用户问题。
-                %s 若存在关联知识补充上下文（related 标签块），可作为额外参考。
-
-                用户问题：%s
-
-                参考材料：
-                %s
-
-                请根据参考材料生成结构化中文回答：
-                - 先给出 1-2 句直接结论
-                - 再按要点分点展开（- 列表），覆盖材料中的概念、步骤、示例等关键信息
-                - 材料含代码时保留关键代码片段
-                - 回答总长度控制在 300-500 字，准确完整，不要省略核心技术点""".formatted(insufficiencyInstruction,
-                query.replace("<", "&lt;"), context);
-
-        try {
-            return chatModel.call(new Prompt(new UserMessage(prompt)))
-                    .getResults().getFirst().getOutput().getText().trim();
-        } catch (Exception e) {
-            log.warn("LLM 回答生成失败", e);
-            return "# " + query + "\n\n基于知识库的搜索结果：\n\n"
-                    + chunks.stream()
-                    .map(c -> "- [" + c.title() + "](" + c.sourceUrl() + ")")
-                    .reduce("", (a, b) -> a + "\n" + b);
-        }
+    private List<ScoredResource> toMaterials(List<RagChunk> matched) {
+        return matched.stream()
+                .map(c -> new ScoredResource(c.sourceUrl(), c.title(), c.content(),
+                        0, 0, 0, 0, c.similarity()))
+                .toList();
     }
 
     /**
