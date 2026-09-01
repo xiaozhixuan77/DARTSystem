@@ -2,6 +2,7 @@ package com.dart.util;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Base64;
 
 /**
  * 向量编解码与余弦相似度（RagService 检索与 KnowledgeService 跨条目关联共用）。
@@ -23,6 +24,14 @@ public final class VectorUtils {
         float[] floats = new float[bytes.length / 4];
         ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(floats);
         return floats;
+    }
+
+    public static String encodeToBase64(float[] floats) {
+        return Base64.getEncoder().encodeToString(floatArrayToBytes(floats));
+    }
+
+    public static float[] decodeFromBase64(String base64) {
+        return bytesToFloatArray(Base64.getDecoder().decode(base64));
     }
 
     public static double cosineSimilarity(float[] a, float[] b) {
