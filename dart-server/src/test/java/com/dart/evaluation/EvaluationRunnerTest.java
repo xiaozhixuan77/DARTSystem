@@ -115,7 +115,7 @@ class EvaluationRunnerTest {
         String answer;
         boolean hit;
         try {
-            Optional<RagService.RagResult> result = ragService.retrieve(q.query(), EVAL_USER_ID);
+            Optional<RagService.RagResult> result = ragService.retrieve(q.query(), q.query(), EVAL_USER_ID);
             hit = result.isPresent();
             answer = result.map(RagService.RagResult::answer).orElse("（RAG 未命中）");
         } catch (Exception e) {

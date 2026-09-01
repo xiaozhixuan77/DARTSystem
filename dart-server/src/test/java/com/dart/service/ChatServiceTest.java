@@ -169,7 +169,7 @@ class ChatServiceTest {
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport().markdown()).contains("缓存报告");
         assertThat(result.curatedReport().sources()).contains("https://a.com");
-        verify(ragService, never()).retrieve(anyString(), anyLong());
+        verify(ragService, never()).retrieve(anyString(), anyString(), anyLong());
         verify(searchAgent, never()).execute(anyList(), anyInt(), any());
         verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
         verify(chatModel, never()).call(any(org.springframework.ai.chat.prompt.Prompt.class));
@@ -219,7 +219,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_cacheMiss_runsFullFlowAndWritesCache() throws Exception {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -240,7 +240,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_cacheKey_normalizesQuery() throws Exception {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -261,7 +261,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_cacheKey_isolatesByUserId() throws Exception {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -284,7 +284,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_persistsUserMessageInSeparateTransaction() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -310,7 +310,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_insertsDraftThenCompletes() throws Exception {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
@@ -340,7 +340,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_draftConsumer_updatesDraftIncrementally() throws Exception {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
@@ -375,7 +375,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_draftInsertFailure_fallsBackToInsert() throws Exception {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
@@ -412,7 +412,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_reportSedimentedToKnowledgeBase() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
@@ -443,7 +443,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_similarItemExists_mergesInsteadOfInsert() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("Spring 三级缓存原理", "# Report\n\n完整报告内容 ".repeat(20),
@@ -468,7 +468,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_sedimentSourceUrl_highestAuthority() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         // 多个来源：docs.spring.io（权威 5）应被选为主要来源而非第一个 blog
@@ -490,7 +490,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_reportSedimented_triggersRelationExtraction() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
@@ -513,7 +513,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_reportWithPlaceholder_notSedimented() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query",
@@ -532,7 +532,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_knowledgeBaseFull_notSedimented() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
@@ -760,7 +760,7 @@ class ChatServiceTest {
     void executeSearchAndCurate_optimizedEnMissing_englishQueryFromWordMap() throws Exception {
         // LLM 未输出 optimizedEn → searchQueries 用词表降级生成的短英文词（index=1）
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -784,7 +784,7 @@ class ChatServiceTest {
     void executeSearchAndCurate_searchQueriesOrder_mainThenEnglishThenVariants() throws Exception {
         // 搜索词列表顺序：[主词, 英文检索词, LLM 变体...]；词表命中歧义词时短词优先于 LLM optimizedEn
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -813,7 +813,7 @@ class ChatServiceTest {
     void executeSearchAndCurate_wordMapMiss_llmOptimizedEnFallsBack() throws Exception {
         // 词表未命中歧义词 → LLM optimizedEn 兜底作英文检索词（index=1）
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -843,7 +843,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_degradedResults_marksReportAndSkipsCacheAndSediment() throws Exception {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource degradedSr = new ScoredResource("https://a.com", "A", "snippet", 5, 1, 1, 2, 1.95, true);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(degradedSr));
         CuratedReport report = new CuratedReport("query", "# 精简报告\n\n要点内容 ".repeat(10),
@@ -869,7 +869,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_degradedResults_curatorGetsDegradedFlag() throws Exception {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource degradedSr = new ScoredResource("https://a.com", "A", "snippet", 5, 1, 1, 2, 1.95, true);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(degradedSr));
         CuratedReport report = new CuratedReport("query", "# 精简报告\n\n要点内容 ".repeat(10),
@@ -1111,7 +1111,7 @@ class ChatServiceTest {
         assertThat(result.followUpAnswer()).contains("三级缓存");
         // 续答不触发搜索/RAG/Curator
         verify(searchAgent, never()).execute(anyList(), anyInt(), any());
-        verify(ragService, never()).retrieve(anyString(), anyLong());
+        verify(ragService, never()).retrieve(anyString(), anyString(), anyLong());
         verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
         // 回答持久化 type=followup（user + assistant 两次 insert）
         ArgumentCaptor<Message> msgCaptor = ArgumentCaptor.forClass(Message.class);
@@ -1142,7 +1142,7 @@ class ChatServiceTest {
             throw new RuntimeException("memory answer failure"); // 记忆回答与追问均失败（降级）
         });
         // 回退正常搜索流程
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1160,7 +1160,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_normalQuery_noFollowUpPath() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1189,7 +1189,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_searchPath_updatesSessionSummaryWithoutFollowUpSection() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整内容 ".repeat(20),
@@ -1212,7 +1212,7 @@ class ChatServiceTest {
         when(valueOps.get(anyString())).thenReturn(null);
         RagResult ragAnswer = new RagResult(0.9, false, List.of(
                 new ScoredResource("https://a.com", "RAG 标题", "RAG 回答内容内容", 0, 0, 0, 0, 0.9)));
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整内容 ".repeat(20),
                 List.of("https://a.com"), Instant.now());
         when(curatorAgent.curate(anyString(), anyList(), any(), any(), any(), eq(false), any()))
@@ -1230,7 +1230,7 @@ class ChatServiceTest {
     void executeSearchAndCurate_ragAnswerInsufficient_fallsBackToSearch() {
         when(valueOps.get(anyString())).thenReturn(null);
         RagResult ragAnswer = new RagResult(0.61, true, List.of());
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1249,7 +1249,7 @@ class ChatServiceTest {
     void executeSearchAndCurate_ragAnswerInsufficient_searchFails_returnsError() {
         when(valueOps.get(anyString())).thenReturn(null);
         RagResult ragAnswer = new RagResult(0.61, true, List.of());
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.of(ragAnswer));
         when(searchAgent.execute(anyList(), anyInt(), any())).thenThrow(new RuntimeException("search down"));
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
@@ -1261,7 +1261,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_followUpPromptIncludesSessionSummary() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1332,7 +1332,7 @@ class ChatServiceTest {
 
     @Test
     void executeSearchAndCurate_optimizedQueryUsedInAllStages() {
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1346,8 +1346,9 @@ class ChatServiceTest {
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
         assertThat(result.isRagHit()).isFalse();
-        // 前置合并单次调用已由 preProcessQuery 专门用例覆盖（此处还有追问调用）
-        verify(ragService).retrieve(eq("优化后的技术问题描述"), eq(1L));
+        // 前置合并单次调用已由 preProcessQuery 专门用例覆盖（此处还有追问调用）；
+        // RAG 双向量：优化词 + 原始查询
+        verify(ragService).retrieve(eq("优化后的技术问题描述"), eq("Spring Boot"), eq(1L));
         verify(searchAgent).execute(eq(List.of("优化后的技术问题描述")), anyInt(), any());
         verify(curatorAgent).curate(eq("优化后的技术问题描述"), anyList(), any(), any(), any(), eq(false), any());
     }
@@ -1355,7 +1356,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_usesOptimizedQueryPlusVariants() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1371,8 +1372,8 @@ class ChatServiceTest {
         // SearchAgent 收到主词 + 2 个变体词
         verify(searchAgent).execute(eq(List.of("优化后的技术问题描述", "变体查询1", "变体查询2")),
                 anyInt(), any());
-        // RAG 只用主词（变体词仅扩展网络搜索）
-        verify(ragService).retrieve(eq("优化后的技术问题描述"), eq(1L));
+        // RAG 只用主词（变体词仅扩展网络搜索）；双向量 = 优化词 + 原始查询
+        verify(ragService).retrieve(eq("优化后的技术问题描述"), eq("Spring Boot"), eq(1L));
     }
 
     // === 意图路由 ===
@@ -1380,7 +1381,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_deepDive_expandsSearchAndPassesIntent() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1402,7 +1403,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_quickFact_reducesSearchResultsTo5() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1423,7 +1424,7 @@ class ChatServiceTest {
     void executeSearchAndCurate_missingIntent_usesDefaultSearchSizeAndHowTo() {
         // intent 缺失 → 默认 how_to → 8（与升级前行为一致）
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1444,7 +1445,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_ragHit_recordsTraceWithScore() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())) .thenReturn(Optional.of(
+        when(ragService.retrieve(anyString(), anyString(), anyLong())) .thenReturn(Optional.of(
                 new RagResult(0.93, false, List.of(
                         new ScoredResource("https://spring.io", "Spring Boot 详解",
                                 "内容内容内容", 0, 0, 0, 0, 0.93)))));
@@ -1488,7 +1489,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_normalFlow_recordsSearchTrace() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1515,7 +1516,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_sectionFailed_marksFallbackReason() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query",
@@ -1552,7 +1553,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_traceInsertFailure_doesNotBreakMainFlow() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1573,7 +1574,7 @@ class ChatServiceTest {
 
     @Test
     void executeSearchAndCurate_optimizationFails_usesOriginalQuery() {
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1599,14 +1600,14 @@ class ChatServiceTest {
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
         assertThat(result.curatedReport().markdown()).contains("技术");
-        verify(ragService, never()).retrieve(anyString(), anyLong());
+        verify(ragService, never()).retrieve(anyString(), anyString(), anyLong());
         verify(searchAgent, never()).execute(anyList(), anyInt(), any());
         verify(curatorAgent, never()).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
     }
 
     @Test
     void executeSearchAndCurate_ragHits_buildsFullReport() {
-        when(ragService.retrieve(eq("Spring Boot"), eq(1L)))
+        when(ragService.retrieve(eq("Spring Boot"), eq("Spring Boot"), eq(1L)))
                 .thenReturn(Optional.of(new RagResult(0.93, false, List.of(
                         new ScoredResource("https://spring.io", "Spring Boot 详解",
                                 "内容内容内容", 0, 0, 0, 0, 0.93)))));
@@ -1627,7 +1628,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_ragHits_doesNotWaitForSlowSearch() {
         // RAG 慢响应（500ms）但命中 → 不等 Search Agent 完成直接返回
-        when(ragService.retrieve(anyString(), anyLong())).thenAnswer(inv -> {
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenAnswer(inv -> {
             Thread.sleep(500);
             return Optional.of(new RagResult(0.93, false, List.of(
                     new ScoredResource("https://a.com", "慢查询回答", "内容内容内容", 0, 0, 0, 0, 0.93))));
@@ -1652,7 +1653,7 @@ class ChatServiceTest {
 
     @Test
     void executeSearchAndCurate_ragException_continuesWithSearch() {
-        when(ragService.retrieve(anyString(), anyLong()))
+        when(ragService.retrieve(anyString(), anyString(), anyLong()))
                 .thenThrow(new RuntimeException("RAG 检索失败"));
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
@@ -1670,7 +1671,7 @@ class ChatServiceTest {
 
     @Test
     void executeSearchAndCurate_ragMiss_triggersFullSearch() {
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1680,14 +1681,14 @@ class ChatServiceTest {
         ChatService.SearchResult result = chatService.executeSearchAndCurate("Spring Boot", 1L, 100L, sink);
         assertThat(result.isRagHit()).isFalse();
         assertThat(result.curatedReport()).isNotNull();
-        verify(ragService).retrieve(eq("Spring Boot"), eq(1L));
+        verify(ragService).retrieve(eq("Spring Boot"), eq("Spring Boot"), eq(1L));
         verify(searchAgent).execute(anyList(), anyInt(), any());
         verify(curatorAgent).curate(anyString(), anyList(), any(), any(), any(), eq(false), any());
     }
 
     @Test
     void executeSearchAndCurate_appendsFollowUpSection() {
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("Java", "# Java 技术学习报告\n\nJava是...".repeat(3),
@@ -1717,7 +1718,7 @@ class ChatServiceTest {
 
     @Test
     void executeSearchAndCurate_followUpFails_stillReturnsReport() {
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\nContent ".repeat(10),
@@ -1739,7 +1740,7 @@ class ChatServiceTest {
 
     @Test
     void executeSearchAndCurate_searchReturnsEmpty_returnsErrorReport() {
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of());
 
         ChatService.SearchResult result = chatService.executeSearchAndCurate("obscure query", 1L, 100L, sink);
@@ -1753,7 +1754,7 @@ class ChatServiceTest {
 
     @Test
     void executeSearchAndCurate_searchAgentException_callsFallback() {
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         when(searchAgent.execute(anyList(), anyInt(), any()))
                 .thenThrow(new RuntimeException("network error"));
 
@@ -1766,7 +1767,7 @@ class ChatServiceTest {
 
     private void stubFullFlowForVariantTest(String variantsJson) {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
@@ -1822,7 +1823,7 @@ class ChatServiceTest {
     @ValueSource(strings = {"quick_fact", "how_to", "deep_dive", "comparison", "troubleshooting"})
     void executeSearchAndCurate_intentMapsToSedimentTag(String intent) {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
@@ -1850,7 +1851,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_sedimentLinksExtractedEntities() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),
@@ -1879,7 +1880,7 @@ class ChatServiceTest {
     @Test
     void executeSearchAndCurate_unknownIntent_usesDefaultTag() {
         when(valueOps.get(anyString())).thenReturn(null);
-        when(ragService.retrieve(anyString(), anyLong())).thenReturn(Optional.empty());
+        when(ragService.retrieve(anyString(), anyString(), anyLong())).thenReturn(Optional.empty());
         ScoredResource sr = new ScoredResource("https://a.com", "A", "content ".repeat(50), 5, 4, 3, 4, 4.0);
         when(searchAgent.execute(anyList(), anyInt(), any())).thenReturn(List.of(sr));
         CuratedReport report = new CuratedReport("query", "# Report\n\n完整报告内容 ".repeat(20),

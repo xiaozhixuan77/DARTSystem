@@ -170,7 +170,7 @@ public class ChatService {
         ExecutorService parallelExecutor = Executors.newVirtualThreadPerTaskExecutor();
         try {
             Future<Optional<RagService.RagResult>> ragFuture = parallelExecutor.submit(() ->
-                    ragService.retrieve(effectiveQuery, userId));
+                    ragService.retrieve(effectiveQuery, query, userId));
             // 主词 + 英文检索词 + 变体词并行网络搜索扩大召回（RAG 仅用主词，保持检索专注）；
             // 英文检索词排第 2 位（补足优先级最高）：Bing 对含歧义中文词（如"微服务"）的查询
             // 会返回随机无关泛化结果。词表降级优先——词表产出的是验证稳定的短英文技术词

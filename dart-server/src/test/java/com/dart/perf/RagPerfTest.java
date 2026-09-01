@@ -131,7 +131,7 @@ class RagPerfTest {
 
             // 预热（JIT）
             for (int i = 0; i < WARMUP; i++) {
-                ragService.retrieve(speedQueries.get(i % speedQueries.size()).query(), userId);
+                ragService.retrieve(speedQueries.get(i % speedQueries.size()).query(), speedQueries.get(i % speedQueries.size()).query(), userId);
                 redisSearcher.search(probeVec, topK);
             }
 
@@ -140,7 +140,7 @@ class RagPerfTest {
             for (PerfQuery q : speedQueries) {
                 for (int r = 0; r < QUERY_REPEAT; r++) {
                     long start = System.nanoTime();
-                    ragService.retrieve(q.query(), userId);
+                    ragService.retrieve(q.query(), q.query(), userId);
                     mysql.add((System.nanoTime() - start) / 1_000_000);
                 }
             }
@@ -197,7 +197,7 @@ class RagPerfTest {
             String topicKey = topicKeyOf(q.topic());
             List<Double> sims = new ArrayList<>();
             if (mysqlPath) {
-                var result = ragService.retrieve(q.query(), userId);
+                var result = ragService.retrieve(q.query(), q.query(), userId);
                 if (result.isEmpty()) {
                     continue;
                 }

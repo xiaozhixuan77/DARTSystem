@@ -73,11 +73,16 @@ public class RagService {
     private static final double STRONG_MATCH_THRESHOLD = 0.75;
 
     /**
-     * RAG 检索：向量化查询 → 查本地知识库 → 命中则 LLM 生成回答。
+     * RAG 检索：向量化查询 → 查本地知识库 → 命中则返回材料（Curator 生成报告）。
+     * @param optimizedQuery 前置优化词（LLM 每次可能漂移，如随机加"Java"前缀）
+     * @param originalQuery 用户原始输入——双向量检索取最大余弦，防优化词漂移致边缘命中率波动
      */
-    public Optional<RagResult> retrieve(String query, Long userId) {
+    public Optional<RagResult> retrieve(String optimizedQuery, String originalQuery, Long userId) {
         try {
-            float[] queryVec = embeddingService.embed(query);
+            float[] queryVec = embeddingService.embed(optimizedQuery);
+            // 原查询向量：与优化词相同则复用（省一次 embedding 调用）
+            float[] originalVec = (originalQuery == null || originalQuery.equals(optimizedQuery))
+                    ? queryVec : embeddingService.embed(originalQuery);
 
             // 先查询用户的知识条目 ID，避免 SQL 注入
             QueryWrapper<KnowledgeItem> itemQuery = new QueryWrapper<>();
@@ -115,7 +120,7 @@ public class RagService {
 
             // 实体通道：实体名精确匹配 + 概念向量匹配 → 命中条目的 chunk 免阈值入池
             // （实体命中是强信号，防"概念命中但段落表述不同"漏检；topK 截断兜底）
-            Set<Long> entityHitItemIds = new HashSet<>(entityService.findItemsByEntityName(userId, query));
+            Set<Long> entityHitItemIds = new HashSet<>(entityService.findItemsByEntityName(userId, optimizedQuery));
             entityHitItemIds.addAll(entityService.matchEntitiesByVector(userId, queryVec));
 
             // 用 MySQL 中存储的向量计算余弦相似度（避免重复 Embedding API 调用）
@@ -127,7 +132,10 @@ public class RagService {
                 KnowledgeItem item = itemMap.get(c.getKnowledgeItemId());
                 if (item == null || c.getEmbedding() == null) continue;
                 float[] chunkVec = com.dart.util.VectorUtils.decodeFromBase64(c.getEmbedding());
-                double similarity = com.dart.util.VectorUtils.cosineSimilarity(queryVec, chunkVec);
+                // 双向量取最大余弦：原查询与优化词各自计算，缓解 LLM 优化词漂移
+                double similarity = Math.max(
+                        com.dart.util.VectorUtils.cosineSimilarity(queryVec, chunkVec),
+                        com.dart.util.VectorUtils.cosineSimilarity(originalVec, chunkVec));
                 boolean entityHit = entityHitItemIds.contains(c.getKnowledgeItemId());
                 if (similarity >= similarityThreshold
                         || (entityHit && similarity >= entityChunkThreshold)) {
@@ -162,7 +170,7 @@ public class RagService {
             return Optional.of(new RagResult(maxSimilarity, weakHit, materials));
 
         } catch (Exception e) {
-            log.warn("RAG 检索失败: {}", query, e);
+            log.warn("RAG 检索失败: {}", originalQuery, e);
             return Optional.empty();
         }
     }

@@ -59,7 +59,7 @@ class RagServiceTest {
         lenient().when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of());
 
-        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", "Spring Boot", 1L);
         assertThat(result).isEmpty();
     }
 
@@ -92,7 +92,7 @@ class RagServiceTest {
                 .thenReturn(java.util.Set.of(1L));
         when(entityService.matchEntitiesByVector(eq(1L), any())).thenReturn(java.util.Set.of());
 
-        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", "Redis 缓存淘汰策略", 1L);
 
         assertThat(result).isEmpty();
     }
@@ -128,13 +128,50 @@ class RagServiceTest {
                 .thenReturn(java.util.Set.of(1L));
         when(entityService.matchEntitiesByVector(eq(1L), any())).thenReturn(java.util.Set.of());
 
-        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", "Redis 缓存淘汰策略", 1L);
 
         // 实体通道放行（≥0.45）但未达正常阈值（0.80）→ weakHit=true（材料不足）
         // ChatService 据此降级搜索（不再短路）
         assertThat(result).isPresent();
         assertThat(result.get().weakHit()).isTrue();
         assertThat(result.get().materials()).hasSize(1);
+    }
+
+    @Test
+    void retrieve_optimizedQueryDrift_originalQueryStillHits() {
+        // 优化词漂移（LLM 前置每次生成不同，如随机加"Java"前缀）导致余弦边缘波动
+        float[] optimized = new float[1024];
+        optimized[0] = 1.0f;            // 优化词与 chunk 余弦 = 0.5（<0.60 阈值）
+        float[] original = new float[1024];
+        original[0] = 0.5f;
+        original[1] = (float) Math.sqrt(0.75);   // 原查询与 chunk 余弦 = 1.0
+        when(embeddingService.embed("CompletableFuture 异步编排 用法")).thenReturn(original);
+        when(embeddingService.embed("Java CompletableFuture 异步编排 用法 示例")).thenReturn(optimized);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("CompletableFuture 异步编排 用法 示例");
+        item.setSourceUrl("https://juejin.cn");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
+
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("CompletableFuture 异步编排 用法");
+        chunk.setChunkIndex(0);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(original)));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        Optional<RagService.RagResult> result =
+                ragService.retrieve("Java CompletableFuture 异步编排 用法 示例",
+                        "CompletableFuture 异步编排 用法", 1L);
+
+        // 双向量取最大余弦：优化词漂移不影响命中（仅优化词 cos=0.5 会 miss）
+        assertThat(result).isPresent();
+        assertThat(result.get().weakHit()).isFalse();
     }
 
     @Test
@@ -164,7 +201,7 @@ class RagServiceTest {
                 .thenReturn(java.util.Set.of(1L));
         when(entityService.matchEntitiesByVector(eq(1L), any())).thenReturn(java.util.Set.of());
 
-        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", "Redis 缓存淘汰策略", 1L);
 
         // 实体命中且 chunk 达到正常阈值 → 强实体命中（weakHit=false，RAG 直答，回归锁定）
         assertThat(result).isPresent();
@@ -199,7 +236,7 @@ class RagServiceTest {
         when(entityService.findItemsByEntityName(any(), anyString())).thenReturn(java.util.Set.of());
         when(entityService.matchEntitiesByVector(any(), any())).thenReturn(java.util.Set.of());
 
-        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", "Redis 缓存淘汰策略", 1L);
 
         assertThat(result).isEmpty();
     }
@@ -227,7 +264,7 @@ class RagServiceTest {
                 com.dart.util.VectorUtils.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
-        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", "Spring Boot", 1L);
         assertThat(result).isPresent();
 
         // 批量加载 KnowledgeItem，杜绝逐条 selectById 的 N+1
@@ -244,7 +281,7 @@ class RagServiceTest {
         lenient().when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of());
 
-        Optional<RagService.RagResult> result = ragService.retrieve("unknown query", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("unknown query", "unknown query", 1L);
         assertThat(result).isEmpty();
     }
 
@@ -272,7 +309,7 @@ class RagServiceTest {
                 com.dart.util.VectorUtils.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
-        ragService.retrieve("Spring Boot", 1L);
+        ragService.retrieve("Spring Boot", "Spring Boot", 1L);
 
         ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.QueryWrapper> captor =
                 ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.QueryWrapper.class);
@@ -307,7 +344,7 @@ class RagServiceTest {
         }
         when(knowledgeChunkMapper.selectList(any())).thenReturn(six);
 
-        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", "Spring Boot", 1L);
 
         // 6 个命中块但 topK=5 → 材料只保留最高 5 个（chunk-5 被截断）
         assertThat(result).isPresent();
@@ -361,7 +398,7 @@ class RagServiceTest {
         relation.setObjectId(2L);
         when(relationMapper.selectList(any())).thenReturn(List.of(relation));
 
-        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", "Spring Boot", 1L);
         assertThat(result).isPresent();
 
         // 1-hop 关联内容并入材料的"关联知识"聚合资源（Curator 完整报告可见）
@@ -393,7 +430,7 @@ class RagServiceTest {
                 com.dart.util.VectorUtils.floatArrayToBytes(emb)));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
-        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", 1L);
+        Optional<RagService.RagResult> result = ragService.retrieve("Spring Boot", "Spring Boot", 1L);
 
         // 无关系 → materials 不包含"关联知识"聚合资源
         assertThat(result).isPresent();
