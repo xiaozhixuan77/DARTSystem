@@ -127,7 +127,9 @@ agent:
     # 报告生成精读资源数：Top N 携带完整内容，其余仅摘要（控制 LLM 输入长度）
     deep-read-count: 4
   rag:
-    similarity-threshold: 0.60
+    # 命中阈值：bge-m3 对"查询 vs 段落"余弦本征约 0.55-0.65，0.50 与实体通道 0.45 保持分层；
+    # 弱命中（<0.75）仍走"材料不足→降级搜索"安全网，不会产生劣质直答
+    similarity-threshold: 0.50
     # 实体命中（名称/概念向量）条目的 chunk 仍需达到此相关度才入池（防泛词实体免阈值灌入）
     entity-chunk-threshold: 0.45
     top-k: 5
