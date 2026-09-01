@@ -49,6 +49,16 @@ class PageFetcherTest {
     }
 
     @Test
+    void browserHeaders_resembleRealBrowser() {
+        // 反爬拦截（CSDN 521 / 知乎 403）源于半伪造 UA（DART/1.0 尾巴）
+        assertThat(PageFetcher.USER_AGENT)
+                .contains("Chrome").contains("Safari").doesNotContain("DART");
+        assertThat(PageFetcher.browserHeaders())
+                .containsKeys("Accept", "Accept-Language", "Referer")
+                .extractingByKey("Referer").asString().isEqualTo("https://www.bing.com/");
+    }
+
+    @Test
     void fetch_readTimeoutFirstAttempt_retriesAndSucceeds() {
         ScriptableFetcher fetcher = new ScriptableFetcher(1000, calls ->
                 calls == 1 ? throwReadTimeout() : doc("Go 官方文档"));

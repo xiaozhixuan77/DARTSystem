@@ -161,11 +161,6 @@ public class CuratorTools {
             return emptyReport(query);
         }
 
-        // 去重后仅剩 1 个 → 跳过 LLM
-        if (resources.size() == 1) {
-            return singleResourceReport(query, resources.getFirst());
-        }
-
         String resourcesText = buildResourcesText(resources);
         List<String> sections = new ArrayList<>();
         // 草稿 = 前端流式已推送内容的忠实快照（节 1 token 直推 + 节 2 回放 + 节 3 直推，无分隔符）
@@ -661,11 +656,4 @@ public class CuratorTools {
                 List.of(), Instant.now());
     }
 
-    private CuratedReport singleResourceReport(String query, ScoredResource r) {
-        String md = "# " + query + " 搜索结果\n\n"
-                + "## " + r.getTitle() + "\n\n"
-                + "- **来源**: " + r.getUrl() + "\n"
-                + "- **内容**: " + truncateContent(r.getContent(), 1000) + "\n";
-        return new CuratedReport(query, ensureClosedCodeBlocks(md), List.of(r.getUrl()), Instant.now());
-    }
 }

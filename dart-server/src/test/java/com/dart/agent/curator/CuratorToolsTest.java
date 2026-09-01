@@ -700,8 +700,8 @@ class CuratorToolsTest {
         ScoredResource r1 = makeResource("https://spring.io", "Spring Official", "Spring content ".repeat(100), 4.5);
         CuratedReport report = curatorTools.generateReport("Spring Boot", List.of(r1), mock(SseSink.class), null, null, false, null);
         // 单资源也走三节 LLM 结构化生成（质量下限：不再输出摘要列表）
-        assertThat(report.markdown()).contains("Spring Boot");
         assertThat(report.markdown()).contains(SECTION_CONCEPT);
+        assertThat(report.markdown()).contains("关键原理");
         verify(chatModel, atLeastOnce()).stream(any(Prompt.class));
     }
 

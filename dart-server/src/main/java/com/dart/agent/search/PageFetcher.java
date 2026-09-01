@@ -21,6 +21,20 @@ public class PageFetcher {
     private static final int MAX_ATTEMPTS = 2;
     private static final long RETRY_DELAY_MS = 500;
     private static final int MAX_EXTRACTED_TEXT_CHARS = 200_000;
+
+    /** 完整 Chrome UA（半伪造 UA（DART/1.0 尾巴）会被 CSDN/知乎等反爬识别 → 403/521，抓取成功率暴跌）。 */
+    static final String USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+    /** 浏览器标准请求头：Accept/Accept-Language 必带，Referer 用 Bing 结果页（贴合浏览器点击跳转场景）。 */
+    static java.util.Map<String, String> browserHeaders() {
+        return java.util.Map.of(
+                "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
+                        + "image/webp,*/*;q=0.8",
+                "Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8",
+                "Referer", "https://www.bing.com/");
+    }
     private static final Pattern DIAGRAM_KEYWORDS = Pattern.compile(
             "\\b(diagram|archite[ck]ture|flowchart|sequence|component|class diagram|时序图|架构图|流程图)\\b",
             Pattern.CASE_INSENSITIVE);
@@ -97,10 +111,11 @@ public class PageFetcher {
      */
     protected Document connectRaw(String url, int connectTimeoutMs) {
         try {
-            return Jsoup.connect(url)
+            var conn = Jsoup.connect(url)
                     .timeout(connectTimeoutMs)
-                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) DART/1.0")
-                    .get();
+                    .userAgent(USER_AGENT);
+            browserHeaders().forEach(conn::header);
+            return conn.get();
         } catch (java.io.IOException e) {
             throw new RuntimeException("连接失败: " + url, e);
         }
