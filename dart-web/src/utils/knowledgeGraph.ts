@@ -2,20 +2,9 @@ import * as echarts from 'echarts/core'
 import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import type { GraphNode, GraphEdge } from '@/types/knowledge'
 
 echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
-
-export interface GraphNode {
-  id: string
-  label: string
-  category?: string
-}
-
-export interface GraphEdge {
-  source: string
-  target: string
-  label: string
-}
 
 export interface GraphOptionParams {
   repulsion?: number

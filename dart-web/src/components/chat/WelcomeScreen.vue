@@ -1,7 +1,3 @@
-<script setup lang="ts">
-import { useChatStore } from '@/stores/chat'
-</script>
-
 <template>
   <div class="welcome-screen">
     <div class="welcome-icon">D</div>

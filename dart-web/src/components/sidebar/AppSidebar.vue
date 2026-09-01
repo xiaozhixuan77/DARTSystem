@@ -61,7 +61,6 @@ async function handleDeleteConversation() {
 }
 
 onMounted(() => {
-  chatStore.loadConversations()
   window.addEventListener('click', closeContextMenu)
 })
 
@@ -133,7 +132,6 @@ function openSettings() {
       :y="menuY"
       :conversation-title="menuConversationTitle"
       @delete="handleDeleteConversation"
-      @rename="closeContextMenu"
     />
 
     <SettingsDialog :visible="settingsVisible" @close="settingsVisible = false" />

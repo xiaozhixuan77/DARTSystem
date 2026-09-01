@@ -11,10 +11,6 @@ export interface MessageVO {
   id: number
   role: 'user' | 'assistant' | 'system'
   content: string
-  metadata?: MessageMetadata | null
+  metadata?: string | null
   createdAt: string
-}
-
-export interface MessageMetadata {
-  knowledgeItemIds?: number[]
 }

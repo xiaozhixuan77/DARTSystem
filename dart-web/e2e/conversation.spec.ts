@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { registerAndLogin, gotoChat } from './helpers'
+import { preparePoolSession, gotoChat } from './helpers'
 
 test.describe('会话管理', () => {
   // 假 token 会被后端 401 踢回登录页，统一用 API 真实注册登录
-  test.beforeEach(async ({ page, request }) => {
-    await registerAndLogin(page, request)
+  test.beforeEach(async ({ page }) => {
+    await preparePoolSession(page)
     await gotoChat(page)
   })
 

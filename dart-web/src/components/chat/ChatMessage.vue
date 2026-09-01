@@ -10,12 +10,7 @@ const { render, renderMermaidDiagrams } = useMarkdown()
 
 const contentRef = ref<HTMLElement | null>(null)
 const isUser = computed(() => props.message.role === 'user')
-const isDraft = computed(() => {
-  const m = props.message.metadata
-  if (!m) return false
-  const raw = typeof m === 'string' ? m : JSON.stringify(m)
-  return raw.includes('draft')
-})
+const isDraft = computed(() => chatStore.isDraftMessage(props.message))
 const renderedContent = computed(() => {
   if (isUser.value) return props.message.content
   return render(props.message.content)

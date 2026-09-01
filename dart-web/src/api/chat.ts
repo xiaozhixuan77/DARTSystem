@@ -2,7 +2,6 @@ import { getPoolUserId } from './client'
 
 type SSECallback = {
   onStatus?: (status: string, message: string) => void
-  onSearchResult?: (result: unknown) => void
   onContent?: (chunk: string) => void
   onDone?: (data: { status: string; conversationId?: number }) => void
   onError?: (code: number, message: string) => void
@@ -101,13 +100,6 @@ async function parseSSEStream(
       switch (event) {
         case 'status':
           callbacks.onStatus?.(data.phase || '', data.message || '')
-          break
-        case 'search_result':
-          callbacks.onSearchResult?.(data)
-          break
-        case 'curated_report':
-          // curated_report 由后端直接发送，作为 search_result 处理
-          callbacks.onSearchResult?.(data)
           break
         case 'content':
           // content 事件：data 是裸字符串，不是 JSON

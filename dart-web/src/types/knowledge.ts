@@ -22,8 +22,6 @@ export interface KnowledgeItemDetail {
   scoreD: number
   scoreM: number
   notes: string
-  chunks: KnowledgeChunk[]
-  entityNames?: string[]
   createdAt: string
   updatedAt: string
 }
@@ -33,11 +31,6 @@ export interface KnowledgeEntityVO {
   name: string
   type: 'topic' | 'concept'
   itemCount: number
-}
-
-export interface KnowledgeChunk {
-  index: number
-  text: string
 }
 
 export interface GraphNode {

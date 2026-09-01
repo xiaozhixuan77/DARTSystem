@@ -32,7 +32,6 @@ export const useChatStore = defineStore('chat', () => {
   const isStreaming = ref(false)
   const streamingContent = ref('')
   const streamingStatus = ref('')
-  const error = ref<string | null>(null)
   const waitingResume = ref(false)
   let abortFn: (() => void) | null = null
   let resumeAbort: (() => void) | null = null
@@ -58,7 +57,6 @@ export const useChatStore = defineStore('chat', () => {
   async function selectConversation(id: number) {
     currentId.value = id
     messages.value = []
-    error.value = null
     try {
       const res = await getMessages(id)
       if (res.code === 200) messages.value = res.data
@@ -140,7 +138,6 @@ export const useChatStore = defineStore('chat', () => {
     pollTimeout = setTimeout(() => {
       if (waitingResume.value) {
         stopPolling()
-        error.value = '上次回答仍在生成中，请稍后刷新查看'
       }
     }, RESUME_POLL_TIMEOUT_MS)
   }
@@ -257,7 +254,6 @@ export const useChatStore = defineStore('chat', () => {
 
     isStreaming.value = true
     streamingContent.value = ''
-    error.value = null
 
     abortFn = sendMessage(message, convId, {
       onStatus(status, msg) {
@@ -284,7 +280,6 @@ export const useChatStore = defineStore('chat', () => {
       onError(code, msg) {
         isStreaming.value = false
         streamingStatus.value = ''
-        error.value = msg
         const last = messages.value[messages.value.length - 1]
         if (last && last.role === 'assistant' && !last.content) {
           // SSE 中断但报告可能已生成入库 → 重新拉取兜底
@@ -306,8 +301,8 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     conversations, currentId, currentConversation, messages,
-    isStreaming, streamingContent, streamingStatus, error, waitingResume,
+    isStreaming, streamingContent, streamingStatus, waitingResume,
     loadConversations, selectConversation, newConversation,
-    removeConversation, send, cancelStreaming
+    removeConversation, send, cancelStreaming, isDraftMessage
   }
 })

@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { registerAndLogin, gotoChat } from './helpers'
+import { preparePoolSession, gotoChat } from './helpers'
 
 test.describe('聊天页面', () => {
-  test.beforeEach(async ({ page, request }) => {
-    await registerAndLogin(page, request)
+  test.beforeEach(async ({ page }) => {
+    await preparePoolSession(page)
     await gotoChat(page)
   })
 

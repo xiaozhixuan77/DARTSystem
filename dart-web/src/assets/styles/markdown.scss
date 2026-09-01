@@ -1,5 +1,5 @@
 // 报告 markdown 渲染样式 — GitHub 浅色风格 + Typora 标准阅读密度
-// 挂在 .markdown 类上（ChatMessage.vue / AgentMessage.vue 的报告容器）
+// 挂在 .markdown 类上（ChatMessage.vue 的报告容器）
 // 代码块高亮配色来自 highlight.js 的 github.css 主题（main.ts 引入）
 .markdown {
   font-size: 15px;
@@ -75,18 +75,6 @@
       border-radius: 0;
       font-size: 0.9em;
       line-height: 1.6;
-    }
-
-    .copy-btn {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      opacity: 0;
-      transition: opacity 0.2s;
-    }
-
-    &:hover .copy-btn {
-      opacity: 1;
     }
   }
 

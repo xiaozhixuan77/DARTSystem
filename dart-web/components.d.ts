@@ -21,6 +21,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SessionContextMenu: typeof import('./src/components/common/SessionContextMenu.vue')['default']
+    SettingsDialog: typeof import('./src/components/common/SettingsDialog.vue')['default']
     StreamingStatus: typeof import('./src/components/chat/StreamingStatus.vue')['default']
     WelcomeScreen: typeof import('./src/components/chat/WelcomeScreen.vue')['default']
   }

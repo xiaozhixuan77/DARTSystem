@@ -293,17 +293,4 @@ function nextPage() {
   font-size: 14px;
   color: $color-muted;
 }
-.graph-view {
-  height: 100%;
-}
-.graph-hint {
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed $color-border;
-  border-radius: $radius;
-  color: $color-muted;
-  font-size: 14px;
-}
 </style>
