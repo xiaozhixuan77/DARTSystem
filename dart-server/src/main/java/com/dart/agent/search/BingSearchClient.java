@@ -25,8 +25,6 @@ public class BingSearchClient {
     private static final String CN_BING = "https://cn.bing.com/search";
     private static final String WWW_BING = "https://www.bing.com/search";
     private static final int PAGES = 3;
-    // 国际版只抓第 1 页：正常场景 cn 已够量，www 仅兜底污染词，1 页 10 条足量且控制请求总量
-    private static final int WWW_PAGES = 1;
 
     /** 全局出站并发上限（静态、跨实例）：请求高峰期（如搜索词并发）限流主因是多页同发。 */
     private static final java.util.concurrent.Semaphore OUTBOUND = new java.util.concurrent.Semaphore(2);

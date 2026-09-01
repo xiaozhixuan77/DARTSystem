@@ -13,10 +13,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.Generation;
 
 import java.util.List;
 import java.util.Optional;
@@ -34,10 +30,6 @@ class RagServiceTest {
     @Mock
     private EmbeddingService embeddingService;
     @Mock
-    private ChatModel chatModel;
-    @Mock
-    private ChatResponse chatResponse;
-    @Mock
     private KnowledgeItemMapper knowledgeItemMapper;
     @Mock
     private KnowledgeChunkMapper knowledgeChunkMapper;
@@ -50,7 +42,7 @@ class RagServiceTest {
 
     @BeforeEach
     void setUp() {
-        ragService = new RagService(embeddingService, chatModel, knowledgeItemMapper,
+        ragService = new RagService(embeddingService, knowledgeItemMapper,
                 knowledgeChunkMapper, relationMapper, entityService, 0.80, 5);
         // 实体通道默认无命中（lenient：未声明实体命中的 retrieve 用例不触发）
         lenient().when(entityService.findItemsByEntityName(any(), any())).thenReturn(java.util.Set.of());

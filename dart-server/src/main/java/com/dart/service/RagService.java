@@ -9,9 +9,6 @@ import com.dart.mapper.KnowledgeChunkMapper;
 import com.dart.mapper.KnowledgeItemMapper;
 import com.dart.mapper.KnowledgeRelationMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -25,7 +22,6 @@ import java.util.*;
 public class RagService {
 
     private final EmbeddingService embeddingService;
-    private final ChatModel chatModel;
     private final KnowledgeItemMapper knowledgeItemMapper;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final KnowledgeRelationMapper relationMapper;
@@ -33,7 +29,7 @@ public class RagService {
     private final double similarityThreshold;
     private final int topK;
 
-    public RagService(EmbeddingService embeddingService, ChatModel chatModel,
+    public RagService(EmbeddingService embeddingService,
                       KnowledgeItemMapper knowledgeItemMapper,
                       KnowledgeChunkMapper knowledgeChunkMapper,
                       KnowledgeRelationMapper relationMapper,
@@ -41,7 +37,6 @@ public class RagService {
                       @Value("${agent.rag.similarity-threshold:0.80}") double similarityThreshold,
                       @Value("${agent.rag.top-k:5}") int topK) {
         this.embeddingService = embeddingService;
-        this.chatModel = chatModel;
         this.knowledgeItemMapper = knowledgeItemMapper;
         this.knowledgeChunkMapper = knowledgeChunkMapper;
         this.relationMapper = relationMapper;
@@ -72,7 +67,7 @@ public class RagService {
                     .reduce("", (a, b) -> a + "\n\n" + b);
         }
     }
-    public record RagChunk(String content, String title, String sourceUrl, double similarity) {}
+    private record RagChunk(String content, String title, String sourceUrl, double similarity) {}
 
     /** 强相关判定阈值：最高相似度低于此值时命中视为弱相关（材料不足），ChatService 降级搜索。 */
     private static final double STRONG_MATCH_THRESHOLD = 0.75;
