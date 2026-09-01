@@ -42,7 +42,7 @@ class EntityExtractionServiceTest {
         mockLlm("{\"topics\":[\"Spring\",\"区块链\"],\"concepts\":[\"Redis\",\"缓存淘汰策略\",\"LRU\"]}");
 
         EntityExtractionService.ExtractedEntities result =
-                service.extract("Spring Boot 缓存", "## 报告\nRedis 缓存淘汰策略相关");
+                service.extract("Spring Boot 缓存", "## 报告\nRedis 缓存淘汰策略 LRU 相关");
 
         // 区块链不在白名单 → 丢弃；Spring 保留
         assertThat(result.topics()).containsExactly("Spring");
@@ -54,7 +54,7 @@ class EntityExtractionServiceTest {
         mockLlm("{\"topics\":[\"缓存\"],\"concepts\":[\"Redis\",\"缓存\",\"LRU\"]}");
 
         EntityExtractionService.ExtractedEntities result =
-                service.extract("Redis 缓存", "## 报告\nLRU 淘汰策略");
+                service.extract("Redis 缓存", "## 报告\nRedis LRU 淘汰策略");
 
         // concepts 中与白名单同名的"缓存"归并到 topic，不重复出现
         assertThat(result.topics()).containsExactly("缓存");
@@ -73,13 +73,48 @@ class EntityExtractionServiceTest {
     }
 
     @Test
-    void extract_otherTopic_keptAsFallback() {
+    void extract_otherTopic_filteredOut() {
         mockLlm("{\"topics\":[\"其他\"],\"concepts\":[\"量子计算\"]}");
 
         EntityExtractionService.ExtractedEntities result =
-                service.extract("量子计算", "## 报告\n量子比特");
+                service.extract("量子计算", "## 报告\n量子计算 量子比特");
 
-        assertThat(result.topics()).containsExactly("其他");
+        // 兜底主题"其他"不再是合法主题（用户确认：减少兜底实体），概念保留
+        assertThat(result.topics()).isEmpty();
+        assertThat(result.concepts()).containsExactly("量子计算");
+    }
+
+    @Test
+    void extract_moreThanMaxConcepts_truncated() {
+        mockLlm("{\"topics\":[\"缓存\"],\"concepts\":[\"Redis\",\"LRU\",\"缓存淘汰策略\",\"过期策略\",\"缓存击穿\"]}");
+
+        EntityExtractionService.ExtractedEntities result =
+                service.extract("缓存专题", "## 报告\nRedis LRU 缓存淘汰策略 过期策略 缓存击穿");
+
+        // 概念数量上限 3：截断取前 3（按 LLM 输出顺序）
+        assertThat(result.concepts()).containsExactly("Redis", "LRU", "缓存淘汰策略");
+    }
+
+    @Test
+    void extract_stopWordConcept_dropped() {
+        mockLlm("{\"topics\":[\"Java\"],\"concepts\":[\"基础语法\",\"Java 垃圾回收\"]}");
+
+        EntityExtractionService.ExtractedEntities result =
+                service.extract("Java 基础", "## 报告\nJava 垃圾回收 基础语法章节");
+
+        // 壳词"基础语法"精确匹配停用词表 → 丢弃；具体技术名词保留
+        assertThat(result.concepts()).containsExactly("Java 垃圾回收");
+    }
+
+    @Test
+    void extract_conceptNotInReport_dropped() {
+        mockLlm("{\"topics\":[\"缓存\"],\"concepts\":[\"Redis\",\"量子计算\"]}");
+
+        EntityExtractionService.ExtractedEntities result =
+                service.extract("Redis 缓存", "## 报告\nRedis 缓存淘汰策略");
+
+        // 概念必须出现在报告正文（准确度校验）：LLM 编造的"量子计算"被丢弃
+        assertThat(result.concepts()).containsExactly("Redis");
     }
 
     @Test
@@ -120,7 +155,7 @@ class EntityExtractionServiceTest {
         mockLlm("{\"topics\":[],\"concepts\":[\"\",\"  \",\"这是一个非常长的概念名词短语远超十个字限制\",\"有效概念\"]}");
 
         EntityExtractionService.ExtractedEntities result =
-                service.extract("查询", "## 报告\n内容");
+                service.extract("查询", "## 报告\n有效概念内容");
 
         assertThat(result.concepts()).containsExactly("有效概念");
     }

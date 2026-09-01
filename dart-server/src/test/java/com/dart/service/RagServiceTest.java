@@ -71,7 +71,7 @@ class RagServiceTest {
     }
 
     @Test
-    void retrieve_entityNameHit_includesLowSimilarityChunk() {
+    void retrieve_entityNameHit_zeroSimilarityChunk_stillExcluded() {
         float[] emb = new float[1024];
         java.util.Arrays.fill(emb, 1.0f);
         when(embeddingService.embed(anyString())).thenReturn(emb);
@@ -85,7 +85,7 @@ class RagServiceTest {
         when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
         when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
 
-        // chunk 向量全 0（与查询全 1 余弦 = 0，低于 0.80 阈值）
+        // chunk 向量全 0（与查询全 1 余弦 = 0：仅实体名匹配也达不到实体通道下限 0.45）
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setKnowledgeItemId(1L);
         chunk.setChunkText("缓存淘汰策略内容");
@@ -94,15 +94,102 @@ class RagServiceTest {
                 com.dart.util.VectorUtils.floatArrayToBytes(new float[1024])));
         when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
 
-        // 实体名"Redis"命中条目 1 → 其 chunk 免阈值入池
+        // 实体名"Redis"命中条目 1，但 chunk 相关性不足 → 不注入，走搜索流程
         when(entityService.findItemsByEntityName(1L, "Redis 缓存淘汰策略"))
                 .thenReturn(java.util.Set.of(1L));
         when(entityService.matchEntitiesByVector(eq(1L), any())).thenReturn(java.util.Set.of());
 
         Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
 
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void retrieve_entityHit_moderateSimilarity_keptButNotStrong() {
+        // 查询向量 [1,0,…]，chunk 向量 [0.5, √0.75, 0…]：余弦恰 0.5（≥0.45 实体通道下限，<0.80 正常阈值）
+        float[] emb = new float[1024];
+        emb[0] = 1.0f;
+        when(embeddingService.embed(anyString())).thenReturn(emb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("Redis 缓存淘汰策略");
+        item.setSourceUrl("https://redis.io");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
+
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("缓存淘汰策略内容");
+        chunk.setChunkIndex(0);
+        float[] chunkVec = new float[1024];
+        chunkVec[0] = 0.5f;
+        chunkVec[1] = (float) Math.sqrt(0.75);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(chunkVec)));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        when(entityService.findItemsByEntityName(1L, "Redis 缓存淘汰策略"))
+                .thenReturn(java.util.Set.of(1L));
+        when(entityService.matchEntitiesByVector(eq(1L), any())).thenReturn(java.util.Set.of());
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("基于知识库的回答"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
+
+        // 实体通道放行（≥0.45）但未达正常阈值（0.80）→ 不算强实体命中：
+        // LLM 被指示输出"材料不足"标记 → ChatService 检测标记后降级搜索（不短路）
         assertThat(result).isPresent();
-        assertThat(result.get().sourceUrls()).containsExactly("https://redis.io");
+        assertThat(result.get().answer()).isEqualTo("基于知识库的回答");
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        assertThat(captor.getValue().getInstructions().getFirst().getText())
+                .contains(RagService.RAG_INSUFFICIENT_MARKER);
+    }
+
+    @Test
+    void retrieve_entityHit_strongSimilarity_skipsInsufficiencyInstruction() {
+        float[] emb = new float[1024];
+        java.util.Arrays.fill(emb, 1.0f);
+        when(embeddingService.embed(anyString())).thenReturn(emb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("Redis 缓存淘汰策略");
+        item.setSourceUrl("https://redis.io");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
+
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("缓存淘汰策略内容");
+        chunk.setChunkIndex(0);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(emb)));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        when(entityService.findItemsByEntityName(1L, "Redis 缓存淘汰策略"))
+                .thenReturn(java.util.Set.of(1L));
+        when(entityService.matchEntitiesByVector(eq(1L), any())).thenReturn(java.util.Set.of());
+        when(chatResponse.getResults()).thenReturn(List.of(
+                new Generation(new AssistantMessage("基于知识库的回答"))));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(chatResponse);
+
+        Optional<RagService.RagResult> result = ragService.retrieve("Redis 缓存淘汰策略", 1L);
+
+        // 实体命中且 chunk 达到正常阈值 → 强实体命中，不注入"材料不足"标记（回归锁定）
+        assertThat(result).isPresent();
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        assertThat(captor.getValue().getInstructions().getFirst().getText())
+                .doesNotContain(RagService.RAG_INSUFFICIENT_MARKER);
     }
 
     @Test
