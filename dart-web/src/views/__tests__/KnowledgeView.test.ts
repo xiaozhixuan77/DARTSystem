@@ -154,7 +154,7 @@ describe('KnowledgeView.vue', () => {
     expect(wrapper.find('.dialog-overlay').exists()).toBe(true)
   })
 
-  it('实体较多时默认折叠，点击按钮展开全部', async () => {
+  it('实体较多时默认只显示前 2 个，点击按钮展开全部', async () => {
     vi.mocked(fetchEntities).mockResolvedValue({
       code: 200, message: 'ok', suggestion: null,
       data: Array.from({ length: 8 }, (_, i) => ({
@@ -165,19 +165,23 @@ describe('KnowledgeView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    // 默认折叠：展开按钮可见，实体栏 collapsed
+    // 默认只露出最精确 Top 2：chip 数 = 1（全部实体）+ 2
     const toggle = wrapper.find('.entity-toggle')
     expect(toggle.exists()).toBe(true)
-    expect(toggle.text()).toContain('显示全部')
-    expect(wrapper.find('.entity-bar').classes()).toContain('collapsed')
+    expect(toggle.text()).toContain('显示全部 8 个实体')
+    expect(wrapper.findAll('.entity-chip')).toHaveLength(3)
 
-    // 点击展开
+    // 点击展开：渲染全部实体
     await toggle.trigger('click')
-    expect(wrapper.find('.entity-bar').classes()).not.toContain('collapsed')
+    expect(wrapper.findAll('.entity-chip')).toHaveLength(9)
     expect(wrapper.find('.entity-toggle').text()).toContain('收起')
+
+    // 再收起：恢复 Top 2
+    await wrapper.find('.entity-toggle').trigger('click')
+    expect(wrapper.findAll('.entity-chip')).toHaveLength(3)
   })
 
-  it('实体较少时不显示展开按钮', async () => {
+  it('实体较少时全部显示且不显示展开按钮', async () => {
     vi.mocked(fetchEntities).mockResolvedValue({
       code: 200, message: 'ok', suggestion: null,
       data: [
@@ -190,7 +194,8 @@ describe('KnowledgeView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.entity-toggle').exists()).toBe(false)
-    expect(wrapper.find('.entity-bar').classes()).not.toContain('collapsed')
+    // 2 个实体全部显示：chip 数 = 1（全部实体）+ 2
+    expect(wrapper.findAll('.entity-chip')).toHaveLength(3)
   })
 
   it('视图切换按钮切换列表/图谱视图', async () => {

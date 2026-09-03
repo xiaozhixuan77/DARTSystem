@@ -7,23 +7,26 @@ async function prepareKnowledgePage(page: Page, request: APIRequestContext): Pro
   await page.waitForSelector('.entity-bar', { timeout: 15000 })
 }
 
-test('实体栏折叠：按钮可见且可展开收起', async ({ page, request }) => {
+test('实体栏默认只显示前 2 个：按钮可见且可展开收起', async ({ page, request }) => {
   await prepareKnowledgePage(page, request)
 
-  // 折叠状态：展开按钮可见（不被裁剪）
+  // 默认只露出最精确 Top 2：chip 数 = 1（全部实体）+ 2；展开按钮可见（不被裁剪）
   const toggle = page.locator('.entity-toggle')
+  const chips = page.locator('.entity-chip')
   await expect(toggle).toBeVisible()
   await expect(toggle).toContainText('显示全部')
-  const bar = page.locator('.entity-bar')
-  await expect(bar).toHaveClass(/collapsed/)
+  await expect(chips).toHaveCount(3)
 
-  // 点击展开：折叠移除 + 按钮变"收起"
+  // 从按钮文本提取实体总数（"显示全部 N 个实体"），展开后应渲染 N 个实体
+  const count = Number((await toggle.textContent())?.match(/\d+/)?.[0])
+
+  // 点击展开：全部实体渲染 + 按钮变"收起"
   await toggle.click()
-  await expect(bar).not.toHaveClass(/collapsed/)
   await expect(toggle).toContainText('收起')
+  await expect(chips).toHaveCount(1 + count)
 
-  // 再点收起
+  // 再点收起：恢复 Top 2
   await toggle.click()
-  await expect(bar).toHaveClass(/collapsed/)
   await expect(toggle).toContainText('显示全部')
+  await expect(chips).toHaveCount(3)
 })

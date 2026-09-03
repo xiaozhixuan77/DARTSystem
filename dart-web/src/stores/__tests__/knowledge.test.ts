@@ -214,6 +214,24 @@ describe('useKnowledgeStore', () => {
     expect(store.entities[0].name).toBe('Redis')
   })
 
+  it('加载实体按 itemCount 降序排序', async () => {
+    vi.mocked(fetchEntities).mockResolvedValue({
+      code: 200, message: 'ok', suggestion: null,
+      data: [
+        { id: 2, name: 'Spring', type: 'topic', itemCount: 1 },
+        { id: 1, name: 'Redis', type: 'concept', itemCount: 3 }
+      ]
+    })
+
+    const store = useKnowledgeStore()
+    await store.loadEntities()
+
+    // 乱序返回也按关联条目数降序：Redis(3) 排前，Spring(1) 排后
+    expect(store.entities).toHaveLength(2)
+    expect(store.entities[0].name).toBe('Redis')
+    expect(store.entities[1].name).toBe('Spring')
+  })
+
   it('实体筛选时 listKnowledge 携带 entity 参数', async () => {
     vi.mocked(listKnowledge).mockResolvedValue({
       code: 200, message: 'ok', suggestion: null,

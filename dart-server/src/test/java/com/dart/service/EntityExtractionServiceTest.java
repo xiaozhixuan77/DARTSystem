@@ -44,9 +44,9 @@ class EntityExtractionServiceTest {
         EntityExtractionService.ExtractedEntities result =
                 service.extract("Spring Boot 缓存", "## 报告\nRedis 缓存淘汰策略 LRU 相关");
 
-        // 区块链不在白名单 → 丢弃；Spring 保留
+        // 区块链不在白名单 → 丢弃；Spring 保留；概念上限 2：按 LLM 输出顺序取前 2
         assertThat(result.topics()).containsExactly("Spring");
-        assertThat(result.concepts()).containsExactlyInAnyOrder("Redis", "缓存淘汰策略", "LRU");
+        assertThat(result.concepts()).containsExactlyInAnyOrder("Redis", "缓存淘汰策略");
     }
 
     @Test
@@ -91,8 +91,8 @@ class EntityExtractionServiceTest {
         EntityExtractionService.ExtractedEntities result =
                 service.extract("缓存专题", "## 报告\nRedis LRU 缓存淘汰策略 过期策略 缓存击穿");
 
-        // 概念数量上限 3：截断取前 3（按 LLM 输出顺序）
-        assertThat(result.concepts()).containsExactly("Redis", "LRU", "缓存淘汰策略");
+        // 概念数量上限 2：截断取前 2（按 LLM 输出顺序）
+        assertThat(result.concepts()).containsExactly("Redis", "LRU");
     }
 
     @Test
@@ -103,6 +103,28 @@ class EntityExtractionServiceTest {
                 service.extract("Java 基础", "## 报告\nJava 垃圾回收 基础语法章节");
 
         // 壳词"基础语法"精确匹配停用词表 → 丢弃；具体技术名词保留
+        assertThat(result.concepts()).containsExactly("Java 垃圾回收");
+    }
+
+    @Test
+    void extract_moreThanMaxTopics_truncated() {
+        mockLlm("{\"topics\":[\"Spring\",\"Java\",\"缓存\"],\"concepts\":[\"Redis\"]}");
+
+        EntityExtractionService.ExtractedEntities result =
+                service.extract("Java Spring 缓存", "## 报告\nRedis 相关");
+
+        // 主题数量上限 2：即使所有 topic 均在白名单也硬截断取前 2（prompt 要求 1-2 的 enforce）
+        assertThat(result.topics()).containsExactly("Spring", "Java");
+    }
+
+    @Test
+    void extract_extendedStopWordConcept_dropped() {
+        mockLlm("{\"topics\":[\"Java\"],\"concepts\":[\"详解\",\"Java 垃圾回收\"]}");
+
+        EntityExtractionService.ExtractedEntities result =
+                service.extract("Java 详解", "## 报告\nJava 垃圾回收 详解");
+
+        // 扩充停用词"详解"精确匹配 → 丢弃；具体技术名词保留
         assertThat(result.concepts()).containsExactly("Java 垃圾回收");
     }
 

@@ -83,6 +83,45 @@ class EntityServiceTest {
     }
 
     @Test
+    void upsertEntities_caseInsensitiveName_reused() {
+        when(entityMapper.selectList(any())).thenReturn(List.of(entity(7L, "Redis", "concept")));
+
+        EntityExtractionService.ExtractedEntities extracted =
+                new EntityExtractionService.ExtractedEntities(List.of(), List.of("redis"));
+        List<Long> ids = service.upsertEntities(1L, extracted);
+
+        // 大小写不同（Redis/redis）归一化后视为同一实体 → 复用不新建
+        assertThat(ids).containsExactly(7L);
+        verify(entityMapper, never()).insert(any(com.dart.entity.KnowledgeEntity.class));
+    }
+
+    @Test
+    void upsertEntities_outerWhitespaceVariant_reused() {
+        when(entityMapper.selectList(any())).thenReturn(List.of(entity(7L, "Redis", "concept")));
+
+        EntityExtractionService.ExtractedEntities extracted =
+                new EntityExtractionService.ExtractedEntities(List.of(), List.of(" Redis "));
+        List<Long> ids = service.upsertEntities(1L, extracted);
+
+        // 首尾空格不同（Redis/ Redis ）归一化后视为同一实体 → 复用不新建
+        assertThat(ids).containsExactly(7L);
+        verify(entityMapper, never()).insert(any(com.dart.entity.KnowledgeEntity.class));
+    }
+
+    @Test
+    void upsertEntities_innerWhitespaceVariant_reused() {
+        when(entityMapper.selectList(any())).thenReturn(List.of(entity(7L, "LRU 缓存", "concept")));
+
+        EntityExtractionService.ExtractedEntities extracted =
+                new EntityExtractionService.ExtractedEntities(List.of(), List.of("LRU缓存"));
+        List<Long> ids = service.upsertEntities(1L, extracted);
+
+        // 内部空格不同（LRU 缓存/LRU缓存）归一化后视为同一实体 → 复用不新建
+        assertThat(ids).containsExactly(7L);
+        verify(entityMapper, never()).insert(any(com.dart.entity.KnowledgeEntity.class));
+    }
+
+    @Test
     void linkItems_duplicateAssociation_skipped() {
         when(itemEntityMapper.selectCount(any())).thenReturn(1L);
 
