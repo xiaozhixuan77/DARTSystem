@@ -207,8 +207,9 @@ class SearchAgentTest {
     }
 
     @Test
-    void execute_primarySatisfiesMaxResults_dropsVariantResults() {
-        // 主词 5 条已达标（maxResults=5）→ 变体词结果不混入；但 searchWeb 仍并行调用
+    void execute_primarySatisfiesMaxResults_dropsVariantResults() throws Exception {
+        // 主词 5 条已达标（maxResults=5）→ 变体词结果不混入；变体组并行调用但主词达标后提前返回，
+        // 不再等待变体组完成（变体 mock sleep 3s：若等待则耗时 ≥3s）
         when(searchTools.searchWeb(anyString(), anyInt())).thenAnswer(inv -> {
             String q = inv.getArgument(0);
             if (q.equals("primary")) {
@@ -216,6 +217,7 @@ class SearchAgentTest {
                         .mapToObj(i -> new SearchResult("https://site" + i + ".com", "primary result", "primary snippet"))
                         .toList();
             }
+            Thread.sleep(3000);
             return IntStream.range(0, 5)
                     .mapToObj(i -> new SearchResult("https://variant" + i + ".com", "variant result", "variant snippet"))
                     .toList();
@@ -231,12 +233,16 @@ class SearchAgentTest {
             return pages.stream().map(p -> new ScoredResource(p.getUrl(), p.getTitle(), p.getContent(), 5, 4, 4, 4, 4.0)).toList();
         });
 
+        long t0 = System.nanoTime();
         List<ScoredResource> result = searchAgent.execute(List.of("primary", "variant"), 5, sink);
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
 
         verify(searchTools, times(2)).searchWeb(anyString(), anyInt());
         verify(searchTools).fetchPages(argThat(urls -> urls.size() == 5
                 && urls.stream().noneMatch(u -> u.startsWith("https://variant"))));
         assertThat(result).allMatch(r -> r.getUrl().startsWith("https://site"));
+        // 主词达标提前返回：不等变体组（3s），端到端耗时远小于 3s
+        assertThat(elapsedMs).isLessThan(2000);
     }
 
     @Test

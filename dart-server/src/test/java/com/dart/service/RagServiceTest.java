@@ -20,6 +20,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -405,6 +406,93 @@ class RagServiceTest {
         assertThat(result.get().materials())
                 .anyMatch(r -> "knowledge://related".equals(r.getUrl())
                         && r.getContent().contains("Spring Framework 原理"));
+    }
+
+    @Test
+    void retrieve_originalQueryEntityNameHit_includedWhenOptimizedMisses() {
+        float[] optEmb = new float[1024];
+        optEmb[0] = 1.0f;
+        float[] origEmb = new float[1024];
+        origEmb[0] = 1.0f;
+        when(embeddingService.embed("opt")).thenReturn(optEmb);
+        when(embeddingService.embed("org")).thenReturn(origEmb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("CompletableFuture 异步编排");
+        item.setSourceUrl("https://java.dev");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
+
+        // chunk 向量与查询向量余弦 0.5：≥0.45 实体通道下限、<0.80 正常阈值——仅实体命中可入池
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("异步编排内容");
+        chunk.setChunkIndex(0);
+        float[] chunkVec = new float[1024];
+        chunkVec[0] = 0.5f;
+        chunkVec[1] = (float) Math.sqrt(0.75);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(chunkVec)));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        // 优化词轨道实体名 miss、原文轨道实体名命中（前置优化词漂移场景）
+        when(entityService.findItemsByEntityName(eq(1L), eq("opt"))).thenReturn(java.util.Set.of());
+        when(entityService.findItemsByEntityName(eq(1L), eq("org"))).thenReturn(java.util.Set.of(1L));
+        when(entityService.matchEntitiesByVector(any(), any())).thenReturn(java.util.Set.of());
+
+        Optional<RagService.RagResult> result = ragService.retrieve("opt", "org", 1L);
+
+        // 原文实体名命中：条目材料纳入（0.5 相关，weakHit=true 非强命中）
+        assertThat(result).isPresent();
+        assertThat(result.get().materials()).isNotEmpty();
+        assertThat(result.get().weakHit()).isTrue();
+    }
+
+    @Test
+    void retrieve_originalVectorEntityMatch_includedWhenOptimizedMisses() {
+        float[] optEmb = new float[1024];
+        optEmb[0] = 1.0f;
+        float[] origEmb = new float[1024];
+        origEmb[0] = 1.0f;
+        when(embeddingService.embed("opt")).thenReturn(optEmb);
+        when(embeddingService.embed("org")).thenReturn(origEmb);
+
+        KnowledgeItem item = new KnowledgeItem();
+        item.setId(1L);
+        item.setUserId(1L);
+        item.setTitle("CompletableFuture 异步编排");
+        item.setSourceUrl("https://java.dev");
+        item.setIsDeleted(0);
+        when(knowledgeItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(knowledgeItemMapper.selectBatchIds(anyCollection())).thenReturn(List.of(item));
+
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setKnowledgeItemId(1L);
+        chunk.setChunkText("异步编排内容");
+        chunk.setChunkIndex(0);
+        float[] chunkVec = new float[1024];
+        chunkVec[0] = 0.5f;
+        chunkVec[1] = (float) Math.sqrt(0.75);
+        chunk.setEmbedding(java.util.Base64.getEncoder().encodeToString(
+                com.dart.util.VectorUtils.floatArrayToBytes(chunkVec)));
+        when(knowledgeChunkMapper.selectList(any())).thenReturn(List.of(chunk));
+
+        // 名称轨道全空；向量轨道仅原文向量命中（按向量引用区分两轨道）
+        when(entityService.findItemsByEntityName(any(), any())).thenReturn(java.util.Set.of());
+        when(entityService.matchEntitiesByVector(eq(1L), any())).thenAnswer(inv -> {
+            float[] v = inv.getArgument(1);
+            return v == origEmb ? java.util.Set.of(1L) : java.util.Set.of();
+        });
+
+        Optional<RagService.RagResult> result = ragService.retrieve("opt", "org", 1L);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().materials()).isNotEmpty();
+        // 两轨道各执行一次向量匹配（opt 轨道 + 原轨道；matcher 对数组按值比较故用次数断言）
+        verify(entityService, times(2)).matchEntitiesByVector(eq(1L), any());
     }
 
     @Test
