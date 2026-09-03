@@ -28,12 +28,17 @@ public class EntityExtractionService {
             "操作系统", "网络", "DevOps 工具链", "性能优化", "算法与数据结构");
 
     /** 概念每篇报告上限：减少实体产生量，保留 LLM 输出顺序前 N 个。 */
-    private static final int MAX_CONCEPTS_PER_REPORT = 3;
+    private static final int MAX_CONCEPTS_PER_REPORT = 2;
+
+    /** 主题每篇报告硬上限：prompt 要求 1-2，LLM 超出时强制截断。 */
+    private static final int MAX_TOPICS_PER_REPORT = 2;
 
     /** 描述性壳词（精确匹配）：区分度不足，不作为实体。 */
     private static final Set<String> STOP_WORDS = Set.of(
             "特点", "简介", "概述", "用法", "教程", "入门", "写法",
-            "基础语法", "最佳实践", "优缺点", "原理", "使用");
+            "基础语法", "最佳实践", "优缺点", "原理", "使用",
+            "详解", "介绍", "基础", "实战", "实践", "指南", "笔记",
+            "总结", "对比", "区别", "浅析", "本质");
 
     private static final int MAX_CONCEPT_LEN = 10;
     private static final int MAX_REPORT_CHARS = 3000;
@@ -84,10 +89,10 @@ public class EntityExtractionService {
                 - topics：从以下列表中选择 1-2 个最贴切的主题（严格使用列表内的名称）：
                   %s
                   无法归类时不输出主题（不要使用列表外的名称）
-                - concepts：提取 1-3 个报告中出现过的核心技术概念（专有名词/技术名，
-                  每个不超过 10 字，如 Redis、缓存淘汰策略、LRU）；不要包含 topics 中已选的主题名；
-                  不得抽取描述性通用词（如基础语法、特点、简介、使用方法、xx 原理）；
-                  不得编造报告中不存在的词
+                - concepts：只提取 1-2 个报告中出现过的、最能精准定位该报告的核心技术专有名词
+                  （每个不超过 10 字；好例：Redis、LRU 缓存；坏例：特点、简介、基础、详解、xx 原理）；
+                  宁缺毋滥——没有高价值概念时可以不输出；不要包含 topics 中已选的主题名；
+                  不得抽取描述性通用词；不得编造报告中不存在的词
 
                 <title>
                 %s
@@ -117,6 +122,9 @@ public class EntityExtractionService {
                     topics.add(name);
                 }
             }
+        }
+        if (topics.size() > MAX_TOPICS_PER_REPORT) {
+            topics = new ArrayList<>(topics.subList(0, MAX_TOPICS_PER_REPORT));
         }
         List<String> concepts = new ArrayList<>();
         Matcher c = Pattern.compile("\"concepts\"\\s*:\\s*\\[([^\\]]*)\\]").matcher(json);

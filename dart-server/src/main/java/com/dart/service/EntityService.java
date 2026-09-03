@@ -62,19 +62,19 @@ public class EntityService {
         Map<String, KnowledgeEntity> existing = new HashMap<>();
         for (KnowledgeEntity e : entityMapper.selectList(
                 new QueryWrapper<KnowledgeEntity>().eq("user_id", userId))) {
-            existing.put(e.getName(), e);
+            existing.put(normalizeName(e.getName()), e);
         }
 
         List<Long> ids = new ArrayList<>(names.size());
         for (String name : names) {
-            KnowledgeEntity found = existing.get(name);
+            KnowledgeEntity found = existing.get(normalizeName(name));
             if (found != null) {
                 ids.add(found.getId());
                 continue;
             }
             KnowledgeEntity entity = new KnowledgeEntity();
             entity.setUserId(userId);
-            entity.setName(name);
+            entity.setName(name.trim());
             entity.setType(extracted.topics().contains(name) ? TYPE_TOPIC : TYPE_CONCEPT);
             if (TYPE_CONCEPT.equals(entity.getType())) {
                 try {
@@ -92,6 +92,11 @@ public class EntityService {
             ids.add(entity.getId());
         }
         return ids;
+    }
+
+    /** 实体名归一化：判重用（trim + 小写 + 去内部空白），防 Redis/redis/Redis  等分裂。 */
+    private static String normalizeName(String name) {
+        return name == null ? "" : name.trim().toLowerCase().replaceAll("\\s+", "");
     }
 
     /** 条目-实体关联（幂等：已有关联跳过）。 */

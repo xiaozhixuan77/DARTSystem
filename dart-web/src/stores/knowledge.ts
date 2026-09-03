@@ -37,7 +37,11 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   async function loadEntities() {
     try {
       const res = await fetchEntities()
-      if (res.code === 200) entities.value = res.data
+      // 按关联条目数降序（并列按 id 升序稳定）：实体云默认露出最精确 Top 2
+      if (res.code === 200) {
+        entities.value = [...res.data].sort((a, b) =>
+          b.itemCount - a.itemCount || a.id - b.id)
+      }
     } catch { /* ignore */ }
   }
 

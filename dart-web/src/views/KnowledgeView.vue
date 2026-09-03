@@ -18,6 +18,8 @@ const dialogVisible = ref(false)
 const dialogInitialTab = ref<'content' | 'detail' | 'graph'>('content')
 
 const totalPages = computed(() => Math.max(1, Math.ceil(store.total / store.size)))
+const visibleEntities = computed(() =>
+  entityExpanded.value ? store.entities : store.entities.slice(0, 2))
 
 watch(searchDebounced, (val) => store.setKeyword(val.trim()))
 
@@ -82,22 +84,22 @@ function nextPage() {
     </div>
 
     <div v-if="store.entities.length > 0" class="entity-section">
-      <div class="entity-bar" :class="{ collapsed: !entityExpanded && store.entities.length > 4 }">
+      <div class="entity-bar">
         <button
           class="entity-chip"
           :class="{ active: !store.entityFilter }"
           @click="store.setEntityFilter(undefined)"
         >全部实体</button>
         <button
-          v-for="e in store.entities"
+          v-for="e in visibleEntities"
           :key="e.id"
           class="entity-chip"
           :class="{ active: store.entityFilter === e.name, topic: e.type === 'topic' }"
           @click="store.setEntityFilter(store.entityFilter === e.name ? undefined : e.name)"
         >{{ e.name }}<span class="entity-count">{{ e.itemCount }}</span></button>
       </div>
-      <!-- 按钮在折叠容器外：折叠裁剪不影响其可见性 -->
-      <button v-if="store.entities.length > 4" class="entity-toggle" @click="entityExpanded = !entityExpanded">
+      <!-- 默认只露出最精确 Top 2；展开后渲染全部实体 -->
+      <button v-if="store.entities.length > 2" class="entity-toggle" @click="entityExpanded = !entityExpanded">
         {{ entityExpanded ? '收起' : `显示全部 ${store.entities.length} 个实体` }}
       </button>
     </div>
@@ -217,10 +219,6 @@ function nextPage() {
   gap: 8px;
   flex-wrap: wrap;
   padding: 10px 24px;
-  &.collapsed {
-    max-height: 46px;
-    overflow: hidden;
-  }
 }
 .entity-chip {
   padding: 3px 12px;
