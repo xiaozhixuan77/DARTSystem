@@ -67,6 +67,9 @@ public class AgentConfig {
     @Value("${agent.curator.deep-read-count:4}")
     private int deepReadCount;
 
+    @Value("${agent.curator.section-max-seconds:120}")
+    private long sectionMaxSeconds;
+
     // ────────── Splitter ──────────
 
     @Bean
@@ -122,7 +125,7 @@ public class AgentConfig {
 
     @Bean
     public CuratorTools curatorTools(ChatModel chatModel) {
-        return new CuratorTools(chatModel, jaccardThreshold, deepReadCount);
+        return new CuratorTools(chatModel, jaccardThreshold, deepReadCount, sectionMaxSeconds);
     }
 
     @Bean

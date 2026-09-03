@@ -19,6 +19,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -97,11 +98,15 @@ public class CuratorTools {
     private final ChatModel chatModel;
     private final double jaccardThreshold;
     private final int deepReadCount;
+    /** 节总时长熔断（秒）：单节墙钟超限以已收内容收尾，防 LLM 慢吐卡死拖垮 SSE 180s。<=0 禁用。 */
+    private final long sectionMaxSeconds;
 
-    public CuratorTools(ChatModel chatModel, double jaccardThreshold, int deepReadCount) {
+    public CuratorTools(ChatModel chatModel, double jaccardThreshold, int deepReadCount,
+                        long sectionMaxSeconds) {
         this.chatModel = chatModel;
         this.jaccardThreshold = jaccardThreshold;
         this.deepReadCount = deepReadCount;
+        this.sectionMaxSeconds = sectionMaxSeconds;
     }
 
     /**
@@ -162,6 +167,9 @@ public class CuratorTools {
         }
 
         String resourcesText = buildResourcesText(resources);
+        // 节 1/节 3 只用标题+短摘要（加快首 token）；构造为空时退化全量（兜底，行为同现状）
+        String briefText = buildResourcesBriefText(resources);
+        String conceptResources = briefText.isBlank() ? resourcesText : briefText;
         List<String> sections = new ArrayList<>();
         // 草稿 = 前端流式已推送内容的忠实快照（节 1 token 直推 + 节 2 回放 + 节 3 直推，无分隔符）
         DraftContext draft = draftConsumer == null ? null
@@ -178,7 +186,7 @@ public class CuratorTools {
                         styleHint, sessionSummary, degraded);
             });
 
-            String section1 = streamSection(query, resourcesText,
+            String section1 = streamSection(query, conceptResources,
                     buildConceptPrompt(query), "concepts", sink, styleHint, sessionSummary, degraded, draft);
             sections.add(section1);
             if (draft != null) {
@@ -206,7 +214,7 @@ public class CuratorTools {
 
             // 阶段 B：节 3 流式直推（与节 2 串行，保持 2 并发峰值）
             sink.sendStatus("curating", "正在整理误区与进阶方向...");
-            String section3 = streamSection(query, resourcesText,
+            String section3 = streamSection(query, conceptResources,
                     buildFaqAdvancePrompt(query), "faq_advance", sink, styleHint, sessionSummary, degraded, draft);
             sections.add(section3);
             if (draft != null) {
@@ -263,9 +271,12 @@ public class CuratorTools {
                 styleHint, sessionSummary, degraded);
         for (int attempt = 1; attempt <= 3; attempt++) {
             AtomicReference<String> finishReason = new AtomicReference<>();
+            AtomicBoolean timedOut = new AtomicBoolean(false);
+            long deadline = sectionDeadline();
             StringBuilder sb = new StringBuilder();
             try {
                 chatModel.stream(new Prompt(new UserMessage(prompt), options))
+                        .takeWhile(resp -> !deadlinePassed(deadline, timedOut))
                         .doOnNext(resp -> {
                             finishReason.set(resp.getResults().getFirst().getMetadata().getFinishReason());
                             String delta = resp.getResults().getFirst().getOutput().getText();
@@ -276,6 +287,12 @@ public class CuratorTools {
                         })
                         .timeout(streamTimeout)
                         .blockLast();
+                if (timedOut.get()) {
+                    log.warn("报告节[{}]第 {} 次流式达到节总时长上限（{}s），以已收内容收尾",
+                            sectionName, attempt, sectionMaxSeconds);
+                    String timedCut = cleanSection(sb.toString());
+                    return timedCut.isBlank() ? SECTION_FAILED : timedCut;
+                }
                 if (isTruncated(finishReason.get())) {
                     // 节 2 预生成无实时消费，截断可安全重试（调用方等完整结果）
                     log.warn("报告节[{}]第 {} 次流式输出截断({})，重试", sectionName, attempt, finishReason.get());
@@ -322,11 +339,14 @@ public class CuratorTools {
         String prompt = buildSectionPrompt(query, resourcesText, sectionPrompt,
                 styleHint, sessionSummary, degraded);
         for (int attempt = 1; attempt <= 3; attempt++) {
+            AtomicBoolean timedOut = new AtomicBoolean(false);
+            long deadline = sectionDeadline();
             StringBuilder sb = new StringBuilder();
             try {
                 // 截断响应不做流式重试（token 已推送无法回滚），记录后交给代码块平衡兜底
                 AtomicReference<String> finishReason = new AtomicReference<>();
                 chatModel.stream(new Prompt(new UserMessage(prompt), options))
+                        .takeWhile(resp -> !deadlinePassed(deadline, timedOut))
                         .doOnNext(resp -> {
                             finishReason.set(resp.getResults().getFirst().getMetadata().getFinishReason());
                             String delta = resp.getResults().getFirst().getOutput().getText();
@@ -343,6 +363,12 @@ public class CuratorTools {
                         })
                         .timeout(streamTimeout)
                         .blockLast();
+                if (timedOut.get()) {
+                    log.warn("报告节[{}]第 {} 次流式达到节总时长上限（{}s），以已收内容收尾",
+                            sectionName, attempt, sectionMaxSeconds);
+                    String timedCut = cleanSection(sb.toString());
+                    return timedCut.isBlank() ? SECTION_FAILED : timedCut;
+                }
                 if (isTruncated(finishReason.get())) {
                     log.warn("报告节[{}]第 {} 次流式输出截断({})，内容不完整", sectionName, attempt, finishReason.get());
                 }
@@ -512,6 +538,42 @@ public class CuratorTools {
 
                 本节字数控制在 1000-1200 字。
                 """.formatted(query);
+    }
+
+    /** 节流式总时长熔断截止时间：sectionMaxSeconds<=0 表示禁用（Long.MAX_VALUE 永不超限）。 */
+    private long sectionDeadline() {
+        return sectionMaxSeconds <= 0 ? Long.MAX_VALUE
+                : System.currentTimeMillis() + sectionMaxSeconds * 1000;
+    }
+
+    /** 墙钟检查（takeWhile 谓词）：超限置标记并停止该节流式（cancel 上游），以已收内容收尾。 */
+    private static boolean deadlinePassed(long deadline, AtomicBoolean timedOut) {
+        boolean passed = System.currentTimeMillis() > deadline;
+        if (passed) {
+            timedOut.set(true);
+        }
+        return passed;
+    }
+
+    /**
+     * 节 1/节 3 精简素材：标题/URL/评分 + 短摘要（≤150 字符）——不含 deep-read 全文，
+     * 缩小 LLM 输入加速首 token；节 2 仍用 buildResourcesText 全量（原理/代码需要全文）。
+     */
+    private String buildResourcesBriefText(List<ScoredResource> resources) {
+        StringBuilder sb = new StringBuilder();
+        int idx = 1;
+        for (ScoredResource r : resources) {
+            sb.append("## 资源 ").append(idx).append(": ").append(r.getTitle()).append("\n");
+            sb.append("- URL: ").append(r.getUrl()).append("\n");
+            sb.append("- 评分: T").append(r.getScoreT())
+                    .append("/A").append(r.getScoreA())
+                    .append("/D").append(r.getScoreD())
+                    .append("/M").append(r.getScoreM())
+                    .append(" (总分 ").append(String.format("%.2f", r.getWeightedScore())).append(")\n");
+            sb.append("- 摘要: ").append(truncateContent(r.getContent(), 150)).append("\n\n");
+            idx++;
+        }
+        return sb.toString();
     }
 
     /**

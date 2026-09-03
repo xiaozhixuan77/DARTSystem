@@ -122,6 +122,13 @@ public class RagService {
             // （实体命中是强信号，防"概念命中但段落表述不同"漏检；topK 截断兜底）
             Set<Long> entityHitItemIds = new HashSet<>(entityService.findItemsByEntityName(userId, optimizedQuery));
             entityHitItemIds.addAll(entityService.matchEntitiesByVector(userId, queryVec));
+            // 原文轨道（用户真实输入）：优化词漂移时保底召回（原文实体名/原文向量，
+            // originalVec 已在双向量计算中完成，等值复用不新增 embedding 调用）
+            if (originalQuery != null && !originalQuery.isBlank()
+                    && !originalQuery.equals(optimizedQuery)) {
+                entityHitItemIds.addAll(entityService.findItemsByEntityName(userId, originalQuery));
+                entityHitItemIds.addAll(entityService.matchEntitiesByVector(userId, originalVec));
+            }
 
             // 用 MySQL 中存储的向量计算余弦相似度（避免重复 Embedding API 调用）
             // 实体命中条目：chunk 仍需 ≥ entityChunkThreshold（相对阈值，非完全免阈值，防泛词实体灌入）；

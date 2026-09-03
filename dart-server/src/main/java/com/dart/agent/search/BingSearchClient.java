@@ -26,8 +26,9 @@ public class BingSearchClient {
     private static final String WWW_BING = "https://www.bing.com/search";
     private static final int PAGES = 3;
 
-    /** 全局出站并发上限（静态、跨实例）：请求高峰期（如搜索词并发）限流主因是多页同发。 */
-    private static final java.util.concurrent.Semaphore OUTBOUND = new java.util.concurrent.Semaphore(2);
+    /** 全局出站并发上限（静态、跨实例）：请求高峰期（如搜索词并发）限流主因是多页同发。
+     *  实测 2 并发稳定、3 仍远低于历史 16 并发全挂上限，放宽以缩短多词组排空耗时。 */
+    private static final java.util.concurrent.Semaphore OUTBOUND = new java.util.concurrent.Semaphore(3);
     /** 进冷却的滚动失败阈值（60s 窗口）与冷却时长：冷却期降载为单页试探。 */
     private static final int FAILURE_TRIGGER = 6;
     private static final long COOLDOWN_MS = 60_000;

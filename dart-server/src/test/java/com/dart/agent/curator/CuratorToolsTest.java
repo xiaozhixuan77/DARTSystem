@@ -20,6 +20,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import com.dart.broadcast.SseSink;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -101,7 +102,8 @@ class CuratorToolsTest {
 
     @BeforeEach
     void setUp() {
-        curatorTools = new CuratorTools(chatModel, 0.85, 4);
+        // sectionMaxSeconds=0：禁用节总时长熔断（现有用例不引入墙钟变量）
+        curatorTools = new CuratorTools(chatModel, 0.85, 4, 0);
         streamBlankFirst = false;
     }
 
@@ -191,6 +193,85 @@ class CuratorToolsTest {
                 mock(SseSink.class), null, null, false, null);
 
         assertThat(report.markdown()).contains("核心概念").contains("关键原理").contains("常见误区");
+    }
+
+    @Test
+    void generateReport_conceptAndFaqUseBriefResources_principleKeepsFullText() {
+        // 深读全文标记位于 160 字符之后：brief（150 字符截断）不可见、全量（1500 截断）可见
+        ScoredResource r = makeResource("https://deep.dev/a", "深读标题",
+                "A".repeat(160) + "DEEP_READ_MARKER_REST", 4.0);
+        when(chatModel.stream(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            String section;
+            if (text.contains("关键原理")) {
+                section = SECTION_PRINCIPLE_CODE;
+            } else if (text.contains("常见误区")) {
+                section = SECTION_FAQ_ADVANCE;
+            } else {
+                section = SECTION_CONCEPT;
+            }
+            return Flux.just(new ChatResponse(
+                    List.of(new Generation(new AssistantMessage(section)))));
+        });
+
+        curatorTools.generateReport("Java", List.of(r), mock(SseSink.class),
+                null, null, false, null);
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel, times(3)).stream(captor.capture());
+        String conceptPrompt = promptContaining(captor.getAllValues(), "核心概念");
+        String principlePrompt = promptContaining(captor.getAllValues(), "关键原理");
+        String faqPrompt = promptContaining(captor.getAllValues(), "常见误区");
+        // 节 1/节 3 用标题+摘要精简输入（不含全文标记）；节 2 保持全量素材
+        assertThat(conceptPrompt).doesNotContain("DEEP_READ_MARKER");
+        assertThat(faqPrompt).doesNotContain("DEEP_READ_MARKER");
+        assertThat(principlePrompt).contains("DEEP_READ_MARKER");
+    }
+
+    private static String promptContaining(List<Prompt> prompts, String keyword) {
+        return prompts.stream()
+                .map(p -> p.getInstructions().getFirst().getText())
+                .filter(t -> t.contains(keyword))
+                .findFirst().orElseThrow();
+    }
+
+    @Test
+    @Timeout(15)
+    void generateReport_sectionExceedsMaxSeconds_keepsCollectedContentWithoutRetry() {
+        // 1s 节熔断：每节 delta 于 100/600ms 到达（收集），2000ms 的 delta 被熔断丢弃
+        CuratorTools shortTools = new CuratorTools(chatModel, 0.85, 4, 1);
+        when(chatModel.stream(any(Prompt.class))).thenAnswer(inv -> {
+            Prompt p = inv.getArgument(0);
+            String text = p.getInstructions().getFirst().getText();
+            String section;
+            if (text.contains("关键原理")) {
+                section = "节二";
+            } else if (text.contains("常见误区")) {
+                section = "节三";
+            } else {
+                section = "节一";
+            }
+            return Flux.concat(
+                    Flux.just(delta(section + "_1")).delaySubscription(Duration.ofMillis(100)),
+                    Flux.just(delta(section + "_2")).delaySubscription(Duration.ofMillis(600)),
+                    Flux.just(delta("ONLY_IF_TIMEOUT_NEVER_" + section))
+                            .delaySubscription(Duration.ofMillis(2000)));
+        });
+
+        CuratedReport report = shortTools.generateReport("Java", fourResources(),
+                mock(SseSink.class), null, null, false, null);
+
+        // 熔断以当前已收内容收尾：含到达的 delta、不含超时后 delta、不触发失败占位与重试
+        assertThat(report.markdown()).contains("节一_1").contains("节一_2")
+                .contains("节二_1").contains("节三_1")
+                .doesNotContain("ONLY_IF_TIMEOUT_NEVER_")
+                .doesNotContain("本节内容生成失败");
+        verify(chatModel, times(3)).stream(any(Prompt.class));
+    }
+
+    private static ChatResponse delta(String text) {
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
     }
 
     @Test
@@ -463,16 +544,19 @@ class CuratorToolsTest {
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
-        for (Prompt p : captor.getAllValues()) {
-            String promptText = p.getInstructions().getFirst().getText();
-            // Top 4 完整内容（1500 字符保留，含 100+ 重复单元）
-            assertThat(promptText).contains("content d ".repeat(100));
-            // 第 5/6 个不再携带完整内容，仅 URL + 短摘要
-            assertThat(promptText).contains("https://e.com");
-            assertThat(promptText).contains("https://f.com");
-            assertThat(promptText).doesNotContain("content e ".repeat(50));
-            assertThat(promptText).doesNotContain("content f ".repeat(50));
-        }
+        // 节 2（原理/代码）携带全量素材：Top 4 完整内容（1500 字符，含 100+ 重复单元），第 5/6 仅短摘要
+        String principlePrompt = promptContaining(captor.getAllValues(), "关键原理");
+        assertThat(principlePrompt).contains("content d ".repeat(100));
+        assertThat(principlePrompt).contains("https://e.com");
+        assertThat(principlePrompt).contains("https://f.com");
+        assertThat(principlePrompt).doesNotContain("content e ".repeat(50));
+        assertThat(principlePrompt).doesNotContain("content f ".repeat(50));
+        // 节 1/节 3 为精简输入（标题+短摘要）：不携带 deep-read 全文
+        String conceptPrompt = promptContaining(captor.getAllValues(), "核心概念");
+        String faqPrompt = promptContaining(captor.getAllValues(), "常见误区");
+        assertThat(conceptPrompt).doesNotContain("content d ".repeat(100));
+        assertThat(faqPrompt).doesNotContain("content d ".repeat(100));
+        assertThat(conceptPrompt).contains("https://a.com");
     }
 
     @Test
@@ -484,11 +568,13 @@ class CuratorToolsTest {
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
-        for (Prompt p : captor.getAllValues()) {
-            String promptText = p.getInstructions().getFirst().getText();
-            assertThat(promptText).contains("content a ".repeat(100));
-            assertThat(promptText).contains("content d ".repeat(100));
-        }
+        // 节 2 全量素材（全部精读）；节 1/3 精简输入（150 字符截断，不含 100 重复单元）
+        String principlePrompt = promptContaining(captor.getAllValues(), "关键原理");
+        assertThat(principlePrompt).contains("content a ".repeat(100));
+        assertThat(principlePrompt).contains("content d ".repeat(100));
+        String conceptPrompt = promptContaining(captor.getAllValues(), "核心概念");
+        assertThat(conceptPrompt).doesNotContain("content a ".repeat(100));
+        assertThat(conceptPrompt).contains("https://a.com");
     }
 
     @Test
@@ -558,11 +644,13 @@ class CuratorToolsTest {
 
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(chatModel, times(3)).stream(captor.capture());
-        for (Prompt p : captor.getAllValues()) {
-            String promptText = p.getInstructions().getFirst().getText();
-            // 旧阈值 250 字符时仅保留前 25 个重复单元，新阈值 1500 应保留 100 个以上
-            assertThat(promptText).contains("ABCDEFGHIJ".repeat(100));
-        }
+        // 节 2 全量素材 1500 字符保留（旧阈值 250 时仅前 25 个重复单元）；节 1/3 精简输入 150 截断
+        String principlePrompt = promptContaining(captor.getAllValues(), "关键原理");
+        assertThat(principlePrompt).contains("ABCDEFGHIJ".repeat(100));
+        String conceptPrompt = promptContaining(captor.getAllValues(), "核心概念");
+        assertThat(conceptPrompt).doesNotContain("ABCDEFGHIJ".repeat(100));
+        String faqPrompt = promptContaining(captor.getAllValues(), "常见误区");
+        assertThat(faqPrompt).doesNotContain("ABCDEFGHIJ".repeat(100));
     }
 
     @Test

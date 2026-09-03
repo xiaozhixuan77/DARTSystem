@@ -133,7 +133,24 @@ public class SearchAgent {
                     .toList();
             List<SearchResult> primary = new ArrayList<>();
             List<SearchResult> variants = new ArrayList<>();
-            for (int i = 0; i < futures.size(); i++) {
+            // 主词先行评估：达标即提前返回（不等变体组——变体组仍在后台，由 finally shutdownNow 中断收尾）
+            List<SearchResult> primaryResults;
+            try {
+                primaryResults = futures.get(0).get(15, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.warn("单组检索词搜索失败（非阻断）: query={}", queries.get(0), e);
+                primaryResults = null;
+            }
+            if (primaryResults != null && isPolluted(queries.get(0), primaryResults)) {
+                log.warn("检索词结果疑似 Bing 污染，丢弃: query={}", queries.get(0));
+            } else if (primaryResults != null) {
+                primary.addAll(primaryResults);
+                List<SearchResult> primaryUnique = uniqueByUrl(primary);
+                if (!primaryUnique.isEmpty() && primaryUnique.size() >= maxResults) {
+                    return primaryUnique;
+                }
+            }
+            for (int i = 1; i < futures.size(); i++) {
                 List<SearchResult> results;
                 try {
                     results = futures.get(i).get(15, TimeUnit.SECONDS);
@@ -148,11 +165,7 @@ public class SearchAgent {
                     log.warn("检索词结果疑似 Bing 污染，丢弃: query={}", queries.get(i));
                     continue;
                 }
-                if (i == 0) {
-                    primary.addAll(results);
-                } else {
-                    variants.addAll(results);
-                }
+                variants.addAll(results);
             }
             List<SearchResult> primaryUnique = uniqueByUrl(primary);
             if (primaryUnique.isEmpty()) {
