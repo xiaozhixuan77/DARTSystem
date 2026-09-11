@@ -113,9 +113,14 @@ public class MarkdownSplitter {
             acc.overlapOnly = false;
             return;
         }
-        // 超长代码块按行切分：行是代码原子单位；子块之间不重叠（同块内行序天然连续）
+        // 超长代码块按行切分：行是代码原子单位；子块之间不重叠（同块内行序天然连续），
+        // 前置 flush 同样零 overlap：残留片段粘到围栏行会让围栏不在行首，markdown 渲染失效
         if (acc.content.length() > 0) {
-            prepareForNewContent(acc, out);
+            if (!acc.overlapOnly) {
+                out.add(acc.content.toString().trim());
+            }
+            acc.content.setLength(0);
+            acc.overlapOnly = false;
         }
         int from = 0;
         while (from < code.length()) {
