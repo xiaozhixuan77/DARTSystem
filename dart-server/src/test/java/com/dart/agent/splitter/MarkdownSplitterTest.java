@@ -231,4 +231,19 @@ class MarkdownSplitterTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("5MB");
     }
+
+    @Test
+    void split_oversizedCodeBlockAfterText_overlapNotGluedToFence() {
+        // 文本段 440 + 超长代码块 852：代码块行切前 flush 文本时，残留 overlap
+        // 不得与围栏行粘连（否则围栏不在行首，markdown 渲染失效）
+        String text = "说明段落内容写在这里。".repeat(40) + "\n\n"
+                + "```python\n"
+                + "x = compute(1)\n".repeat(60)
+                + "```";
+        List<ChunkResult> chunks = splitter.split(text);
+        assertThat(chunks).anySatisfy(c -> assertThat(c.chunkText()).startsWith("```python"));
+        for (ChunkResult c : chunks) {
+            assertThat(c.chunkText()).doesNotContain("。```");
+        }
+    }
 }
